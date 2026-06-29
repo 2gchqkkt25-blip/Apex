@@ -19,7 +19,7 @@ Browse, search, and stream your Xtream Codes or **M3U/M3U8** playlists with a cl
 [![Swift](https://img.shields.io/badge/Swift-5.x-F05138?logo=swift&logoColor=white)](https://swift.org)
 [![SwiftUI](https://img.shields.io/badge/UI-SwiftUI-0A84FF)](https://developer.apple.com/xcode/swiftui/)
 [![SwiftData](https://img.shields.io/badge/Persistence-SwiftData-30B0C7)](https://developer.apple.com/documentation/swiftdata)
-[![Issues](https://img.shields.io/github/issues/TBD/Apex?color=F9EE00&labelColor=1f1f2e)](https://github.com/TBD/Apex/issues)
+[![Issues](https://img.shields.io/github/issues/2gchqkkt25-blip/Apex?color=F9EE00&labelColor=1f1f2e)](https://github.com/2gchqkkt25-blip/Apex/issues)
 [![Discord](https://img.shields.io/badge/chat-Discord-5865F2?logo=discord&logoColor=white&labelColor=1f1f2e)](https://discord.gg/DMnQfr69Ug)
 [![License](https://img.shields.io/badge/license-AGPL--3.0-blue?labelColor=1f1f2e)](LICENSE)
 
@@ -248,7 +248,7 @@ The easiest way to use Apex is to [**download it from the App Store**](https://a
 ### Build & run
 
 ```bash
-git clone https://github.com/TBD/Apex.git
+git clone https://github.com/2gchqkkt25-blip/Apex.git
 cd Apex
 open Apex.xcodeproj
 ```
@@ -345,7 +345,7 @@ and JSON loaders so tests need no bundle-resource setup.
 ## Roadmap
 
 Planned features and enhancements are tracked as
-[**GitHub Issues**](https://github.com/TBD/Apex/issues).
+[**GitHub Issues**](https://github.com/2gchqkkt25-blip/Apex/issues).
 
 ---
 
@@ -356,7 +356,7 @@ Planned features and enhancements are tracked as
 
 Contributions are welcome! The short version:
 
-1. Open an [issue](https://github.com/TBD/Apex/issues) to discuss a bug or feature.
+1. Open an [issue](https://github.com/2gchqkkt25-blip/Apex/issues) to discuss a bug or feature.
 2. Fork the repo and create a feature branch off `main`.
 3. Run `./Scripts/setup.sh` once to install the git hooks and lint/format tooling —
    [Lefthook](https://lefthook.dev), SwiftFormat, and SwiftLint are all vendored as

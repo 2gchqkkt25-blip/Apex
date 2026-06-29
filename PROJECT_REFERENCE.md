@@ -73,7 +73,7 @@ Without these keys, the app works but metadata is limited to what the IPTV provi
 | 9 | Series detail → Movie parity | ✅ Done |
 | 10 | Movie VOD metadata improvements | ✅ Done |
 | 11 | Stremio addon support | ✅ Done |
-| 12 | Set up your own GitHub repo | ⬜ Not started |
+| 12 | Set up your own GitHub repo | ✅ Done |
 | 13 | API keys — TMDB + OMDb (`.env`) | ✅ Done |
 | 14 | Icon URL fix — relative → absolute URLs | ✅ Done |
 | 15 | Content indexer — TMDB enrichment unblocked | ✅ Done |
@@ -108,7 +108,7 @@ Without these keys, the app works but metadata is limited to what the IPTV provi
 
 ## Key Decisions Pending
 
-1. **GitHub repo** — Where to publish the source (AGPL requirement)
+1. ~~**GitHub repo**~~ — ✅ Live at [github.com/2gchqkkt25-blip/Apex](https://github.com/2gchqkkt25-blip/Apex)
 2. **Website / support email** — Currently using placeholders (`TBD`)
 3. **Apple Developer setup** — CloudKit container, IAP products, App Store Connect listing
 4. **TMDB enrichment in Simulator** — Content indexer was blocked indefinitely by embedding model sandbox error (`NLNaturalLanguageErrorDomain Code 7`). Fixed by adding max retry (4 attempts) to `prepareEmbedder` and allowing TMDB enrichment to proceed without semantic-search embeddings when the model is unavailable.
@@ -119,10 +119,10 @@ Without these keys, the app works but metadata is limited to what the IPTV provi
 
 | What | Current | Needs |
 |------|---------|-------|
-| Website | `TBD-website.example.com` | Real domain |
-| Support email | `support@TBD.example.com` | Real email |
-| GitHub repo | `github.com/TBD/apex` | Your GitHub org + repo |
-| Privacy policy | `github.com/TBD/apex/blob/main/PRIVACY.md` | Real URL |
+| Website | `github.com/2gchqkkt25-blip/Apex` | Done (GitHub as homepage) |
+| Support email | `support@streaminfinitytv.com` | ✅ Done |
+| GitHub repo | `github.com/2gchqkkt25-blip/Apex` | ✅ Done |
+| Privacy policy | `github.com/2gchqkkt25-blip/Apex/blob/main/PRIVACY.md` | ✅ Done |
 
 ---
 

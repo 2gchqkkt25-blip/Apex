@@ -37,7 +37,7 @@ not tolerated.
 
 ## Ways to contribute
 
-- **Report a bug** — open a [GitHub issue](https://github.com/TBD/Apex/issues) with
+- **Report a bug** — open a [GitHub issue](https://github.com/2gchqkkt25-blip/Apex/issues) with
   clear reproduction steps (see [Reporting bugs](#reporting-bugs)).
 - **Propose a feature** — open an issue to discuss it *before* you start coding. This
   avoids duplicated effort and gives the idea a chance to be shaped early.
@@ -46,7 +46,7 @@ not tolerated.
 - **Improve docs** — corrections and clarifications to the README or this guide are
   always appreciated.
 
-Planned work is tracked in [GitHub Issues](https://github.com/TBD/Apex/issues).
+Planned work is tracked in [GitHub Issues](https://github.com/2gchqkkt25-blip/Apex/issues).
 
 ---
 
@@ -63,7 +63,7 @@ Planned work is tracked in [GitHub Issues](https://github.com/TBD/Apex/issues).
 ### First-time setup
 
 ```bash
-git clone https://github.com/TBD/Apex.git
+git clone https://github.com/2gchqkkt25-blip/Apex.git
 cd Apex
 ./Scripts/setup.sh        # installs git hooks + lint/format tooling
 open Apex.xcodeproj

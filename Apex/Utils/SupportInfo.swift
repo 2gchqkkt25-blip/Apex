@@ -11,8 +11,8 @@
 import Foundation
 
 nonisolated enum SupportInfo {
-    static let website = "https://TBD-website.example.com"
-    static let email = "support@TBD.example.com"
+    static let website = "https://github.com/2gchqkkt25-blip/Apex"
+    static let email = "support@streaminfinitytv.com"
     static let discord = "https://discord.gg/DMnQfr69Ug"
 
     /// App Store listing, and the deep link that opens straight to the
@@ -21,7 +21,7 @@ nonisolated enum SupportInfo {
     static let appStoreReview = "https://apps.apple.com/app/id6779551584?action=write-review"
 
     /// Scheme-stripped forms for compact on-screen display.
-    static let websiteDisplay = "TBD-website.example.com"
+    static let websiteDisplay = "github.com/2gchqkkt25-blip/Apex"
     static let discordDisplay = "discord.gg/DMnQfr69Ug"
     static let appStoreDisplay = "App Store"
 

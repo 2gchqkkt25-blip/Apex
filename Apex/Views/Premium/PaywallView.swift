@@ -33,7 +33,7 @@ struct PaywallView: View {
     /// Apple's standard EULA, plus Apex's privacy policy. Subscriptions must link
     /// to terms of use and a privacy policy on the purchase screen.
     private static let termsURL = URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")!
-    private static let privacyURL = URL(string: "https://github.com/TBD/apex/blob/main/PRIVACY.md")!
+    private static let privacyURL = URL(string: "https://github.com/2gchqkkt25-blip/Apex/blob/main/PRIVACY.md")!
 
     var body: some View {
         #if os(tvOS)

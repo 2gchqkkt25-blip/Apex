@@ -9,7 +9,7 @@ risk before a fix is available.
 Use one of the following:
 
 - **GitHub private advisory** (preferred): open a report at
-  <https://github.com/TBD/Apex/security/advisories/new>
+  <https://github.com/2gchqkkt25-blip/Apex/security/advisories/new>
 - **Email**: p.bischoff@innoloft.com
 
 Please include, as far as you can:

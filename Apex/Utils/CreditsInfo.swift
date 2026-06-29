@@ -91,8 +91,8 @@ nonisolated enum CreditsInfo {
     // MARK: - Lume
 
     static let licenseName = "GNU AGPL v3"
-    static let sourceCode = "https://github.com/TBD/apex"
-    static let licenseURLString = "https://github.com/TBD/apex/blob/main/LICENSE"
+    static let sourceCode = "https://github.com/2gchqkkt25-blip/Apex"
+    static let licenseURLString = "https://github.com/2gchqkkt25-blip/Apex/blob/main/LICENSE"
 
     static var sourceCodeURL: URL? {
         URL(string: sourceCode)
