@@ -109,7 +109,8 @@ Without these keys, the app works but metadata is limited to what the IPTV provi
 ## Key Decisions Pending
 
 1. ~~**GitHub repo**~~ — ✅ Live at [github.com/2gchqkkt25-blip/Apex](https://github.com/2gchqkkt25-blip/Apex)
-2. **Website / support email** — Currently using placeholders (`TBD`)
+2. ~~**Website / support email**~~ — ✅ support@streaminfinitytv.com, GitHub as homepage
+3. **Apple Developer setup** — CloudKit container, IAP products, App Store Connect listing
 3. **Apple Developer setup** — CloudKit container, IAP products, App Store Connect listing
 4. **TMDB enrichment in Simulator** — Content indexer was blocked indefinitely by embedding model sandbox error (`NLNaturalLanguageErrorDomain Code 7`). Fixed by adding max retry (4 attempts) to `prepareEmbedder` and allowing TMDB enrichment to proceed without semantic-search embeddings when the model is unavailable.
 
