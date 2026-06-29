@@ -1,0 +1,253 @@
+//
+//  EPGProgramDetailView.swift
+//  Apex
+//
+//  Programme detail presented when a guide cell is selected: channel, title,
+//  airing time, live progress, synopsis, and a "Watch Live" action that hands
+//  back to the caller to start playback.
+//
+
+import SwiftUI
+
+struct EPGProgramDetailView: View {
+    let stream: LiveStream
+    let cell: EPGProgramCell
+    let now: Date
+    let onPlay: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @Environment(ThemeManager.self) private var themeManager
+
+    private var isLive: Bool {
+        cell.isLive(at: now)
+    }
+
+    var body: some View {
+        #if os(tvOS)
+            tvBody
+        #else
+            standardBody
+        #endif
+    }
+
+    #if !os(tvOS)
+        private var standardBody: some View {
+            NavigationStack {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 20) {
+                        channelHeader
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            if isLive {
+                                statusBadge("On Now", color: .red)
+                            } else if cell.isPast(at: now) {
+                                statusBadge("Earlier", color: .secondary)
+                            } else {
+                                statusBadge("Upcoming", color: themeManager.colors.accent)
+                            }
+
+                            Text(cell.title)
+                                .font(.title2.weight(.bold))
+
+                            timeRow
+
+                            if isLive {
+                                ProgressView(value: cell.progress(at: now))
+                                    .tint(.red)
+                            }
+                        }
+
+                        if !cell.detail.isEmpty {
+                            Text(cell.detail)
+                                .font(.body)
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+
+                        if stream.tvArchive > 0 {
+                            Label("Catch-up available for \(stream.tvArchiveDuration) days", systemImage: "clock.arrow.circlepath")
+                                .font(.subheadline)
+                                .foregroundStyle(.blue)
+                        }
+
+                        watchButton
+                    }
+                    .padding(.horizontal)
+                    .padding(.vertical, 24)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .navigationTitle(stream.name)
+                #if os(iOS)
+                    .navigationBarTitleDisplayMode(.inline)
+                #endif
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Close") { dismiss() }
+                        }
+                    }
+            }
+            #if os(macOS)
+            .frame(minWidth: 420, minHeight: 360)
+            #endif
+        }
+    #endif
+
+    // MARK: - tvOS
+
+    #if os(tvOS)
+        /// A roomy, 10-foot-readable detail card. No navigation chrome or Close
+        /// button: tvOS dismisses a sheet with the Menu/Back button, and the toolbar
+        /// "Close" rendered as an oversized, unfocusable control. Type is sized
+        /// explicitly to match the rest of the tvOS UI rather than inheriting the
+        /// blown-up dynamic sizes.
+        private var tvBody: some View {
+            HStack(alignment: .top, spacing: 56) {
+                tvArtwork
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 24) {
+                        tvStatusBadge
+
+                        Text(cell.title)
+                            .font(.system(size: 56, weight: .bold))
+                            .lineLimit(3)
+
+                        Text(stream.name)
+                            .font(.system(size: 30, weight: .semibold))
+                            .foregroundStyle(.secondary)
+
+                        tvTimeRow
+
+                        if isLive {
+                            ProgressView(value: cell.progress(at: now))
+                                .tint(.red)
+                                .frame(maxWidth: 520)
+                        }
+
+                        if stream.tvArchive > 0 {
+                            Label("Catch-up available for \(stream.tvArchiveDuration) days", systemImage: "clock.arrow.circlepath")
+                                .font(.system(size: 26))
+                                .foregroundStyle(.blue)
+                        }
+
+                        // Keep the action above the synopsis. The button is the only
+                        // focusable element here, and on tvOS the ScrollView only
+                        // reveals content as focus moves. A long synopsis below the
+                        // button would otherwise push it off-screen and out of reach.
+                        TVPlayButton(title: "Watch Live", systemImage: "play.fill") {
+                            onPlay()
+                            dismiss()
+                        }
+                        .frame(maxWidth: 460)
+                        .padding(.top, 16)
+
+                        if !cell.detail.isEmpty {
+                            Text(cell.detail)
+                                .font(.system(size: 28))
+                                .foregroundStyle(.secondary)
+                                .lineSpacing(6)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .scrollClipDisabled()
+            }
+            .padding(80)
+            .frame(width: 1280, height: 840)
+        }
+
+        private var tvArtwork: some View {
+            ChannelLogoView(url: stream.iconURL, size: 280, cornerRadius: 24, contentPadding: 24)
+        }
+
+        private var tvStatusBadge: some View {
+            Group {
+                if isLive {
+                    tvBadge("On Now", color: .red)
+                } else if cell.isPast(at: now) {
+                    tvBadge("Earlier", color: .secondary)
+                } else {
+                    tvBadge("Upcoming", color: .blue)
+                }
+            }
+        }
+
+        private func tvBadge(_ title: LocalizedStringKey, color: Color) -> some View {
+            Text(title)
+                .font(.system(size: 24, weight: .bold))
+                .textCase(.uppercase)
+                .foregroundStyle(.white)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 8)
+                .background(Capsule().fill(color))
+        }
+
+        private var tvTimeRow: some View {
+            HStack(spacing: 10) {
+                Text(cell.start, format: .dateTime.weekday(.abbreviated).hour().minute())
+                Text("–")
+                Text(cell.end, format: .dateTime.hour().minute())
+                Text("·")
+                Text(durationText)
+            }
+            .font(.system(size: 28))
+            .foregroundStyle(.secondary)
+        }
+    #endif
+
+    private var channelHeader: some View {
+        HStack(spacing: 14) {
+            ChannelLogoView(url: stream.iconURL, size: 52, cornerRadius: 8, contentPadding: 6)
+
+            Text(stream.name)
+                .font(.headline)
+                .lineLimit(2)
+
+            Spacer(minLength: 0)
+        }
+    }
+
+    private var timeRow: some View {
+        HStack(spacing: 6) {
+            Text(cell.start, format: .dateTime.weekday(.abbreviated).hour().minute())
+            Text("–")
+            Text(cell.end, format: .dateTime.hour().minute())
+            Text("·")
+            Text(durationText)
+        }
+        .font(.subheadline)
+        .foregroundStyle(.secondary)
+    }
+
+    private var durationText: String {
+        let minutes = Int(cell.end.timeIntervalSince(cell.start) / 60)
+        if minutes >= 60 {
+            let hours = minutes / 60
+            let mins = minutes % 60
+            return mins == 0 ? "\(hours)h" : "\(hours)h \(mins)m"
+        }
+        return "\(minutes)m"
+    }
+
+    private var watchButton: some View {
+        Button {
+            onPlay()
+            dismiss()
+        } label: {
+            Label("Watch Live", systemImage: "play.fill")
+                .font(.headline)
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.borderedProminent)
+        .controlSize(.large)
+        .padding(.top, 4)
+    }
+
+    private func statusBadge(_ title: LocalizedStringKey, color: Color) -> some View {
+        Text(title)
+            .font(.caption.weight(.bold))
+            .textCase(.uppercase)
+            .foregroundStyle(color)
+    }
+}
