@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src=".github/assets/apex-banner.png" alt="Apex" width="640">
+<img src=".github/assets/apex-banner.png" alt="Apex Stream Player" width="640">
 
 ### A modern, native IPTV player for Apple platforms
 
