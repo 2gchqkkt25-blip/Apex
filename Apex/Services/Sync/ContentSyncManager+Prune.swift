@@ -70,13 +70,17 @@ extension ContentSyncManager {
         let context = ModelContext(modelContainer)
         context.autosaveEnabled = false
 
-        // Scope to the playlist via its UUID — a substring that appears in every
-        // id this playlist produced and nowhere else (see PlaylistDeletion) — so
-        // SQLite seeks the playlist's rows instead of hydrating the whole table.
         let prefix = playlistId.uuidString
         let descriptor = FetchDescriptor<Movie>(
             predicate: #Predicate { $0.id.localizedStandardContains(prefix) }
         )
+        // Guard: if the DB has no more rows than the provider returned, every row
+        // is accounted for — skip the full fetch. A first sync (or an unchanged
+        // catalog) would otherwise hydrate 20k+ managed objects into memory and
+        // OOM the device before finding a single stale row.
+        let dbCount = (try? context.fetchCount(descriptor)) ?? 0
+        guard dbCount > seenIds.count else { return }
+
         var removed = 0
         for movie in (try? context.fetch(descriptor)) ?? [] where !seenIds.contains(movie.id) {
             context.delete(movie)
@@ -97,6 +101,9 @@ extension ContentSyncManager {
         let descriptor = FetchDescriptor<Series>(
             predicate: #Predicate { $0.id.localizedStandardContains(prefix) }
         )
+        let dbCount = (try? context.fetchCount(descriptor)) ?? 0
+        guard dbCount > seenIds.count else { return }
+
         var removed = 0
         for show in (try? context.fetch(descriptor)) ?? [] where !seenIds.contains(show.id) {
             context.delete(show)
@@ -116,6 +123,9 @@ extension ContentSyncManager {
         let descriptor = FetchDescriptor<LiveStream>(
             predicate: #Predicate { $0.id.localizedStandardContains(prefix) }
         )
+        let dbCount = (try? context.fetchCount(descriptor)) ?? 0
+        guard dbCount > seenIds.count else { return }
+
         var removed = 0
         for stream in (try? context.fetch(descriptor)) ?? [] where !seenIds.contains(stream.id) {
             context.delete(stream)
@@ -134,12 +144,13 @@ extension ContentSyncManager {
         let context = ModelContext(modelContainer)
         context.autosaveEnabled = false
 
-        // Episode.id is "\(seriesId)-episode-…" and seriesId embeds the playlist
-        // UUID, so the same substring scope applies.
         let prefix = playlistId.uuidString
         let descriptor = FetchDescriptor<Episode>(
             predicate: #Predicate { $0.id.localizedStandardContains(prefix) }
         )
+        let dbCount = (try? context.fetchCount(descriptor)) ?? 0
+        guard dbCount > seenIds.count else { return }
+
         var removed = 0
         for episode in (try? context.fetch(descriptor)) ?? [] where !seenIds.contains(episode.id) {
             context.delete(episode)

@@ -96,32 +96,14 @@ struct SyncProgressView: View {
             do {
                 let syncManager = ContentSyncManager(modelContainer: modelContext.container)
                 try await syncManager.syncPlaylist(playlist, progress: progress, full: true)
+                await schedulePostSyncBackgroundWork()
                 await MainActor.run {
-                    // Newly synced titles need indexing; the launch-time pass
-                    // may already be finished, so kick a fresh one — but hold it
-                    // off a few seconds so loading the embedding model and the
-                    // per-chunk saves don't fight the first browse of the catalog
-                    // the user just synced. On tvOS the embedding model is never
-                    // available, so start immediately to minimise the window where
-                    // tmdbId is still nil on a just-opened detail screen.
-                    #if os(tvOS)
-                        ContentIndexingService.shared.kick()
-                    #else
-                        ContentIndexingService.shared.kick(after: .seconds(3))
-                    #endif
-                    // Refresh the guide so a freshly synced playlist's channels
-                    // get EPG data without waiting for the next scheduled run.
-                    EPGSyncService.shared.syncNow()
                     phase = .finished
-                    // Auto-sync gets out of the way as soon as it succeeds so the
-                    // user can start browsing; the manual flow waits for Done.
                     if autoStart { dismiss() }
                 }
             } catch is CancellationError {
                 // User aborted — the sheet is being dismissed, nothing to show.
             } catch {
-                // A cancelled network request surfaces as a non-CancellationError;
-                // swallow it too so an abort never flashes the failure screen.
                 if Task.isCancelled { return }
                 await MainActor.run {
                     syncError = error.localizedDescription
@@ -129,6 +111,27 @@ struct SyncProgressView: View {
                 }
             }
         }
+    }
+
+    /// Kicks indexing and EPG after a successful sync. tvOS waits longer so the
+    /// home screen can become responsive before background catalog work starts.
+    private func schedulePostSyncBackgroundWork() async {
+        #if os(tvOS)
+        await MainActor.run {
+            ContentIndexingService.shared.kick(after: .seconds(20))
+        }
+        Task {
+            try? await Task.sleep(for: .seconds(45))
+            await MainActor.run {
+                EPGSyncService.shared.syncNow()
+            }
+        }
+        #else
+        await MainActor.run {
+            ContentIndexingService.shared.kick(after: .seconds(3))
+            EPGSyncService.shared.syncNow()
+        }
+        #endif
     }
 
     /// Cancels the in-flight sync (if any) and closes the sheet. Cancellation

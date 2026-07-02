@@ -23,3 +23,23 @@ final class PlaybackClock {
         duration = 0
     }
 }
+
+/// Seek handle wired by whichever engine view is active. The host-owned Skip
+/// Intro overlay lives above the engine stack and forwards seeks through here so
+/// it stays visible without duplicating per-engine overlay logic.
+@MainActor
+@Observable
+final class PlayerSeekBridge {
+    var seekTo: ((TimeInterval) -> Void)?
+    var onAfterSeek: (() -> Void)?
+
+    func seek(_ time: TimeInterval) {
+        seekTo?(time)
+        onAfterSeek?()
+    }
+
+    func reset() {
+        seekTo = nil
+        onAfterSeek = nil
+    }
+}

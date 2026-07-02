@@ -121,9 +121,16 @@ final class SyncProgress {
     }
 
     func update(detail: String, fraction: Double = 0) {
+        let now = Date()
+        // Throttle UI churn: hundreds of batch updates during a large sync were
+        // saturating the main actor and freezing Cancel/Done.
+        if fraction < 1, now.timeIntervalSince(lastPublish) < 0.35 { return }
+        lastPublish = now
         stepDetail = detail
         stepFraction = fraction
     }
+
+    private var lastPublish = Date.distantPast
 
     func state(for step: SyncStep) -> SyncStepState {
         if completedSteps.contains(step) { return .completed }

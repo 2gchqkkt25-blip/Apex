@@ -15,6 +15,7 @@
 //
 
 import Foundation
+import OSLog
 
 enum IntroDBError: Error {
     case invalidURL
@@ -54,7 +55,7 @@ nonisolated struct IntroDBClient {
     /// drop the skip affordance rather than treat it as an error. IntroDB only
     /// indexes episodic TV, so this is never called for movies or live streams.
     func segments(imdbId: String, season: Int, episode: Int) async throws -> IntroSegments? {
-        let trimmed = imdbId.trimmingCharacters(in: .whitespaces)
+        let trimmed = Self.normalizedIMDbID(imdbId)
         guard !trimmed.isEmpty else { return nil }
 
         var components = URLComponents(string: baseURL + "/segments")
@@ -64,6 +65,8 @@ nonisolated struct IntroDBClient {
             URLQueryItem(name: "episode", value: String(episode))
         ]
         guard let url = components?.url else { throw IntroDBError.invalidURL }
+
+        Logger.network.info("[SkipIntro] IntroDB request: \(url.absoluteString, privacy: .public)")
 
         var request = URLRequest(url: url)
         request.setValue("application/json", forHTTPHeaderField: "accept")
@@ -89,7 +92,59 @@ nonisolated struct IntroDBClient {
         }
 
         let segments = decoded.asSegments
-        return segments.isEmpty ? nil : segments
+        guard segments.hasSkippableOpener else {
+            Logger.network.info("[SkipIntro] IntroDB has no intro/recap for s\(season)e\(episode) (outro-only or empty)")
+            return nil
+        }
+        return segments
+    }
+
+    /// Legacy intro-only endpoint — still populated for some episodes where
+    /// `/segments` returns no opener (e.g. older submissions).
+    private func legacyIntro(imdbId: String, season: Int, episode: Int) async throws -> IntroSegments? {
+        var components = URLComponents(string: baseURL + "/intro")
+        components?.queryItems = [
+            URLQueryItem(name: "imdb_id", value: imdbId),
+            URLQueryItem(name: "season", value: String(season)),
+            URLQueryItem(name: "episode", value: String(episode))
+        ]
+        guard let url = components?.url else { return nil }
+
+        var request = URLRequest(url: url)
+        request.setValue("application/json", forHTTPHeaderField: "accept")
+        if let key { request.setValue(key, forHTTPHeaderField: "X-API-Key") }
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200 ... 299).contains(http.statusCode) else {
+            return nil
+        }
+
+        let decoded = try JSONDecoder().decode(LegacyIntroResponse.self, from: data)
+        guard let intro = decoded.introSegment else { return nil }
+        Logger.network.info("[SkipIntro] IntroDB legacy /intro hit for s\(season)e\(episode)")
+        return IntroSegments(intro: intro, recap: nil, outro: nil)
+    }
+
+    /// Fetches skippable openers, trying `/segments` first then the legacy
+    /// `/intro` route when the modern payload has no intro or recap.
+    func skippableSegments(imdbId: String, season: Int, episode: Int) async throws -> IntroSegments? {
+        if let segments = try await segments(imdbId: imdbId, season: season, episode: episode) {
+            return segments
+        }
+        return try await legacyIntro(
+            imdbId: Self.normalizedIMDbID(imdbId),
+            season: season,
+            episode: episode
+        )
+    }
+
+    /// Ensures IntroDB receives a canonical `tt…` id.
+    static func normalizedIMDbID(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+        if trimmed.hasPrefix("tt") { return trimmed }
+        let digits = trimmed.filter(\.isNumber)
+        return digits.isEmpty ? trimmed : "tt\(digits)"
     }
 }
 
@@ -115,6 +170,11 @@ nonisolated struct IntroSegments: Equatable {
 
     var isEmpty: Bool {
         intro == nil && recap == nil && outro == nil
+    }
+
+    /// Whether IntroDB returned an intro or recap the skip button can act on.
+    var hasSkippableOpener: Bool {
+        intro != nil || recap != nil
     }
 }
 
@@ -146,6 +206,22 @@ private nonisolated struct SegmentDTO: Decodable {
     /// `nil` for a degenerate window (end at or before start), which would never
     /// be a useful skip target.
     var model: IntroSegments.Segment? {
+        guard endSec > startSec else { return nil }
+        return IntroSegments.Segment(start: startSec, end: endSec)
+    }
+}
+
+/// Legacy `/intro` response — flat start/end fields, intro only.
+private nonisolated struct LegacyIntroResponse: Decodable {
+    let startSec: Double
+    let endSec: Double
+
+    enum CodingKeys: String, CodingKey {
+        case startSec = "start_sec"
+        case endSec = "end_sec"
+    }
+
+    var introSegment: IntroSegments.Segment? {
         guard endSec > startSec else { return nil }
         return IntroSegments.Segment(start: startSec, end: endSec)
     }

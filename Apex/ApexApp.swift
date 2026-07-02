@@ -39,6 +39,7 @@ struct ApexApp: App {
             cloudKitEnabled: Self.isCloudKitEnvironment
         )
         _cloudSync = State(initialValue: coordinator)
+        Logger.sync.info("CloudKit sync enabled: \(Self.isCloudKitEnvironment, privacy: .public) container=\(Self.cloudKitContainerIdentifier, privacy: .public)")
         let profiles = ProfileManager(catalogContainer: catalog, cloudContainer: cloud, coordinator: coordinator)
         _profileManager = State(initialValue: profiles)
         _parentalControls = State(initialValue: ParentalControls(profileManager: profiles))
@@ -136,24 +137,16 @@ struct ApexApp: App {
     /// no CloudKit provisioning). Likewise `CKContainer(identifier:)` raises on an
     /// un-entitled id. In those contexts we skip CloudKit entirely: the user-data
     /// store stays local and the reconcile engine still runs (just no sync).
-    /// Real, properly-signed builds get full CloudKit sync.
+    /// Real, properly-signed builds get full CloudKit sync. Previews and automated
+    /// tests skip it (un-entitled binaries crash on `CKContainer`). Sideload
+    /// configuration keeps Premium unlocked but still syncs when signed with a
+    /// CloudKit-capable provisioning profile.
     static let isCloudKitEnvironment: Bool = {
-        #if SIDE_LOAD
-            // Sideloaded / self-compiled builds are re-signed with an identity that
-            // doesn't own the `iCloud.com.streaminfinity.apex` container, so the CloudKit
-            // entitlement is stripped at install time. Touching CloudKit then hard-
-            // crashes at launch — the un-catchable `_os_crash` in
-            // `containerWithIdentifier:` documented above. Keep all user data
-            // local-only: both stores resolve to `cloudKitDatabase: .none` and the
-            // sync coordinator skips every `CKContainer`/`accountStatus` call.
-            return false
-        #else
-            let environment = ProcessInfo.processInfo.environment
-            let isPreview = environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1"
-            let isUnitTest = environment["XCTestConfigurationFilePath"] != nil
-            let isUITest = CommandLine.arguments.contains("-ui-testing")
-            return !(isPreview || isUnitTest || isUITest)
-        #endif
+        let environment = ProcessInfo.processInfo.environment
+        let isPreview = environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1"
+        let isUnitTest = environment["XCTestConfigurationFilePath"] != nil
+        let isUITest = CommandLine.arguments.contains("-ui-testing")
+        return !(isPreview || isUnitTest || isUITest)
     }()
 
     private static var cloudKitDatabase: ModelConfiguration.CloudKitDatabase {
@@ -224,12 +217,26 @@ struct ApexApp: App {
                     // unindexed (the pass waits on its own while a playlist
                     // sync is running).
                     ContentIndexingService.shared.configure(container: catalogContainer)
+                    #if os(tvOS)
+                    // Let the home screen settle before indexing a large catalog —
+                    // tvOS has less RAM and six browse tabs would otherwise all
+                    // fight the indexer for main-context merges at once.
+                    ContentIndexingService.shared.kick(after: .seconds(30))
+                    #else
                     ContentIndexingService.shared.kick()
+                    #endif
 
                     // Refresh the TV guide on its own schedule, independent of
                     // the content sync. No-ops when no guide is due yet.
                     EPGSyncService.shared.configure(container: catalogContainer)
+                    #if os(tvOS)
+                    Task {
+                        try? await Task.sleep(for: .seconds(60))
+                        EPGSyncService.shared.syncIfDue()
+                    }
+                    #else
                     EPGSyncService.shared.syncIfDue()
+                    #endif
                 }
                 .onChange(of: scenePhase) { _, phase in
                     cloudSync.handleScenePhaseChange(to: phase)

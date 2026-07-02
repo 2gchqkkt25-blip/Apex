@@ -31,7 +31,8 @@ import SwiftUI
             startTime: 0,
             contentRef: .movie("preview")
         ),
-        clock: PlaybackClock()
+        clock: PlaybackClock(),
+        seekBridge: PlayerSeekBridge()
     )
     .preferredColorScheme(.dark)
 }

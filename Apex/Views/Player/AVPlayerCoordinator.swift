@@ -61,6 +61,13 @@ final class AVPlayerCoordinator: NSObject, ObservableObject {
     @Published private(set) var audioTrackOptions: [PlayerTrackOption] = []
     @Published private(set) var textTrackOptions: [PlayerTrackOption] = []
 
+    #if os(macOS)
+        /// On-screen subtitle text for the custom overlay. `AVPlayerLayer` on
+        /// macOS does not render legible media the way iOS / tvOS do, so an
+        /// `AVPlayerItemLegibleOutput` drives this instead.
+        @Published private(set) var legibleSubtitle: AttributedString?
+    #endif
+
     /// Current playback rate (1.0 == normal). Remembered across pause/resume so
     /// resuming honours a chosen speed.
     var playbackRate: Float {
@@ -109,6 +116,10 @@ final class AVPlayerCoordinator: NSObject, ObservableObject {
     private var presentationSizeObservation: NSKeyValueObservation?
     private var trackLoadTask: Task<Void, Never>?
 
+    #if os(macOS)
+        private var legibleOutput: AVPlayerItemLegibleOutput?
+    #endif
+
     private var pipController: AVPictureInPictureController?
 
     override init() {
@@ -152,6 +163,9 @@ final class AVPlayerCoordinator: NSObject, ObservableObject {
         videoInfo = nil
         audioTrackOptions = []
         textTrackOptions = []
+        #if os(macOS)
+            legibleSubtitle = nil
+        #endif
         isBuffering = true
         hasStartedPlayback = false
         didReportFailure = false
@@ -164,6 +178,9 @@ final class AVPlayerCoordinator: NSObject, ObservableObject {
 
         attachItemObservers(to: newItem)
         loadTracks(from: asset, item: newItem)
+        #if os(macOS)
+            attachLegibleOutput(to: newItem)
+        #endif
 
         player.replaceCurrentItem(with: newItem)
         // swiftlint:disable:next line_length
@@ -401,6 +418,13 @@ final class AVPlayerCoordinator: NSObject, ObservableObject {
             player.removeTimeObserver(timeObserver)
             self.timeObserver = nil
         }
+        #if os(macOS)
+            if let item, let legibleOutput {
+                item.remove(legibleOutput)
+            }
+            legibleOutput = nil
+            legibleSubtitle = nil
+        #endif
         statusObservation?.invalidate()
         statusObservation = nil
         durationObservation?.invalidate()
@@ -434,7 +458,34 @@ final class AVPlayerCoordinator: NSObject, ObservableObject {
         let info = PlayerVideoInfo(width: width, height: height, fps: 0, codec: nil)
         if info != videoInfo { videoInfo = info }
     }
+
+    #if os(macOS)
+        private func attachLegibleOutput(to item: AVPlayerItem) {
+            let output = AVPlayerItemLegibleOutput()
+            output.setDelegate(self, queue: .main)
+            output.suppressesPlayerRendering = true
+            item.add(output)
+            legibleOutput = output
+        }
+    #endif
 }
+
+#if os(macOS)
+    extension AVPlayerCoordinator: AVPlayerItemLegibleOutputPushDelegate {
+        func legibleOutput(
+            _: AVPlayerItemLegibleOutput,
+            didOutputAttributedStrings strings: [NSAttributedString],
+            nativeSampleBuffers _: [Any],
+            forItemTime _: CMTime
+        ) {
+            if let last = strings.last, !last.string.isEmpty {
+                legibleSubtitle = AttributedString(last)
+            } else {
+                legibleSubtitle = nil
+            }
+        }
+    }
+#endif
 
 // MARK: - AVPictureInPictureControllerDelegate
 

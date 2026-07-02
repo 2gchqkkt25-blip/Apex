@@ -11,11 +11,11 @@ import SwiftUI
 
 // MARK: - Palette
 
-/// Explicit guide colours. The app ships an empty `AccentColor` asset, so
-/// `Color.accentColor` resolves to *white* on tvOS — which renders a focused
-/// block as white text on a white fill. The 10-foot UI therefore uses these
-/// concrete colours and the system "focused = solid white, dark text" idiom
-/// (mirroring `TVGlassButtonStyle`) instead of the accent colour.
+/// Explicit guide colours. `Color.platformAccent` always returns the standard
+/// system blue across all platforms, so the guide uses `ThemeManager.shared.colors.accent`
+/// to follow the active theme instead (midnight → indigo, sunset → amber, etc.).
+/// The 10-foot UI still uses concrete colours with the system "focused = solid
+/// white, dark text" idiom (mirroring `TVGlassButtonStyle`) instead of the accent.
 enum EPGColors {
     /// Tint for the currently-airing programme (progress bar + live accents).
     /// Follows the active theme so the guide palette stays consistent with the

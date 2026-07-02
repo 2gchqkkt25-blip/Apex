@@ -260,6 +260,18 @@ nonisolated struct TMDBClient {
         return response.parts.map(\.id)
     }
 
+    /// Lightweight call that returns the IMDb ID for a TV series without the
+    /// heavy `append_to_response` payload of `tvDetails()`. Used by
+    /// `IntroSkipResolver` when the series has a `tmdbId` but no cached `imdbId`.
+    /// Returns `nil` when TMDB has no IMDb ID for the series.
+    func tvExternalIMDbID(_ id: Int) async throws -> String? {
+        let ids: ExternalIds = try await get("/tv/\(id)/external_ids")
+        guard let imdbId = ids.imdbId?.trimmingCharacters(in: .whitespaces), !imdbId.isEmpty else {
+            return nil
+        }
+        return imdbId
+    }
+
     // MARK: - Networking
 
     private func get<T: Decodable>(_ path: String) async throws -> T {

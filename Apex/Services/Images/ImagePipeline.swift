@@ -36,12 +36,13 @@ actor ImagePipeline {
     private let maxRetries = 3
 
     init() {
-        let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 30
-        config.timeoutIntervalForResource = 90
-        config.urlCache = nil
-        config.requestCachePolicy = .reloadIgnoringLocalCacheData
-        session = URLSession(configuration: config)
+        session = ProviderURLSession.make(
+            timeout: 30,
+            resourceTimeout: 90,
+            maxConnectionsPerHost: 4,
+            urlCache: nil,
+            cachePolicy: .reloadIgnoringLocalCacheData
+        )
     }
 
     /// Builds the memory-cache key. Disk is keyed by URL alone (original bytes);

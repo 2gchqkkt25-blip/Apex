@@ -282,12 +282,11 @@ struct SettingsView: View {
 
         private var playbackSection: some View {
             Section {
-                Toggle("Autoplay Next Episode", isOn: $autoPlayNext)
+                Toggle("Autoplay Next Episode", isOn: premiumGated($autoPlayNext))
                     .disabled(!premium.isPremium)
-                Toggle("Show Next Episode Button", isOn: $showNextEpisodeButton)
+                Toggle("Show Next Episode Button", isOn: premiumGated($showNextEpisodeButton))
                     .disabled(!premium.isPremium)
                 Toggle("Show Skip Intro Button", isOn: $showSkipIntroButton)
-                    .disabled(!premium.isPremium)
                 if !premium.isPremium {
                     Button {
                         presentPaywall(.playbackControls)
@@ -377,6 +376,19 @@ struct SettingsView: View {
             }
         }
     #endif
+}
+
+extension SettingsView {
+    /// Premium-gated playback toggles read as off when Apex Pro isn't active,
+    /// even if UserDefaults still has them enabled from a prior session.
+    func premiumGated(_ storage: Binding<Bool>) -> Binding<Bool> {
+        Binding(
+            get: { premium.isPremium && storage.wrappedValue },
+            set: { newValue in
+                if premium.isPremium { storage.wrappedValue = newValue }
+            }
+        )
+    }
 }
 
 // MARK: - tvOS (Apple TV Settings-style two-pane layout)

@@ -83,6 +83,10 @@ final class VLCPlayerCoordinator: NSObject, ObservableObject {
     var lastStats: VLCMedia.Stats?
     private var lastStateName: String?
     private var bufferingStartedAt: Date?
+    /// Last seen track counts — bumps `objectWillChange` when new audio / subtitle
+    /// tracks appear so the tvOS overlay's track menus populate mid-stream.
+    private var lastTextTrackCount = 0
+    private var lastAudioTrackCount = 0
 
     /// Drives bounded backoff reconnects when the stream drops (see
     /// `handleRetry`).
@@ -135,6 +139,8 @@ final class VLCPlayerCoordinator: NSObject, ObservableObject {
         retry.reset()
         hasStartedPlayback = false
         didReportFailure = false
+        lastTextTrackCount = 0
+        lastAudioTrackCount = 0
         startStartupWatchdog()
         mediaPlayer.delegate = self
 
@@ -196,6 +202,8 @@ final class VLCPlayerCoordinator: NSObject, ObservableObject {
         retry.reset()
         hasStartedPlayback = false
         didReportFailure = false
+        lastTextTrackCount = 0
+        lastAudioTrackCount = 0
         startStartupWatchdog()
 
         let vlcMedia = VLCMedia(url: media.url)
@@ -445,6 +453,17 @@ final class VLCPlayerCoordinator: NSObject, ObservableObject {
         }
         objectWillChange.send()
     }
+
+    /// Republish when the demuxer exposes new audio / subtitle tracks so the
+    /// tvOS overlay's track menus appear without waiting for a state flip.
+    private func refreshTrackMenusIfNeeded() {
+        let textCount = mediaPlayer.textTracks.count
+        let audioCount = mediaPlayer.audioTracks.count
+        guard textCount != lastTextTrackCount || audioCount != lastAudioTrackCount else { return }
+        lastTextTrackCount = textCount
+        lastAudioTrackCount = audioCount
+        objectWillChange.send()
+    }
 }
 
 // MARK: - VLCMediaPlayerDelegate
@@ -463,6 +482,7 @@ extension VLCPlayerCoordinator: VLCMediaPlayerDelegate {
             isPipSupported = pipController != nil
             pipController?.invalidatePlaybackState()
             refreshVideoInfo()
+            refreshTrackMenusIfNeeded()
         }
     }
 
@@ -507,6 +527,7 @@ extension VLCPlayerCoordinator: VLCMediaPlayerDelegate {
             // them from the high-frequency time callback until they first land,
             // so steady playback doesn't re-read tracks/codec each tick.
             if videoInfo == nil { refreshVideoInfo() }
+            refreshTrackMenusIfNeeded()
         }
     }
 

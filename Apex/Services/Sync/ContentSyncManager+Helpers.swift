@@ -208,4 +208,17 @@ extension ContentSyncManager {
         }
         return lookup
     }
+
+    /// Categories already stored for a playlist, sorted by provider order.
+    func localCategories(playlistId: UUID, type: CategoryType) -> [Category] {
+        let context = ModelContext(modelContainer)
+        let prefix = "\(playlistId.uuidString)-\(type.rawValue)-"
+        let typeRaw = type.rawValue
+        let descriptor = FetchDescriptor<Category>(
+            predicate: #Predicate { $0.typeRaw == typeRaw },
+            sortBy: [SortDescriptor(\.sortOrder)]
+        )
+        return ((try? context.fetch(descriptor)) ?? [])
+            .filter { $0.id.hasPrefix(prefix) }
+    }
 }

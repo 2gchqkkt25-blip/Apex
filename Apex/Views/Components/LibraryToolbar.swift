@@ -23,19 +23,21 @@ struct LibraryToolbarModifier: ViewModifier {
                 }
 
                 ToolbarItem(placement: .automatic) {
-                    HStack {
-                        Button {
-                            showingSync = true
-                        } label: {
-                            Image(systemName: "arrow.triangle.2.circlepath")
-                        }
-
-                        Button {
-                            showingSettings = true
-                        } label: {
-                            Image(systemName: "gear")
-                        }
+                    Button {
+                        showingSync = true
+                    } label: {
+                        Image(systemName: "arrow.triangle.2.circlepath")
                     }
+                    .buttonStyle(.borderless)
+                }
+
+                ToolbarItem(placement: .automatic) {
+                    Button {
+                        showingSettings = true
+                    } label: {
+                        Image(systemName: "gear")
+                    }
+                    .buttonStyle(.borderless)
                 }
             }
             .sheet(isPresented: $showingSettings) {

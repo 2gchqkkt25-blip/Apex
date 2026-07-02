@@ -56,7 +56,7 @@ Apex/
 │   ├── Player/              PlayerSettings, PlayerHistory, NextUp resolver
 │   └── Images/              CachedAsyncImage, ImagePipeline
 └── Views/                   SwiftUI, platform-adaptive
-    ├── Home/                Hero carousel, rails, tvOS fold
+    ├── Home/                Hero carousel, immersive iPad/tvOS backdrop, rails, tvOS fold
     ├── Player/              Engine wrappers + unified overlay
     └── …
 ```

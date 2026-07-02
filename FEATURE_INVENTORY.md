@@ -2,7 +2,7 @@
 
 > **Purpose:** Track what stays, what goes, and what changes during the Lume → Apex rebrand.
 >
-> **Last updated:** June 29, 2026
+> **Last updated:** June 30, 2026
 
 ---
 
@@ -189,8 +189,8 @@ Shows focused "Next Episode" button near episode end (≥90%). **Currently premi
 - **Status:** Auxiliary (Premium) — **Decision:** ✅ Keep
 
 ### 5.9 Skip Intro / Skip Recap
-Detects intro/recap segments via IntroDB crowd-sourced timestamps. Shows "Skip Intro" button. **Currently premium-gated.**
-- **Files:** `PlayerSkipIntroOverlay.swift`, `IntroSkipResolver.swift`, `IntroDBClient.swift`
+Detects intro/recap segments via IntroDB crowd-sourced timestamps. Shows "Skip Intro" button when enabled in Settings (not Premium-gated; autoplay/next episode remain Premium).
+- **Files:** `PlayerSkipIntroOverlay.swift`, `IntroSkipResolver.swift`, `IntroDBClient.swift`, `EpisodeSeriesResolver.swift`, `FullScreenPlayerView.swift`, `PlaybackClock.swift`
 - **Status:** Auxiliary (Premium) — **Decision:** ✅ Keep
 
 ### 5.10 VLCKit Per-Engine Settings
@@ -383,8 +383,8 @@ Shows download speed and estimated time remaining for active downloads.
 ## 11. Home Screen
 
 ### 11.1 Hero Carousel
-Full-bleed backdrop carousel at top of Home showing trending movies/series with artwork, title logo, overview. Auto-rotates. tvOS: immersive full-screen with fold-snapping scroll.
-- **Files:** `HomeHeroCarousel.swift`, `HeroItem.swift`, `HeroInfo.swift`, `HeroPageIndicator.swift`, `HomeMediaItem.swift`, `TVHomeScreen.swift`, `TVHomeFold.swift`
+Full-bleed TMDB backdrop carousel on Home: trending movies/series with artwork, title logo, overview. Auto-rotates every 6s with horizontal paging. Matches library by TMDB id or cleaned title; falls back to library artwork when trending overlap is thin. iPhone: inline carousel. iPad/tvOS: immersive full-screen backdrop.
+- **Files:** `HomeHeroController.swift`, `HomeHeroArtworkPager.swift`, `HomeHeroBuilder.swift`, `HomeHeroCarousel.swift`, `HomeImmersiveHomeScreen.swift`, `HeroItem.swift`, `HeroInfo.swift`, `HeroPageIndicator.swift`, `HomeMediaItem.swift`, `HomeView.swift`, `TVHomeScreen.swift`, `TVHomeFold.swift`
 - **Status:** Core — **Decision:** ✅ Keep
 
 ### 11.2 Home Content Rows (User-Configurable)
@@ -393,8 +393,8 @@ Reorderable, toggleable horizontal content rails: Recently Watched, Favorites, F
 - **Status:** Core — **Decision:** ✅ Keep
 
 ### 11.3 For You Row (AI Recommendations)
-Personalized recommendations via on-device ML. Builds taste profile from favorites/history/votes, ranks by cosine similarity. **Currently premium-gated.**
-- **Files:** `RecommendationEngine.swift`, `RecommendationScoring.swift`, `RecommendationCacheStore.swift`, `RecommendationSettings.swift`, `HomeView.swift` (ForYouRow), `RecommendationVote.swift`
+Personalized recommendations on-device. Primary path: embedding vectors + cosine similarity (iPhone/iPad/Mac after indexing). Fallback path: genre overlap + TMDB similar-title ids when embeddings unavailable (tvOS). Requires Premium + at least one watch/favorite/vote signal.
+- **Files:** `RecommendationEngine.swift`, `RecommendationMetadataRanker.swift`, `RecommendationScoring.swift`, `RecommendationCacheStore.swift`, `RecommendationSettings.swift`, `HomeView.swift` (ForYouRow), `RecommendationVote.swift`
 - **Status:** Auxiliary (Premium) — **Decision:** ✅ Keep
 
 ### 11.4 Trending Movies/Series Rows
@@ -475,7 +475,7 @@ In-app purchases: monthly subscription + lifetime unlock. Purchase flow, restore
 - **Status:** Auxiliary — **Decision:** ✅ Keep
 
 ### 14.2 Premium Feature Gating
-Six gated features: Unlimited Playlists, Offline Downloads, Multiple Profiles, Trakt Integration, Smart Playback (autoplay/skip intro/next episode), For You Recommendations.
+Six gated features: Unlimited Playlists, Offline Downloads, Multiple Profiles, Trakt Integration, Smart Playback (autoplay/next episode; skip intro is free when enabled in Settings), For You Recommendations.
 - **Files:** `PremiumFeature.swift`
 - **Status:** Auxiliary — **Decision:** ✅ Keep
 
@@ -804,8 +804,8 @@ Shows focused "Next Episode" button near episode end (≥90%). **Currently premi
 - **Decision:** Keep
 
 ### 5.9 Skip Intro / Skip Recap
-Detects intro/recap segments via IntroDB crowd-sourced timestamps. Shows "Skip Intro" button. **Currently premium-gated.**
-- **Files:** `PlayerSkipIntroOverlay.swift`, `IntroSkipResolver.swift`, `IntroDBClient.swift`
+Detects intro/recap segments via IntroDB crowd-sourced timestamps. Shows "Skip Intro" button when enabled in Settings (not Premium-gated; autoplay/next episode remain Premium).
+- **Files:** `PlayerSkipIntroOverlay.swift`, `IntroSkipResolver.swift`, `IntroDBClient.swift`, `EpisodeSeriesResolver.swift`, `FullScreenPlayerView.swift`, `PlaybackClock.swift`
 - **Status:** Auxiliary (Premium)
 - **Decision:** Keep
 
@@ -1031,8 +1031,8 @@ Shows download speed and estimated time remaining for active downloads.
 ## 11. Home Screen
 
 ### 11.1 Hero Carousel
-Full-bleed backdrop carousel at top of Home showing trending movies/series with artwork, title logo, overview. Auto-rotates. tvOS: immersive full-screen with fold-snapping scroll.
-- **Files:** `HomeHeroCarousel.swift`, `HeroItem.swift`, `HeroInfo.swift`, `HeroPageIndicator.swift`, `HomeMediaItem.swift`, `TVHomeScreen.swift`, `TVHomeFold.swift`
+Full-bleed TMDB backdrop carousel on Home: trending movies/series with artwork, title logo, overview. Auto-rotates every 6s with horizontal paging. Matches library by TMDB id or cleaned title; falls back to library artwork when trending overlap is thin. iPhone: inline carousel. iPad/tvOS: immersive full-screen backdrop.
+- **Files:** `HomeHeroController.swift`, `HomeHeroArtworkPager.swift`, `HomeHeroBuilder.swift`, `HomeHeroCarousel.swift`, `HomeImmersiveHomeScreen.swift`, `HeroItem.swift`, `HeroInfo.swift`, `HeroPageIndicator.swift`, `HomeMediaItem.swift`, `HomeView.swift`, `TVHomeScreen.swift`, `TVHomeFold.swift`
 - **Status:** Core
 - **Decision:** keep
 
@@ -1043,8 +1043,8 @@ Reorderable, toggleable horizontal content rails: Recently Watched, Favorites, F
 - **Decision:** keep
 
 ### 11.3 For You Row (AI Recommendations)
-Personalized recommendations via on-device ML. Builds taste profile from favorites/history/votes, ranks by cosine similarity. **Currently premium-gated.**
-- **Files:** `RecommendationEngine.swift`, `RecommendationScoring.swift`, `RecommendationCacheStore.swift`, `RecommendationSettings.swift`, `HomeView.swift` (ForYouRow), `RecommendationVote.swift`
+Personalized recommendations on-device. Primary path: embedding vectors + cosine similarity (iPhone/iPad/Mac after indexing). Fallback path: genre overlap + TMDB similar-title ids when embeddings unavailable (tvOS). Requires Premium + at least one watch/favorite/vote signal.
+- **Files:** `RecommendationEngine.swift`, `RecommendationMetadataRanker.swift`, `RecommendationScoring.swift`, `RecommendationCacheStore.swift`, `RecommendationSettings.swift`, `HomeView.swift` (ForYouRow), `RecommendationVote.swift`
 - **Status:** Auxiliary (Premium)
 - **Decision:** keep
 
@@ -1139,7 +1139,7 @@ In-app purchases: monthly subscription + lifetime unlock. Purchase flow, restore
 - **Decision:** keep
 
 ### 14.2 Premium Feature Gating
-Six gated features: Unlimited Playlists, Offline Downloads, Multiple Profiles, Trakt Integration, Smart Playback (autoplay/skip intro/next episode), For You Recommendations.
+Six gated features: Unlimited Playlists, Offline Downloads, Multiple Profiles, Trakt Integration, Smart Playback (autoplay/next episode; skip intro is free when enabled in Settings), For You Recommendations.
 - **Files:** `PremiumFeature.swift`
 - **Status:** Auxiliary
 - **Decision:** keep

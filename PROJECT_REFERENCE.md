@@ -52,9 +52,9 @@ cp .env.example .env
 | `TMDB_ACCESS_TOKEN` | [themoviedb.org/settings/api](https://www.themoviedb.org/settings/api) | Backdrops, cast, genres, trailers, collections |
 | `OMDB_API_KEY` | [omdbapi.com/apikey.aspx](https://www.omdbapi.com/apikey.aspx) | IMDb, Rotten Tomatoes, Metacritic scores |
 | `TRAKT_CLIENT_ID` | [trakt.tv/oauth/applications](https://trakt.tv/oauth/applications) | Watch scrobbling (optional) |
-| `INTRO_DB_API_KEY` | [introdb.app](https://introdb.app) | Skip intro/recap (optional) |
+| `INTRO_DB_API_KEY` | [introdb.app](https://introdb.app) | Skip intro/recap (optional — reads work unauthenticated; key helps rate limits) |
 
-Without these keys, the app works but metadata is limited to what the IPTV provider supplies.
+Without these keys, the app works but metadata is limited to what the IPTV provider supplies. **Rebuild after editing `.env`** — secrets inject at build time, not at runtime.
 
 ---
 
@@ -90,6 +90,20 @@ Without these keys, the app works but metadata is limited to what the IPTV provi
 | 26 | tvOS — TMDB/IMDb metadata main-context enrichment | ✅ Done |
 | 27 | VOD poster rating badges (star + score on covers) | ✅ Done |
 | 28 | tvOS — All Categories moved to Search with poster tiles | ✅ Done |
+| 29 | iPadOS — System theme contrast fixes (selection text, settings icon, Add Playlist) | ✅ Done |
+| 30 | Skip Intro — TMDB IMDb ID resolution on playback (was nil for direct category plays) | ✅ Done |
+| 31 | Skip Intro — full playback fix (series link, overlay, IntroDB, settings gate) | ✅ Done |
+| 32 | Home hero backdrop — iPad + tvOS horizontal TMDB carousel parity with iPhone | ✅ Done |
+| 33 | For You — genre/TMDB fallback ranker when embeddings unavailable (tvOS parity) | ✅ Done |
+| 34 | Home hero — title matching + library artwork fallback when trending overlap is thin | ✅ Done |
+| 35 | iOS device — large-library crash/freeze fix (~28K Xtream playlist) | ✅ Done |
+| 36 | CloudKit re-enabled + Development schema bootstrapped | ✅ Done |
+| 37 | CloudKit Production schema deploy + iCloud sync verified | ✅ Done |
+| 38 | Discord link — `discord.gg/fKhGp6xpB` (app + README + GitHub) | ✅ Done |
+| 39 | Subtitles — KSPlayer overlay + tvOS track menus + macOS AVPlayer legible output | ✅ Done |
+| 40 | TestFlight build **17** (1.2.0) — iOS + tvOS upload | 🔄 In progress |
+| 41 | TestFlight — external tester groups (Beta App Review) | 🔄 In progress |
+| 42 | tvOS TestFlight + large-library hardening (lazy tabs, deferred indexing) | ✅ Done (build 17) |
 
 ---
 
@@ -110,9 +124,13 @@ Without these keys, the app works but metadata is limited to what the IPTV provi
 
 1. ~~**GitHub repo**~~ — ✅ Live at [github.com/2gchqkkt25-blip/Apex](https://github.com/2gchqkkt25-blip/Apex)
 2. ~~**Website / support email**~~ — ✅ support@streaminfinitytv.com, GitHub as homepage
-3. **Apple Developer setup** — CloudKit container, IAP products, App Store Connect listing
-3. **Apple Developer setup** — CloudKit container, IAP products, App Store Connect listing
-4. **TMDB enrichment in Simulator** — Content indexer was blocked indefinitely by embedding model sandbox error (`NLNaturalLanguageErrorDomain Code 7`). Fixed by adding max retry (4 attempts) to `prepareEmbedder` and allowing TMDB enrichment to proceed without semantic-search embeddings when the model is unavailable.
+3. ~~**Apple Developer setup**~~ — ✅ Team `VS7D6GB238`, bundle ID registered, IAP products created, iOS TestFlight builds uploaded (July 2, 2026)
+4. ~~**CloudKit Development schema**~~ — ✅ Bootstrapped; **Production deployed** — playlist + user data sync verified on TestFlight (July 2, 2026)
+5. **TestFlight build 17** — Archive + upload iOS and tvOS (Discord, subtitles, tvOS perf, CloudKit)
+6. **iOS TestFlight external testers** — Invites sent; waiting on Apple **Beta App Review** (~1–2 days) for new build
+7. ~~**tvOS large-library hardening**~~ — ✅ Lazy tab mount, deferred indexing/EPG (tvOS-only); in build 17
+8. **macOS signing** — Requires Apple Developer certificates on this machine
+9. **App Store submission** — After TestFlight validation
 
 ---
 
@@ -285,6 +303,163 @@ Settings → Appearance (between Premium and Profiles)
 - **iOS / macOS unchanged:** "All Categories" text tiles remain on Movies and Series tabs.
 - **Files:** `CategoryPosterTile`, `CategoryPosterGridSection`, `CategoryArtwork` in `CategoryContentGrid.swift`; `SearchView.swift` (tvOS category browse + `navigationDestination(for: Category.self)`); `#if !os(tvOS)` guard on `CategoryGridSection` in `MoviesView.swift` / `SeriesView.swift`.
 
+### iPadOS System Theme Contrast Fixes (June 30, 2026)
+- **Symptom:** On iPadOS with the System theme, three contrast failures: (1) tab bar selection capsule showed invisible white text, (2) the settings gear icon in the toolbar was obscured, (3) the "Add Playlist" button at first launch was nearly invisible.
+- **Root cause:** A custom `AccentColor` asset catalog entry set to `#4248FF` — a very dark blue-purple (perceived luminance ~0.09). iPadOS system controls (tab bar capsules, segmented controls, list row highlights) read the asset catalog accent **directly**, bypassing the view hierarchy's `.tint()` override. When the dark accent was used as a fill behind primary/dark text in light mode, contrast collapsed. The branded themes (Midnight, Sunset, Ocean, Frosted Glass) were never affected — they all force `.dark` color scheme and render white text on their fills.
+- **Fix:**
+  - **Deleted** `Assets.xcassets/AccentColor.colorset/` — removes the global `#4248FF` override so system controls use the standard iOS blue they're designed for
+  - Changed `Color.platformAccent` from `Color.accentColor` → `Color.blue` on all platforms (standard system blue, luminance ~0.22, works correctly in all control states)
+  - **LoginView:** "Add Playlist" button → `.borderedProminent` (solid accent fill, always visible); segmented picker gets explicit `.tint()`; validation-on-tap instead of silent disable with low-opacity text
+  - **LibraryToolbar:** Split grouped `HStack` into separate `ToolbarItem`s — iPadOS was rendering the HStack as a tint-filled grouped control that obscured the icons
+  - **MainTabView:** Added explicit `.tint()` on the `TabView` to guarantee the accent reaches the tab bar capsule
+- **Files:** `Theme.swift` (`platformAccent`), `AccentColor.colorset/` (deleted), `LoginView.swift`, `LibraryToolbar.swift`, `MainTabView.swift`, `EPGComponents.swift` (comment update)
+
+### Skip Intro — TMDB IMDb ID Resolution (June 30, 2026)
+- **Symptom:** The "Skip Intro" button never appeared during playback on any platform, even when IntroDB had segment data for the episode and the setting was enabled.
+- **Root cause:** `Series.imdbId` was only populated during TMDB enrichment — which only runs when the user opens the Series detail screen. When playing an episode directly from a category (the common IPTV flow), the series had a `tmdbId` (set by the content indexer) but `imdbId` was `nil`. `IntroSkipResolver.lookup()` returned `nil` when `imdbId` was missing → segments never fetched → button never shown. The `try?` in the calling code silently swallowed all errors, making the failure invisible.
+- **Fix:**
+  - Added `TMDBClient.tvExternalIMDbID(_:)` — a lightweight call to `/tv/{id}/external_ids` (single field, no heavy `append_to_response`) that returns just the IMDb ID string
+  - Rewrote `IntroSkipResolver.lookup(for:in:)` as `async` — when the series has a `tmdbId` but no cached `imdbId`, it fetches the IMDb ID from TMDB on the spot and persists it so subsequent episodes from the same series hit the fast path
+  - Updated `FullScreenPlayerView` to `await` the now-async lookup
+  - Replaced silent `try?` with `do`/`catch` + `Logger.player` diagnostics at every guard in the skip-intro chain so the exact failure point can be identified in Console.app
+  - Added `onAppear` logging to `PlayerSkipIntroOverlay` to confirm when segments are mounted
+- **Files:** `IntroSkipResolver.swift` (async rewrite + TMDB fallback), `TMDBClient.swift` (`tvExternalIMDbID`), `FullScreenPlayerView.swift` (`await` lookup + diagnostics), `PlayerSkipIntroOverlay.swift` (mount logging)
+
+### Skip Intro — Full Playback Fix (June 30, 2026)
+- **Symptom:** After the IMDb ID fix, Skip Intro still failed on many episodes (including direct category plays on Xtream/Stalker). On iOS the button could appear briefly then vanish; Breaking Bad S1E1 had no skippable intro in IntroDB (outro-only).
+- **Root causes (multiple):**
+  - Xtream/Stalker episodes inserted without `episode.series` set → series lookup failed
+  - Skip overlay lived inside per-engine views and was gated on `controlsVisible` — KSPlayer kept controls visible on iOS, hiding the button
+  - TMDB title search / episode-number fallback missing when `tmdbId` absent
+  - Premium gate blocked the feature even when the Settings toggle looked on
+  - `@Observable` playback clock did not reliably drive overlay updates
+  - IntroDB returns outro-only for some episodes; legacy `/intro` endpoint needed as fallback
+- **Fix:**
+  - **`EpisodeSeriesResolver.swift`** — recover parent series from episode ID when the SwiftData link is missing
+  - **`ContentSyncManager`** — set `episode.series = self` on episode insert
+  - **`IntroSkipResolver`** — series resolver, TMDB title search, episode-number fallback, IMDb ID normalization
+  - **`FullScreenPlayerView`** — host-level skip overlay; **`PlayerSeekBridge`** on **`PlaybackClock`** for seek-after-skip on all engines
+  - **`PlayerSkipIntroOverlay`** — `@Bindable` clock, timer poll, no controls gate, ±20s timing slack, `startTime` support
+  - **`IntroDBClient`** — `hasSkippableOpener`, legacy `/intro` fallback, `skippableSegments()`
+  - **`PlayerSettings`** — `canUseSkipIntro` follows the setting only (no Premium gate); autoplay / next episode remain Premium
+  - Engine views (`KSPlayer`, `AVPlayer`, `VLC`) — `seekBridge` wiring; removed per-engine skip overlay
+  - Settings UI — skip intro toggle no longer Premium-gated
+  - Tests: `EpisodeSeriesResolverTests`, `IntroDBClientTests`
+- **Verified:** Skip Intro works on iOS, iPadOS, and tvOS after rebuild (e.g. Breaking Bad S1E2+ has intro ~5:14+; S1E1 has no intro in IntroDB)
+
+### Home Hero Backdrop — iPad + tvOS Parity (June 30, 2026)
+- **Symptom:** iPhone Home showed TMDB trending artwork scrolling/auto-advancing in the hero; iPad and tvOS did not match (iPad lacked the immersive full-screen effect; tvOS used crossfade-only backdrop).
+- **Fix:**
+  - Extracted shared carousel logic into **`HomeHeroController`** + **`HomeHeroArtworkPager`** (horizontal paging, 6s auto-advance, infinite loop via boundary clones)
+  - **iPad:** new **`HomeImmersiveHomeScreen`** — fixed full-screen TMDB backdrop behind scroll content, hero copy + page dots in the top slot (`HomeView` branches on `UIDevice.current.userInterfaceIdiom == .pad`)
+  - **tvOS:** **`TVHomeScreen`** backdrop switched from opacity crossfade to the same horizontal pager (remote left/right still pages; fold-snapping and frost/dim below the fold unchanged)
+  - **iPhone / macOS:** unchanged inline **`HomeHeroCarousel`** at top of scroll (refactored to use shared controller/pager)
+- **Files:** `HomeHeroController.swift`, `HomeHeroArtworkPager.swift`, `HomeImmersiveHomeScreen.swift`, `HomeHeroCarousel.swift`, `HomeView.swift`, `TVHomeScreen.swift`
+
+### For You — tvOS / Metadata Fallback (June 30, 2026)
+- **Symptom:** "For You" row stayed empty on tvOS (and anywhere embeddings weren't built yet), even with Premium, watch history, and `.env` configured.
+- **Root cause:** `RecommendationEngine` only ranked titles with `embeddingData` from the on-device `NLContextualEmbedding` model. tvOS cannot run that model, so the indexer enriches TMDB but never writes vectors — taste signals and candidates both filtered out.
+- **Fix:**
+  - Added **`RecommendationMetadataRanker`** — genre-overlap + TMDB "similar titles" + rating fallback when embeddings are absent
+  - **`RecommendationEngine`** tries embedding-based ranking first; falls back to metadata ranking when no vectors exist or embedding rank returns empty
+  - Works on tvOS-only setups after the user watches or favorites something (same taste-signal requirement as before)
+- **Files:** `RecommendationMetadataRanker.swift`, `RecommendationEngine.swift`, `RecommendationMetadataRankerTests.swift`
+
+### Home Hero — Robust Matching + Library Fallback (June 30, 2026)
+- **Symptom:** Hero carousel empty on some devices despite TMDB key in `.env` — trending titles didn't match library until TMDB ids were assigned by the background indexer.
+- **Fix:**
+  - Added **`HomeHeroBuilder`** — match trending → library by **TMDB id**, then by **cleaned title** (`ContentIndexText.searchQuery` handles provider prefixes like `DE | Title (2024) 4K`)
+  - **`supplementFromLibrary`** fills the carousel from the user's own highest-rated titles with backdrop/poster artwork when trending overlap is thin (< 3 heroes)
+  - Trending Movies/Series rows use the same resolution path
+- **Note:** TMDB key is injected at **build time** — rebuild after editing `.env`. Hero still requires a synced playlist with VOD content.
+- **Files:** `HomeHeroBuilder.swift`, `HomeView+Trending.swift`, `HomeView.swift`
+
+### iOS Device — Large Library Fix (July 2, 2026)
+
+**Device:** iPhone 16 Pro Max, iOS 26.5.1  
+**Provider:** Xtream, `app.streaminfinitytv.com` (~28K items: ~20.7K movies, ~7.5K series, ~1.6K live streams)
+
+**Symptom:** App worked in Simulator but crashed or froze on physical iPhone after syncing — sync cover Done/Cancel unresponsive, UI dead, memory jetsam. Original Lume reportedly worked on the same device.
+
+**Root causes:**
+1. **TLS** — Provider cert didn't match `app.streaminfinitytv.com`; device rejected connections (Simulator was lenient).
+2. **Home hero OOM** — `HomeHeroBuilder` / trending path scanned the **entire catalog** to match TMDB titles; ~28K rows into memory after sync.
+3. **Sync memory spike** (earlier) — single JSON fetch for all VOD before batching (fixed with category-scoped sync).
+
+**Fixes applied (kept):**
+- **`ProviderURLSession.swift`** — shared permissive TLS for all provider HTTP (Xtream, M3U, Stalker, image/icon loaders).
+- **Category-scoped Xtream sync** — movies/series/live fetched per category; `batchSize = 2000`.
+- **`HomeView+Trending.swift`** — batched TMDB ID lookups (Lume pattern); no full-catalog scan.
+- **`HomeHeroBuilder.swift`** — title fallback + library supplement with **bounded** fetches (80 library / 100 title search).
+- **CloudKit split stores** — catalog local-only; user data in `CloudUserData` (unchanged architecture).
+
+**Fixes reverted (device-only workarounds — caused parity issues):**
+- Tab deferral / `browseTabsMounted` / `CatalogLoadingPlaceholder` during sync
+- `LargeCatalogGuard`, `CatalogSyncState`, `waitForBrowseReady`
+- 120s indexer delay on device; reduced Movies/Series category preview limits
+- Stripped post-sync indexer + EPG kick (restored to Lume behavior)
+
+**Restored Lume parity:**
+- **`MainTabView.swift`** — all tabs mount; sync is a cover only (no tab unmount).
+- **`SyncProgressView.swift`** — post-sync: `ContentIndexingService.kick(after: .seconds(3))` + `EPGSyncService.syncNow()`.
+- **`ApexApp.swift`** — launch indexer `kick()` without long device-only delay.
+
+**Verified:** iOS app working on physical iPhone with full hero carousel, browse, and sync (user confirmed July 2, 2026).
+
+**Key files:** `ProviderURLSession.swift`, `ContentSyncManager.swift`, `HomeView+Trending.swift`, `HomeHeroBuilder.swift`, `MainTabView.swift`, `SyncProgressView.swift`, `ApexApp.swift`
+
+### CloudKit Re-enable + Schema (July 2, 2026)
+
+**Was disabled:** `if true { return false }` in `ApexApp.isCloudKitEnvironment` (temporary crash isolation during device debugging).
+
+**Re-enabled:** CloudKit on all signed builds (Debug, Release, Sideload). Still off for SwiftUI previews and automated tests only.
+
+**Development schema bootstrapped** in [CloudKit Console](https://icloud.developer.apple.com) for `iCloud.com.streaminfinity.apex`:
+- `CD_SyncedPlaylist` (16 fields)
+- `CD_UserContentState` (16 fields)
+- `CD_UserProfile` (15 fields)
+- `CD_SyncedEPGSource` — appears when a manual EPG source is added
+
+**Settings → iCloud Sync** shows **On** on device after container provisioning + fresh install.
+
+**Production schema deployed** (July 2, 2026) — playlist + favorites/progress sync verified on TestFlight. See `CLOUDKIT_SETUP.md`.
+
+**Diagnostics added:** account status timeout (10s), Settings refresh on appear, launch log `CloudKit sync enabled: true/false`.
+
+### Discord + Subtitles (July 2, 2026)
+
+**Discord:** `SupportInfo.swift` → Settings → Support (iOS/iPad/Mac) and About QR (tvOS). Invite: `https://discord.gg/fKhGp6xpB`. Also updated in `README.md` and `.github/ISSUE_TEMPLATE/config.yml`.
+
+**Subtitles:** All three engines expose a CC menu in player controls. **KSPlayer** (default) now mounts `KSPlayerSubtitleOverlay` so selected tracks actually render (previously menu-only). **VLCKit** / **AVPlayer** unchanged for rendering; tvOS track menus refresh when tracks load mid-stream; **macOS AVPlayer** uses `AVPlayerItemLegibleOutput` overlay.
+
+**Key files:** `SupportInfo.swift`, `KSPlayerSubtitleOverlay.swift`, `KSPlayerEngineView.swift`, `KSTVPlaybackEngine.swift`, `VLCPlayerCoordinator.swift`, `AVPlayerCoordinator.swift`
+
+### TestFlight (July 2, 2026)
+
+| Item | Status |
+|------|--------|
+| App Store Connect app | ✅ "Apex Stream Player" |
+| IAP products | ✅ `premium.monthly` + `premium.lifetime` |
+| Version / build | **1.2.0 (17)** — current target for upload |
+| iOS archive + upload | 🔄 Build 17 (includes Discord, subtitles, CloudKit, device/tvOS fixes) |
+| Internal testing (self) | ✅ ~30–60 min after processing |
+| External tester invites | 🔄 **Beta App Review** (~1–2 days per build) |
+| CloudKit Production schema | ✅ Deployed; playlist + user data sync verified |
+| tvOS TestFlight | 🔄 Upload build 17 (lazy tabs + deferred background work included) |
+| `.env` secrets | ✅ TMDB + OMDb set; IntroDB/Trakt optional (empty) |
+
+### tvOS — Hero + Large Library Audit (July 2, 2026)
+
+**Hero on Apple TV:** Already implemented via **`TVHomeScreen`** (full-screen TMDB backdrop, fold scroll). Same `loadTrending()` + `HomeHeroBuilder` as iOS.
+
+**Bug fixed:** `HomeView.isEmpty` ignored `heroItems` — hero-only homes showed "Nothing Here Yet" instead of the immersive hero (iOS + tvOS).
+
+**Large-library hardening (tvOS, build 17):** Lazy-mount browse tabs (`MainTabView.activatedTabs`), 30s launch indexer delay, 60s launch EPG delay, post-sync background work deferred, trending gated on sync idle, hero logo enrichment deferred. User-reported multi-minute home freeze addressed — retest on Apple TV with build 17.
+
+**Optional (not in build 17):** Paginate Live TV `@Query` channel lists (UI paginates display but query still loads full category).
+
+**Files:** `TVHomeScreen.swift`, `HomeView.swift`, `MainTabView.swift`, `ApexApp.swift`, `SyncProgressView.swift`, `HomeView+Trending.swift`, `GenreBrowse.swift`
+
 ---
 
 ## Notes
@@ -293,12 +468,67 @@ Settings → Appearance (between Premium and Profiles)
 - AGPL-3.0 means every change you make MUST be published on GitHub
 - You CAN sell this on the App Store even though the code is public
 - The app ships with NO content — users provide their own credentials/playlists
-- CloudKit container + IAP product IDs are renamed but won't work until set up in Apple Developer Portal
+- CloudKit container configured — Development + **Production** schema live; sync verified on TestFlight (see `CLOUDKIT_SETUP.md`)
 - A full feature inventory is at `FEATURE_INVENTORY.md`
-- **API keys are required** for TMDB/OMDb metadata — see `.env` setup section above
+- **API keys** — TMDB + OMDb strongly recommended; `INTRO_DB_API_KEY` optional (Skip Intro works unauthenticated). Keys inject at **build time** via `Scripts/inject-env.sh` — **rebuild after editing `.env`**
+- **Skip Intro** — Settings toggle only (not Premium); needs IntroDB coverage per episode (some episodes have no skippable intro)
+- **For You** — Premium + at least one watch/favorite/vote signal; tvOS uses metadata fallback when embeddings unavailable
+- **Home hero** — TMDB key + synced playlist; title matching + library fallback when trending overlap is thin
 - **macOS builds** require an Apple Developer account signed into Xcode (no signing identities on this machine)
 - **tvOS Search tab** — first tab (magnifying glass); empty state shows poster-grid category browse for Movies and Series; text search when typing
 
 ---
 
-*Last updated: June 29, 2026 (VOD poster rating badges + tvOS Search category browse with poster tiles)*
+## Apple Developer Setup (July 2, 2026)
+
+| Done | What |
+|------|------|
+| ✅ | Team ID `VS7D6GB238` wired up project-wide |
+| ✅ | Release entitlements — APNs `production`, CloudKit container, increased memory limit |
+| ✅ | App Store Connect app created — "Apex Stream Player" |
+| ✅ | IAP products — `premium.monthly` + `premium.lifetime` |
+| ✅ | App icon regenerated at all sizes + tvOS brand assets |
+| ✅ | iOS builds archived + uploaded to TestFlight (builds 7–16; **17** uploading) |
+| ✅ | App working on iPhone 16 Pro Max (physical device, ~28K playlist) |
+| ✅ | CloudKit Development + **Production** schema; sync verified |
+| ✅ | `.env` — TMDB + OMDb keys confirmed for Release archives |
+| 🔄 | TestFlight build **17** — iOS + tvOS archive/upload in progress |
+| 🔄 | External TestFlight testers — Beta App Review (per build) |
+| ⏳ | macOS TestFlight / App Store (signing) |
+
+---
+
+## Current Architecture — Large Library + Sync
+
+| Layer | Behavior |
+|-------|----------|
+| **Catalog** | Local `default.store` only — never CloudKit-synced |
+| **User data** | `CloudUserData.store` → CloudKit (`SyncedPlaylist`, `UserContentState`, `UserProfile`, `SyncedEPGSource`) |
+| **Xtream sync** | Per-category API fetch → batch writes (2000) |
+| **Provider HTTP** | `ProviderURLSession` — TLS bypass for mismatched provider certs |
+| **Home hero** | Batched TMDB ID query + bounded title/library fallback (`HomeHeroBuilder`) |
+| **Post-sync** | Indexer kick @ 3s + EPG `syncNow()` |
+| **CloudKit UI** | Settings → iCloud Sync; foreground reconcile gated on actual imports |
+
+---
+
+## Resolved — iOS Device Issues (July 2, 2026)
+
+See **What's Been Built → iOS Device — Large Library Fix** above for full detail.
+
+**Summary:** Simulator ≠ device was not a platform limitation — it was full-catalog Home fetches and SSL. Fixed with bounded hero/trending, `ProviderURLSession`, and Lume-aligned sync/post-sync flow. **Status: resolved on user's iPhone.**
+
+---
+
+## Next Steps
+
+1. ~~**Deploy CloudKit schema** Development → Production~~ — ✅ Done; sync verified
+2. **Archive + upload build 17** — iOS and tvOS to TestFlight (Release, `.env` keys inject at build)
+3. **Smoke-test build 17** — sync, hero, subtitles (CC), Discord link, tvOS home responsiveness
+4. **Wait for Beta App Review** — external testers (~1–2 days after upload)
+5. **macOS signing** — Apple Developer certs on build machine
+6. **App Store submission** — after TestFlight validation
+
+---
+
+*Last updated: July 2, 2026 (build 17, CloudKit Production sync verified, Discord + subtitle fixes)*

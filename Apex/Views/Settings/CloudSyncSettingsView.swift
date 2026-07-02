@@ -25,6 +25,7 @@ enum CloudSyncStatusText {
         case .restricted: "Restricted"
         case .temporarilyUnavailable: "Temporarily Unavailable"
         case .couldNotDetermine: "Unavailable"
+        case .localOnly: "Off"
         }
     }
 
@@ -49,7 +50,9 @@ enum CloudSyncStatusText {
         case .temporarilyUnavailable:
             return Text("iCloud is temporarily unavailable. Sync resumes automatically.")
         case .couldNotDetermine, .unknown:
-            return Text("iCloud status couldn’t be determined.")
+            return Text("iCloud status couldn’t be determined. Confirm the CloudKit container is set up in Apple Developer and reinstall from Xcode.")
+        case .localOnly:
+            return Text("iCloud sync isn’t available in SwiftUI previews or automated tests.")
         }
     }
 
@@ -82,6 +85,9 @@ enum CloudSyncStatusText {
                 } footer: {
                     Text(CloudSyncStatusText.footer)
                 }
+                .task {
+                    await coordinator.refreshAccountStatus()
+                }
             }
         }
 
@@ -89,7 +95,7 @@ enum CloudSyncStatusText {
             if status.isSyncing { return "arrow.triangle.2.circlepath.icloud" }
             switch status.account {
             case .available: return "checkmark.icloud"
-            case .noAccount, .restricted, .couldNotDetermine, .temporarilyUnavailable: return "xmark.icloud"
+            case .noAccount, .restricted, .couldNotDetermine, .temporarilyUnavailable, .localOnly: return "xmark.icloud"
             case .unknown: return "icloud"
             }
         }

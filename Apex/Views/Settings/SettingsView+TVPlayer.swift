@@ -36,12 +36,11 @@ import SwiftUI
             VStack(alignment: .leading, spacing: 28) {
                 VStack(alignment: .leading, spacing: 8) {
                     TVSettingsSectionLabel("Playback")
-                    TVOptionToggleRow(title: "Autoplay Next Episode", isOn: $autoPlayNext)
+                    TVOptionToggleRow(title: "Autoplay Next Episode", isOn: premiumGated($autoPlayNext))
                         .disabled(!premium.isPremium)
-                    TVOptionToggleRow(title: "Show Next Episode Button", isOn: $showNextEpisodeButton)
+                    TVOptionToggleRow(title: "Show Next Episode Button", isOn: premiumGated($showNextEpisodeButton))
                         .disabled(!premium.isPremium)
                     TVOptionToggleRow(title: "Show Skip Intro Button", isOn: $showSkipIntroButton)
-                        .disabled(!premium.isPremium)
                     if !premium.isPremium {
                         Button {
                             presentPaywall(.playbackControls)

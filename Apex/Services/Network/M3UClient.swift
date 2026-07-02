@@ -46,13 +46,12 @@ nonisolated class M3UClient {
     /// Generous resource timeout: provider playlist exports can be very large
     /// and some servers stream them slowly.
     private static func makeSession() -> URLSession {
-        let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 30
-        config.timeoutIntervalForResource = 600
-        // Match the Xtream client: some providers serve a block page to an
-        // unrecognized UA, breaking the playlist download/parse.
-        config.httpAdditionalHeaders = ["User-Agent": apexCatalogUserAgent]
-        return URLSession(configuration: config)
+        ProviderURLSession.make(
+            timeout: 30,
+            resourceTimeout: 600,
+            maxConnectionsPerHost: 1,
+            additionalHeaders: ["User-Agent": apexCatalogUserAgent]
+        )
     }
 
     // MARK: - Download

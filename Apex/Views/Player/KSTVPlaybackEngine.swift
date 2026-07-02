@@ -26,11 +26,15 @@
         /// — keeping a default `init()` lets the host declare it as a plain
         /// `@StateObject` without an initializer-ordering dance.
         private weak var coordinator: KSVideoPlayer.Coordinator?
+        private var subtitleObservation: AnyCancellable?
 
         init() {}
 
         func attach(coordinator: KSVideoPlayer.Coordinator) {
             self.coordinator = coordinator
+            subtitleObservation = coordinator.subtitleModel.objectWillChange
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self] _ in self?.objectWillChange.send() }
         }
 
         // MARK: - Host-driven updates

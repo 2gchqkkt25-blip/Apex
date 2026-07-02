@@ -21,13 +21,12 @@ struct KSPlayerEngineView: View {
     /// tick path; only the scrubber leaf reads it. `@Bindable` so the iOS/macOS
     /// overlay can still take plain bindings.
     @Bindable var clock: PlaybackClock
+    /// Host-level skip overlay forwards seeks through this bridge.
+    @Bindable var seekBridge: PlayerSeekBridge
     /// The episode queued after `media`, resolved by the host. Drives the
     /// end-of-episode Next Up affordances; `nil` when there is nothing to play
     /// next.
     var nextUpMedia: PlayableMedia?
-    /// Intro / recap windows for the active episode (from IntroDB), driving the
-    /// in-player Skip Intro button. `nil` when there is nothing to skip.
-    var skipSegments: IntroSegments?
     /// Whether the host has another engine to fall back to if this one can't
     /// start the stream. When true, an initial-load failure reports to the host
     /// (which switches engines) instead of raising the error overlay, and the
@@ -197,6 +196,8 @@ struct KSPlayerEngineView: View {
                     }
                     .ignoresSafeArea()
 
+                ksSubtitleLayer
+
                 tapCatcher
 
                 // Suppress the controls (and their Play button) until the stream
@@ -226,13 +227,6 @@ struct KSPlayerEngineView: View {
                     )
                 }
 
-                skipIntroOverlay(controlsVisible: isControlsVisible) { time in
-                    engine.seek(to: time)
-                    // The skip button held focus; hand it back to the tap-catcher
-                    // so the remote keeps summoning controls.
-                    Task { @MainActor in catcherFocused = true }
-                }
-
                 if isChannelBrowserOpen {
                     channelBrowser
                 }
@@ -254,6 +248,8 @@ struct KSPlayerEngineView: View {
             .preferredColorScheme(.dark)
             .onAppear {
                 engine.attach(coordinator: coordinator)
+                seekBridge.seekTo = { [engine] time in engine.seek(to: time) }
+                seekBridge.onAfterSeek = { Task { @MainActor in catcherFocused = true } }
                 scheduleHide()
                 startStartupWatchdog()
             }
@@ -262,6 +258,7 @@ struct KSPlayerEngineView: View {
                 reconnector.cancel()
                 cancelStartupWatchdog()
                 cancelStallWatchdog()
+                seekBridge.reset()
                 coordinator.resetPlayer()
             }
             .onChange(of: engine.isPlaying) { _, _ in
@@ -397,6 +394,8 @@ struct KSPlayerEngineView: View {
                     }
                     .ignoresSafeArea()
 
+                ksSubtitleLayer
+
                 // Hold the controls back until the stream starts, so the loading
                 // indicator stands in for a player that would otherwise look
                 // paused behind its Play button.
@@ -414,8 +413,6 @@ struct KSPlayerEngineView: View {
                     )
                 }
 
-                skipIntroOverlay(controlsVisible: isControlsVisible) { coordinator.seek(time: $0) }
-
                 if isBuffering {
                     PlayerLoadingIndicator(title: hasStartedPlayback ? nil : media.title)
                         .transition(.opacity)
@@ -432,6 +429,7 @@ struct KSPlayerEngineView: View {
             }
             .preferredColorScheme(.dark)
             .onAppear {
+                seekBridge.seekTo = { [coordinator] time in coordinator.seek(time: time) }
                 scheduleHide()
                 observePipState()
                 startStartupWatchdog()
@@ -442,10 +440,17 @@ struct KSPlayerEngineView: View {
                 reconnector.cancel()
                 cancelStartupWatchdog()
                 cancelStallWatchdog()
+                seekBridge.reset()
                 coordinator.resetPlayer()
             }
             .onTapGesture {
                 toggleControls()
+            }
+            .onChange(of: isPlaying) { _, _ in
+                resetHideTimer()
+            }
+            .onChange(of: hasStartedPlayback) { _, started in
+                if started { resetHideTimer() }
             }
             #if os(macOS)
             .onContinuousHover(coordinateSpace: .local) { phase in
@@ -522,6 +527,16 @@ struct KSPlayerEngineView: View {
     #endif
 
     // MARK: - Actions (shared)
+
+    @ViewBuilder
+    private var ksSubtitleLayer: some View {
+        HStack {
+            Spacer()
+            KSPlayerSubtitleOverlay(model: coordinator.subtitleModel)
+            Spacer()
+        }
+        .padding()
+    }
 
     private func togglePlay() {
         let playing: Bool

@@ -10,11 +10,16 @@
 
 import SwiftData
 import SwiftUI
+#if os(iOS)
+    import UIKit
+#endif
 
 struct HomeView: View {
     @Namespace private var animationNamespace
-    @Environment(\.modelContext) private var modelContext
-    @Environment(\.contentRestriction) private var restriction
+    // Several members below are `internal` (not `private`) so the trending /
+    // watchlist loading in `HomeView+Trending.swift` can drive them.
+    @Environment(\.modelContext) var modelContext
+    @Environment(\.contentRestriction) var restriction
     @Environment(ThemeManager.self) private var themeManager
     #if os(macOS)
         @Environment(\.openWindow) private var openWindow
@@ -35,9 +40,9 @@ struct HomeView: View {
     @Query private var favoriteSeries: [Series]
     @Query private var favoriteStreams: [LiveStream]
 
-    @State private var trendingMovies: [HomeMediaItem] = []
-    @State private var trendingSeries: [HomeMediaItem] = []
-    @State private var watchlist: [HomeMediaItem] = []
+    @State var trendingMovies: [HomeMediaItem] = []
+    @State var trendingSeries: [HomeMediaItem] = []
+    @State var watchlist: [HomeMediaItem] = []
     @AppStorage(RecommendationSettings.enabledKey) private var recommendationsEnabled = RecommendationSettings.enabledDefault
     /// The user's chosen Home row order (Settings › Layout › Home). Falls back to
     /// the declaration order of `HomeSection` until they reorder.
@@ -52,9 +57,9 @@ struct HomeView: View {
     /// False until the first recommendations pass completes, so the row can show
     /// a progress placeholder rather than an empty state on launch.
     @State private var recommendationsLoaded = false
-    @State private var heroItems: [HeroItem] = []
-    @State private var trendingState: LoadState = .idle
-    @State private var trakt = TraktService.shared
+    @State var heroItems: [HeroItem] = []
+    @State var trendingState: HomeLoadState = .idle
+    @State var trakt = TraktService.shared
     /// "For You" is a Apex Pro feature; observed so the row appears/disappears
     /// when entitlement changes.
     @State private var premium = PremiumManager.shared
@@ -65,6 +70,14 @@ struct HomeView: View {
     @State private var playingMedia: PlayableMedia?
     @State private var showingSync = false
     @State private var showingSettings = false
+
+    /// True while a playlist sync, iCloud sync or EPG import is running. Shared
+    /// with `HomeView+Trending.swift` so hero/trending work waits until sync settles.
+    var isSyncBusy: Bool {
+        playlists.contains { $0.syncStatus == .syncing }
+            || indexing.isCloudSyncActive
+            || epgSync.isSyncing
+    }
 
     #if os(tvOS)
         /// Hero selected on the immersive home. Drives navigation
@@ -144,6 +157,29 @@ struct HomeView: View {
                             onSelectHero: { selectedHero = $0 },
                             rows: { homeRows }
                         )
+                    #elseif os(iOS)
+                        if UIDevice.current.userInterfaceIdiom == .pad {
+                            HomeImmersiveHomeScreen(
+                                heroItems: heroItems,
+                                backgroundColor: themeManager.colors.background,
+                                rows: { homeRows }
+                            )
+                            .ignoresSafeArea(edges: heroItems.isEmpty ? [] : .top)
+                        } else {
+                            ScrollView {
+                                LazyVStack(alignment: .leading, spacing: 28) {
+                                    if !heroItems.isEmpty {
+                                        HomeHeroCarousel(items: heroItems)
+                                    }
+                                    homeRows
+                                }
+                                .padding(.bottom)
+                            }
+                            .scrollIndicators(.hidden)
+                            .scrollContentBackground(.hidden)
+                            .background(themeManager.colors.background)
+                            .ignoresSafeArea(edges: heroItems.isEmpty ? [] : .top)
+                        }
                     #else
                         ScrollView {
                             LazyVStack(alignment: .leading, spacing: 28) {
@@ -157,9 +193,6 @@ struct HomeView: View {
                         .scrollIndicators(.hidden)
                         .scrollContentBackground(.hidden)
                         .background(themeManager.colors.background)
-                        // Only let content run under the nav bar when the hero
-                        // backdrop is there to fill it; otherwise the first row
-                        // would sit hidden behind the bar.
                         .ignoresSafeArea(edges: heroItems.isEmpty ? [] : .top)
                     #endif
                 }
@@ -200,10 +233,10 @@ struct HomeView: View {
                     }
                 }
             #endif
-                .task(id: "\(playlists.count)-\(selectedPlaylistID)-\(activePlaylist?.lastSyncDate?.timeIntervalSince1970 ?? 0)") {
+                .task(id: trendingTaskKey) {
                     await loadTrending()
                 }
-                .task(id: "watchlist-\(trakt.isConnected)-\(selectedPlaylistID)") {
+                .task(id: watchlistTaskKey) {
                     await loadWatchlist()
                 }
                 .task(id: recommendationsKey) {
@@ -285,11 +318,11 @@ struct HomeView: View {
     /// The id prefix every Movie/Series/LiveStream belonging to the active
     /// playlist shares (ids are stored as `"\(playlistID)-…"`). The `@Query`
     /// results span all playlists, so this scopes them in-memory.
-    private var playlistPrefix: String? {
+    var playlistPrefix: String? {
         activePlaylist.map { "\($0.id.uuidString)-" }
     }
 
-    private func belongsToActivePlaylist(_ id: String) -> Bool {
+    func belongsToActivePlaylist(_ id: String) -> Bool {
         guard let prefix = playlistPrefix else { return true }
         return id.hasPrefix(prefix)
     }
@@ -314,140 +347,16 @@ struct HomeView: View {
 
     /// Truly empty home — only show the empty state once trending has settled
     /// so async-loaded content doesn't make the empty view flash on launch.
+    /// Hero-only homes (library fallback with no trending row matches) still
+    /// render the immersive hero on iOS/iPad/tvOS.
     private var isEmpty: Bool {
         recentlyWatched.isEmpty
             && favorites.isEmpty
             && trendingMovies.isEmpty
             && trendingSeries.isEmpty
             && watchlist.isEmpty
+            && heroItems.isEmpty
             && trendingState.isSettled
-    }
-
-    // MARK: - Trending
-
-    private func loadTrending() async {
-        let client = TMDBClient.shared
-        guard client.isConfigured else {
-            trendingState = .loaded
-            return
-        }
-        trendingState = .loading
-        do {
-            async let movieTitles = client.trending(.movie)
-            async let tvTitles = client.trending(.tvShow)
-            let (movies, tvSeries) = try await (movieTitles, tvTitles)
-
-            var movieItems: [HomeMediaItem] = []
-            var seriesItems: [HomeMediaItem] = []
-            var heroes: [HeroItem] = []
-            let maxCount = max(movies.count, tvSeries.count)
-            for index in 0 ..< maxCount {
-                if index < movies.count {
-                    let title = movies[index]
-                    if let movie = fetchMovie(tmdbId: title.id) {
-                        movieItems.append(.movie(movie))
-                        heroes.append(.movie(
-                            movie,
-                            backdropURL: TMDBClient.backdropURL(title.backdropPath),
-                            overview: title.overview
-                        ))
-                    }
-                }
-                if index < tvSeries.count {
-                    let title = tvSeries[index]
-                    if let series = fetchSeries(tmdbId: title.id) {
-                        seriesItems.append(.series(series))
-                        heroes.append(.series(
-                            series,
-                            backdropURL: TMDBClient.backdropURL(title.backdropPath),
-                            overview: title.overview
-                        ))
-                    }
-                }
-            }
-            trendingMovies = Array(movieItems.prefix(20))
-            trendingSeries = Array(seriesItems.prefix(20))
-            heroItems = Array(heroes.prefix(8))
-            trendingState = .loaded
-            await enrichHeroLogos()
-        } catch {
-            trendingState = .failed
-        }
-    }
-
-    /// The TMDB trending feed carries no logo artwork, so a hero title shows
-    /// only its backdrop until its full details are fetched. That fetch used to
-    /// happen only on the detail screen, so logos "popped in" after visiting
-    /// Details and coming back. Enrich the visible hero titles up front via the
-    /// same TMDB detail path. Runs after the carousel is shown so backdrops
-    /// aren't blocked.
-    private func enrichHeroLogos() async {
-        // Enrich on the manager's background context; the saves auto-merge back
-        // so the hero models pick up their logos without a main-thread store
-        // write blocking the carousel.
-        let manager = ContentSyncManager(modelContainer: modelContext.container)
-        for hero in heroItems {
-            switch hero {
-            case let .movie(movie, _, _):
-                guard heroNeedsLogo(logoPath: movie.logoPath, enrichedAt: movie.tmdbEnrichedAt),
-                      let tmdbId = movie.tmdbId
-                else { continue }
-                await manager.enrichMovie(id: movie.id, tmdbId: tmdbId)
-            case let .series(series, _, _):
-                guard heroNeedsLogo(logoPath: series.logoPath, enrichedAt: series.tmdbEnrichedAt),
-                      let tmdbId = series.tmdbId
-                else { continue }
-                await manager.enrichSeries(id: series.id, tmdbId: tmdbId)
-            }
-        }
-    }
-
-    /// A hero needs a logo fetch when it has none yet and hasn't been enriched
-    /// recently. The recency guard mirrors the detail screen's 14-day window so
-    /// titles TMDB simply has no logo for aren't refetched on every appearance.
-    private func heroNeedsLogo(logoPath: String?, enrichedAt: Date?) -> Bool {
-        guard (logoPath ?? "").isEmpty else { return false }
-        guard let enrichedAt else { return true }
-        return Date().timeIntervalSince(enrichedAt) >= 14 * 24 * 3600
-    }
-
-    /// Loads the connected user's Trakt watchlist and keeps only the titles the
-    /// user actually owns in the active playlist — matched by TMDB id, the same
-    /// way the trending rows work.
-    private func loadWatchlist() async {
-        guard trakt.isConnected else {
-            watchlist = []
-            return
-        }
-        let items = await trakt.fetchWatchlist()
-        var matched: [HomeMediaItem] = []
-        for item in items {
-            switch item.type {
-            case "movie":
-                if let tmdbID = item.movie?.ids.tmdb, let movie = fetchMovie(tmdbId: tmdbID) {
-                    matched.append(.movie(movie))
-                }
-            case "show":
-                if let tmdbID = item.show?.ids.tmdb, let series = fetchSeries(tmdbId: tmdbID) {
-                    matched.append(.series(series))
-                }
-            default:
-                break
-            }
-        }
-        watchlist = Array(matched.prefix(20))
-    }
-
-    private func fetchMovie(tmdbId: Int) -> Movie? {
-        let descriptor = FetchDescriptor<Movie>(predicate: #Predicate { $0.tmdbId == tmdbId })
-        let matches = (try? modelContext.fetch(descriptor)) ?? []
-        return matches.first { belongsToActivePlaylist($0.id) && !restriction.hides(categoryID: $0.categoryId) }
-    }
-
-    private func fetchSeries(tmdbId: Int) -> Series? {
-        let descriptor = FetchDescriptor<Series>(predicate: #Predicate { $0.tmdbId == tmdbId })
-        let matches = (try? modelContext.fetch(descriptor)) ?? []
-        return matches.first { belongsToActivePlaylist($0.id) && !restriction.hides(categoryID: $0.categoryId) }
     }
 
     // MARK: - Recently watched
@@ -489,15 +398,12 @@ private extension HomeView {
         return "rec-\(recommendationsEnabled)-\(premium.isPremium)-\(isSyncBusy)-\(recommendationsRecalcToken)-\(counts)-\(selectedPlaylistID)"
     }
 
-    /// True while a playlist sync, iCloud sync or EPG import is running. The For
-    /// You recompute reads and ranks the whole catalog, so on older devices it's
-    /// deferred until those finish — and during a CloudKit import, touching the
-    /// catalog mid-handshake is best avoided entirely. Folded into
-    /// `recommendationsKey` so the load retries the moment syncing settles.
-    var isSyncBusy: Bool {
-        playlists.contains { $0.syncStatus == .syncing }
-            || indexing.isCloudSyncActive
-            || epgSync.isSyncing
+    var trendingTaskKey: String {
+        "trending-\(playlists.count)-\(selectedPlaylistID)-\(activePlaylist?.lastSyncDate?.timeIntervalSince1970 ?? 0)-\(isSyncBusy)"
+    }
+
+    var watchlistTaskKey: String {
+        "watchlist-\(trakt.isConnected)-\(selectedPlaylistID)-\(isSyncBusy)"
     }
 
     /// Resolves the engine's (throttled, possibly cached) list to local models,
@@ -575,7 +481,7 @@ private extension HomeView {
 
 // MARK: - Load state
 
-private enum LoadState {
+enum HomeLoadState {
     case idle
     case loading
     case loaded

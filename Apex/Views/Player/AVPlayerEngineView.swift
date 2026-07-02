@@ -23,13 +23,11 @@ struct AVPlayerEngineView: View {
     /// than as `@Binding` scalars — see `VLCPlayerEngineView` for why this keeps
     /// the engine view off the per-tick re-render path.
     @Bindable var clock: PlaybackClock
+    @Bindable var seekBridge: PlayerSeekBridge
     /// The episode queued after `media`, resolved by the host. Drives the
     /// end-of-episode Next Up affordances; `nil` when there is nothing to play
     /// next.
     var nextUpMedia: PlayableMedia?
-    /// Intro / recap windows for the active episode (from IntroDB), driving the
-    /// in-player Skip Intro button. `nil` when there is nothing to skip.
-    var skipSegments: IntroSegments?
     /// Whether the host has another engine to fall back to if this one can't
     /// start the stream. When true, an initial-load failure reports to the host
     /// (which switches engines) instead of raising the error overlay, and the
@@ -96,6 +94,22 @@ struct AVPlayerEngineView: View {
             // the player surface, mirroring the VLCKit/KSPlayer hosts.
             tapCatcher
 
+            #if os(macOS)
+                if let subtitle = coordinator.legibleSubtitle {
+                    VStack {
+                        Spacer()
+                        Text(subtitle)
+                            .font(.title3.weight(.semibold))
+                            .multilineTextAlignment(.center)
+                            .foregroundStyle(.white)
+                            .shadow(color: .black.opacity(0.9), radius: 2, x: 1, y: 1)
+                            .padding(.horizontal, 24)
+                            .padding(.bottom, 48)
+                    }
+                    .allowsHitTesting(false)
+                }
+            #endif
+
             if isControlsVisible, !loadFailed {
                 controlsOverlay
                     .transition(.opacity.animation(.easeInOut(duration: 0.2)))
@@ -107,22 +121,6 @@ struct AVPlayerEngineView: View {
                     clock: clock,
                     controlsVisible: isControlsVisible,
                     onPlayNext: { onSelectMedia?($0) }
-                )
-            }
-
-            if let skipSegments {
-                PlayerSkipIntroOverlay(
-                    segments: skipSegments,
-                    clock: clock,
-                    controlsVisible: isControlsVisible,
-                    onSeek: { time in
-                        coordinator.seek(to: time)
-                        #if os(tvOS)
-                            // The skip button held focus; hand it back to the
-                            // tap-catcher so the remote keeps working.
-                            Task { @MainActor in catcherFocused = true }
-                        #endif
-                    }
                 )
             }
 
@@ -152,11 +150,16 @@ struct AVPlayerEngineView: View {
             coordinator.onPlaybackFailure = { reportFailure() }
             coordinator.startupTimeout = fallbackAvailable ? fallbackStartupTimeout : startupTimeout
             coordinator.configure(media: media)
+            seekBridge.seekTo = { [coordinator] time in coordinator.seek(to: time) }
+            #if os(tvOS)
+                seekBridge.onAfterSeek = { Task { @MainActor in catcherFocused = true } }
+            #endif
             scheduleHide()
         }
         .onDisappear {
             hideTask?.cancel()
             hoverHideTask?.cancel()
+            seekBridge.reset()
             coordinator.tearDown()
         }
         .onChange(of: coordinator.isPlaying) { _, _ in
@@ -544,7 +547,8 @@ private extension View {
             startTime: 0,
             contentRef: .movie("preview")
         ),
-        clock: PlaybackClock()
+        clock: PlaybackClock(),
+        seekBridge: PlayerSeekBridge()
     )
     .preferredColorScheme(.dark)
 }

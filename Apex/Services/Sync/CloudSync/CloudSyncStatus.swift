@@ -9,6 +9,8 @@ enum CloudAccountStatus: Equatable {
     case restricted
     case temporarilyUnavailable
     case couldNotDetermine
+    /// This build intentionally skips CloudKit (previews / automated tests only).
+    case localOnly
 
     /// Whether sync can actually happen. Only `.available` syncs; everything
     /// else means the local store works but changes stay on-device.

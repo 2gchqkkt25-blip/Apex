@@ -24,7 +24,7 @@ enum NextEpisodeResolver {
         var descriptor = FetchDescriptor<Episode>(predicate: #Predicate { $0.id == id })
         descriptor.fetchLimit = 1
         guard let current = try? context.fetch(descriptor).first,
-              let series = current.series else { return nil }
+              let series = EpisodeSeriesResolver.series(for: current, in: context) else { return nil }
 
         let ordered = series.episodes.sorted {
             ($0.seasonNum, $0.episodeNum) < ($1.seasonNum, $1.episodeNum)

@@ -82,6 +82,7 @@ struct LoginView: View {
                             Text("Stremio").tag(PlaylistSourceType.stremio)
                         }
                         .pickerStyle(.segmented)
+                        .tint(themeManager.colors.accent)
                     }
 
                     switch sourceType {
@@ -100,7 +101,7 @@ struct LoginView: View {
                     }
 
                     Section {
-                        Button(action: addPlaylist) {
+                        Button(action: validateAndAddPlaylist) {
                             HStack {
                                 Spacer()
                                 if isLoading {
@@ -113,8 +114,9 @@ struct LoginView: View {
                                 Spacer()
                             }
                         }
+                        .buttonStyle(.borderedProminent)
                         .controlSize(.large)
-                        .disabled(!isFormValid || isLoading)
+                        .disabled(isLoading)
                     }
                 }
                 #if os(macOS)
@@ -360,6 +362,37 @@ struct LoginView: View {
     #endif
 
     // MARK: - Add playlist
+
+    /// Validates the form and either proceeds or shows inline feedback.  Called
+    /// by the "Add Playlist" button, which stays enabled so its label never
+    /// washes out against the background (the disabled-opacity contrast bug).
+    private func validateAndAddPlaylist() {
+        guard isFormValid else {
+            switch sourceType {
+            case .xtream:
+                if serverURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    errorMessage = "Enter your server URL to continue."
+                } else if username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    errorMessage = "Enter your username to continue."
+                } else {
+                    errorMessage = "Enter your password to continue."
+                }
+            case .m3u:
+                errorMessage = "Enter a playlist URL or choose a local file."
+            case .stalker:
+                errorMessage = "Enter the portal URL to continue."
+            case .stremio:
+                if stremioURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    errorMessage = "Enter the manifest URL to continue."
+                } else {
+                    errorMessage = "Enter a valid MAC address to continue."
+                }
+            }
+            return
+        }
+        errorMessage = nil
+        addPlaylist()
+    }
 
     private func addPlaylist() {
         switch sourceType {

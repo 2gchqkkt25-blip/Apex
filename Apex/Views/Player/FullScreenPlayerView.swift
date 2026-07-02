@@ -71,6 +71,8 @@ struct FullScreenPlayerView: View {
     /// changes. Read only when the player tree is (re)built, never on the
     /// per-tick clock path. See `PlayerSkipIntroOverlay`.
     @State private var skipSegments: IntroSegments?
+    /// Wired by the active engine so the host-level skip overlay can seek.
+    @State private var seekBridge = PlayerSeekBridge()
 
     init(media: PlayableMedia) {
         self.media = media
@@ -112,6 +114,16 @@ struct FullScreenPlayerView: View {
 
             playerView
                 .ignoresSafeArea()
+
+            if displayMedia != nil, let skipSegments {
+                PlayerSkipIntroOverlay(
+                    segments: skipSegments,
+                    clock: clock,
+                    startTime: activeMedia.startTime,
+                    onSeek: { seekBridge.seek($0) }
+                )
+                .zIndex(100)
+            }
 
             // VLCKit and KSPlayer ship their own close button inside the
             // auto-hiding controls overlay — showing a second one here means
@@ -157,15 +169,34 @@ struct FullScreenPlayerView: View {
         .task(id: activeMedia.id) {
             // Resolve the IntroDB skip windows for the active episode. Runs on
             // appear and whenever the stream swaps. Gated on the user setting so
-            // a disabled feature makes no network call. Resolving the lookup key
-            // touches SwiftData on the main actor; the fetch itself is off it.
+            // a disabled feature makes no network call. The lookup may fetch the
+            // series' IMDb ID from TMDB on first encounter, so it is now async.
             skipSegments = nil
-            guard PremiumManager.shared.isPremium, PlayerSettings.Playback.showSkipIntroButton, !activeMedia.isLive,
-                  let lookup = IntroSkipResolver.lookup(for: activeMedia.contentRef, in: modelContext)
-            else { return }
-            skipSegments = try? await IntroDBClient.shared.segments(
-                imdbId: lookup.imdbId, season: lookup.season, episode: lookup.episode
-            )
+            guard PlayerSettings.Playback.canUseSkipIntro else {
+                Logger.player.info("[SkipIntro] Skipped — setting disabled in Settings → Playback")
+                return
+            }
+            guard !activeMedia.isLive else {
+                Logger.player.info("[SkipIntro] Skipped — live stream")
+                return
+            }
+            guard let lookup = await IntroSkipResolver.lookup(for: activeMedia.contentRef, in: modelContext) else {
+                Logger.player.info("[SkipIntro] Skipped — no lookup key (missing IMDb ID / not an episode)")
+                return
+            }
+            Logger.player.info("[SkipIntro] Lookup resolved: imdb=\(lookup.imdbId, privacy: .public) s\(lookup.season)e\(lookup.episode) — fetching from IntroDB")
+            do {
+                if let segments = try await IntroDBClient.shared.skippableSegments(
+                    imdbId: lookup.imdbId, season: lookup.season, episode: lookup.episode
+                ) {
+                    Logger.player.info("[SkipIntro] Segments received: intro=\(segments.intro != nil, privacy: .public) recap=\(segments.recap != nil, privacy: .public)")
+                    skipSegments = segments
+                } else {
+                    Logger.player.info("[SkipIntro] No intro/recap in IntroDB for s\(lookup.season)e\(lookup.episode) — this episode may have no skippable opener (BB S1E1 is a known example)")
+                }
+            } catch {
+                Logger.player.warning("[SkipIntro] IntroDB request failed: \(error.localizedDescription, privacy: .public)")
+            }
         }
         .task {
             // Sample progress on a cadence and stash it in `WatchProgressBuffer`
@@ -202,6 +233,7 @@ struct FullScreenPlayerView: View {
             // Capture the clock synchronously, then flush off the main thread.
             persistProgressDetached(force: true)
             releaseAudioSession()
+            seekBridge.reset()
             ContentIndexingService.shared.isPlaybackActive = false
         }
     }
@@ -242,8 +274,8 @@ struct FullScreenPlayerView: View {
             AVPlayerEngineView(
                 media: media,
                 clock: clock,
+                seekBridge: seekBridge,
                 nextUpMedia: nextUpMedia,
-                skipSegments: skipSegments,
                 fallbackAvailable: hasFallbackEngine,
                 onPlaybackFailed: fallBackToNextEngine,
                 onSelectMedia: switchMedia
@@ -253,8 +285,8 @@ struct FullScreenPlayerView: View {
             KSPlayerEngineView(
                 media: media,
                 clock: clock,
+                seekBridge: seekBridge,
                 nextUpMedia: nextUpMedia,
-                skipSegments: skipSegments,
                 fallbackAvailable: hasFallbackEngine,
                 onPlaybackFailed: fallBackToNextEngine,
                 onSelectMedia: switchMedia
@@ -264,8 +296,8 @@ struct FullScreenPlayerView: View {
             VLCPlayerEngineView(
                 media: media,
                 clock: clock,
+                seekBridge: seekBridge,
                 nextUpMedia: nextUpMedia,
-                skipSegments: skipSegments,
                 fallbackAvailable: hasFallbackEngine,
                 onPlaybackFailed: fallBackToNextEngine,
                 onSelectMedia: switchMedia

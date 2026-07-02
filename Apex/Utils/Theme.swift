@@ -164,16 +164,13 @@ extension Color {
         self.init(red: r, green: g, blue: b)
     }
 
-    /// A visible accent colour for the current platform.  On iOS / macOS,
-    /// `Color.accentColor` follows the user's system accent.  On tvOS, the
-    /// system `accentColor` is **always white** — so we substitute the standard
-    /// iOS system blue so theme-aware views still show a real accent.
+    /// A visible accent colour for the current platform.  On iOS / macOS /
+    /// tvOS we use the standard system blue so selection indicators, tab bars,
+    /// and other system chrome reliably render legible text on the accent fill.
+    /// A custom `AccentColor` asset overrides `Color.accentColor` app-wide and
+    /// breaks contrast on iPadOS where system controls read the asset directly.
     static var platformAccent: Color {
-        #if os(tvOS)
-            Color.blue
-        #else
-            .accentColor
-        #endif
+        Color.blue
     }
 }
 

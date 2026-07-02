@@ -56,12 +56,11 @@ class StalkerClient {
     }
 
     private nonisolated static func makeSession(timeout: TimeInterval) -> URLSession {
-        let config = URLSessionConfiguration.default
-        config.httpMaximumConnectionsPerHost = 1
-        config.timeoutIntervalForRequest = timeout
-        config.timeoutIntervalForResource = 120
-        config.httpShouldSetCookies = false
-        return URLSession(configuration: config)
+        ProviderURLSession.make(
+            timeout: timeout,
+            resourceTimeout: 120,
+            maxConnectionsPerHost: 1
+        )
     }
 
     /// Cache key isolating one portal+MAC session from another.

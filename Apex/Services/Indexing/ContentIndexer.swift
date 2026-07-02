@@ -23,8 +23,9 @@ actor ContentIndexer {
     private let tmdbClient: TMDBClient
 
     /// Items per chunk; the context is saved and progress published once per
-    /// chunk so main-context merges stay infrequent.
-    private let chunkSize = 50
+    /// chunk so main-context merges stay infrequent. Kept small (20) so a save
+    /// never balloons memory on devices with large catalogs (20k+ items).
+    private let chunkSize = 20
     /// Pause between items — keeps TMDB traffic to a couple of requests per
     /// second at most.
     private let itemPause: Duration = .milliseconds(100)
@@ -94,6 +95,10 @@ actor ContentIndexer {
 
             let processed = try await indexNextChunk(embedder: embeddingReady ? embedder : nil)
             if processed == 0 { break }
+            // Each chunk save forces a main-context merge; purge the image cache
+            // to keep the resident footprint from growing unboundedly during long
+            // indexing runs (e.g. 28k-item catalogs on 4 GB devices).
+            ImageMemoryCache.shared.purge(reason: "index chunk")
             try await Task.sleep(for: itemPause)
         }
 

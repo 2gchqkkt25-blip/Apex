@@ -19,7 +19,11 @@ import SwiftUI
 /// so a bounded sample surfaces every genre in practice while keeping the
 /// derivation cheap on libraries with tens of thousands of titles — the same
 /// trade-off `LibraryCollectionRows` makes for "Recently Added".
+#if os(tvOS)
+private let genreSampleLimit = 1200
+#else
 private let genreSampleLimit = 5000
+#endif
 
 enum GenreDerivation {
     /// Derives the genre list on a background context. The sample fetch hydrates
@@ -30,8 +34,9 @@ enum GenreDerivation {
     /// the three columns the derivation reads) removes the hang entirely.
     static func movieGenres(in container: ModelContainer, playlistPrefix: String, restriction: ContentRestriction) async -> [String] {
         await Task.detached(priority: .userInitiated) {
+            let sampleLimit = genreSampleLimit
             var descriptor = FetchDescriptor<Movie>(predicate: #Predicate { $0.genre != nil })
-            descriptor.fetchLimit = genreSampleLimit
+            descriptor.fetchLimit = sampleLimit
             descriptor.propertiesToFetch = [\.id, \.genre, \.categoryId]
             let movies = (try? ModelContext(container).fetch(descriptor)) ?? []
             return Self.derive(playlistPrefix: playlistPrefix, restriction: restriction, rows: movies)
@@ -40,8 +45,9 @@ enum GenreDerivation {
 
     static func seriesGenres(in container: ModelContainer, playlistPrefix: String, restriction: ContentRestriction) async -> [String] {
         await Task.detached(priority: .userInitiated) {
+            let sampleLimit = genreSampleLimit
             var descriptor = FetchDescriptor<Series>(predicate: #Predicate { $0.genre != nil })
-            descriptor.fetchLimit = genreSampleLimit
+            descriptor.fetchLimit = sampleLimit
             descriptor.propertiesToFetch = [\.id, \.genre, \.categoryId]
             let series = (try? ModelContext(container).fetch(descriptor)) ?? []
             return Self.derive(playlistPrefix: playlistPrefix, restriction: restriction, rows: series)

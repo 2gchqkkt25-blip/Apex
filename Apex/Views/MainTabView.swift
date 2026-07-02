@@ -14,6 +14,7 @@ struct MainTabView: View {
     // Optional so previews (which don't inject it) don't crash.
     @Environment(PlaylistSwitchModel.self) private var playlistSwitch: PlaylistSwitchModel?
     @Environment(ProfileManager.self) private var profileManager: ProfileManager?
+    @Environment(ThemeManager.self) private var themeManager
     @Query private var playlists: [Playlist]
     /// Categories marked restricted. Fetched once here so a single source feeds
     /// the restriction context every content surface reads from the environment.
@@ -38,6 +39,13 @@ struct MainTabView: View {
     /// that's already been handled.
     @State private var autoSyncAttempted: Set<UUID> = []
 
+    #if os(tvOS)
+        /// Browse tabs mount on first selection only. tvOS `TabView` keeps every
+        /// tab's `@Query`s live once mounted — with six tabs and a 20k+ library,
+        /// mounting them all at launch pins the main thread for minutes.
+        @State private var activatedTabs: Set<AppTab> = [.home]
+    #endif
+
     private var syncFrequency: SyncFrequency {
         SyncFrequency.resolve(syncFrequencyRaw)
     }
@@ -60,6 +68,7 @@ struct MainTabView: View {
     var body: some View {
         @Bindable var router = router
         return tabView(selection: $router.selectedTab)
+            .tint(themeManager.colors.accent)
             .environment(router)
             .environment(\.contentRestriction, contentRestriction)
             .themeBackground()
@@ -87,7 +96,7 @@ struct MainTabView: View {
                     enqueueDueSyncs(playlists)
                 }
             }
-            .syncCover(item: $activeSyncPlaylist, onDismiss: promoteNextIfIdle)
+            .syncCover(item: $activeSyncPlaylist, onDismiss: handleSyncCoverDismissed)
             .overlay {
                 if playlistSwitch?.isSwitching == true {
                     PlaylistSwitchOverlay(playlistName: playlistSwitch?.targetName ?? "")
@@ -101,41 +110,60 @@ struct MainTabView: View {
         private func tabView(selection: Binding<AppTab>) -> some View {
             TabView(selection: selection) {
                 Tab(value: AppTab.search) {
-                    SearchView()
+                    tvTab(.search) { SearchView() }
                 } label: {
                     Image(systemName: "magnifyingglass")
                 }
 
                 Tab(value: AppTab.home) {
-                    HomeView()
+                    tvTab(.home) { HomeView() }
                 } label: {
                     Text("Home")
                 }
 
                 Tab(value: AppTab.movies) {
-                    MoviesView()
+                    tvTab(.movies) { MoviesView() }
                 } label: {
                     Text("Movies")
                 }
 
                 Tab(value: AppTab.series) {
-                    SeriesView()
+                    tvTab(.series) { SeriesView() }
                 } label: {
                     Text("Series")
                 }
 
                 Tab(value: AppTab.liveTV) {
-                    LiveTVView()
+                    tvTab(.liveTV) { LiveTVView() }
                 } label: {
                     Text("Live TV")
                 }
 
                 Tab(value: AppTab.settings) {
-                    SettingsView()
+                    tvTab(.settings) { SettingsView() }
                 } label: {
                     Image(systemName: "gear")
                 }
             }
+            .onChange(of: selection.wrappedValue) { _, tab in
+                activatedTabs.insert(tab)
+            }
+        }
+
+        /// Defers mounting a tab's browse surface until the user selects it (or a
+        /// deep link targets it). Home is always mounted so the launch screen is
+        /// usable immediately after sync.
+        @ViewBuilder
+        private func tvTab(_ tab: AppTab, @ViewBuilder content: () -> some View) -> some View {
+            if activatedTabs.contains(tab) {
+                content()
+            } else {
+                Color.clear
+            }
+        }
+
+        private func activateTab(_ tab: AppTab) {
+            activatedTabs.insert(tab)
         }
     #else
         private func tabView(selection: Binding<AppTab>) -> some View {
@@ -174,11 +202,17 @@ struct MainTabView: View {
         switch link {
         case let .movie(tmdbId):
             guard let movie = resolveMovie(tmdbId: tmdbId) else { return }
+            #if os(tvOS)
+                activateTab(.movies)
+            #endif
             router.selectedTab = .movies
             router.moviesPath = NavigationPath()
             router.moviesPath.append(movie)
         case let .series(tmdbId):
             guard let series = resolveSeries(tmdbId: tmdbId) else { return }
+            #if os(tvOS)
+                activateTab(.series)
+            #endif
             router.selectedTab = .series
             router.seriesPath = NavigationPath()
             router.seriesPath.append(series)
@@ -240,6 +274,10 @@ struct MainTabView: View {
     private func promoteNextIfIdle() {
         guard activeSyncPlaylist == nil, !syncQueue.isEmpty else { return }
         activeSyncPlaylist = syncQueue.removeFirst()
+    }
+
+    private func handleSyncCoverDismissed() {
+        promoteNextIfIdle()
     }
 }
 

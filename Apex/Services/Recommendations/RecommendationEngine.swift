@@ -84,13 +84,39 @@ actor RecommendationEngine {
         }
 
         guard let taste = RecommendationScoring.centroid(of: positiveSignals()) else {
-            return []
+            return metadataRecommendations(limit: limit, profileID: profileID)
         }
         let dislike = RecommendationScoring.centroid(of: dislikeSignals())
         let ranked = rankCandidates(limit: limit, taste: taste, dislike: dislike)
+        if ranked.isEmpty {
+            return metadataRecommendations(limit: limit, profileID: profileID)
+        }
 
-        // Only cache a real result — an empty one means "no signal yet", which
-        // should retry cheaply as soon as the user favorites or watches something.
+        cacheStore.save(RecommendationCache(computedAt: Date(), items: ranked), for: profileID)
+        return ranked
+    }
+
+    /// Genre / TMDB-similarity ranking when embeddings are unavailable (tvOS) or
+    /// not yet built for the catalog.
+    private func metadataRecommendations(limit: Int, profileID: UUID?) -> [ScoredRecommendation] {
+        let context = ModelContext(modelContainer)
+        guard let profile = RecommendationMetadataRanker.buildProfile(
+            context: context,
+            signalLimit: signalLimit,
+            favoriteWeight: favoriteWeight,
+            watchedWeight: watchedWeight,
+            upvote: upvote,
+            downvote: downvote
+        ) else {
+            return []
+        }
+        let ranked = RecommendationMetadataRanker.rankCandidates(
+            limit: limit,
+            context: context,
+            profile: profile,
+            pageSize: pageSize,
+            downvote: downvote
+        )
         if !ranked.isEmpty {
             cacheStore.save(RecommendationCache(computedAt: Date(), items: ranked), for: profileID)
         }

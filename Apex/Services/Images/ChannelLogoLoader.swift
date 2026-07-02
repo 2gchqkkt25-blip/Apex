@@ -19,14 +19,13 @@ import Foundation
 enum ChannelLogoLoader {
     private static let memory = LogoMemoryCache.shared
 
-    private static let session: URLSession = {
-        let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 30
-        config.timeoutIntervalForResource = 60
-        config.urlCache = nil
-        config.requestCachePolicy = .reloadIgnoringLocalCacheData
-        return URLSession(configuration: config)
-    }()
+    private static let session: URLSession = ProviderURLSession.make(
+        timeout: 30,
+        resourceTimeout: 60,
+        maxConnectionsPerHost: 4,
+        urlCache: nil,
+        cachePolicy: .reloadIgnoringLocalCacheData
+    )
 
     /// Synchronous peek: memory, then disk. Used so category lists can paint
     /// logos on the first frame instead of waiting on a `.task` that List cancels.

@@ -24,10 +24,8 @@ final class CloudSyncCoordinator {
 
     private let engine: CloudSyncEngine
     private let cloudKitContainerIdentifier: String
-    /// False under previews / automated tests, where touching CloudKit
-    /// (`CKContainer`, mirroring) crashes an un-entitled binary. Account checks
-    /// are skipped; the engine still reconciles the local user-data store.
-    private let cloudKitEnabled: Bool
+    /// False under previews / automated tests / sideload builds.
+    let isCloudKitEnabled: Bool
 
     /// Coalescing guard: a reconcile requested while one is running sets
     /// `pendingReconcile` instead of overlapping, then runs once afterwards.
@@ -60,10 +58,13 @@ final class CloudSyncCoordinator {
     init(catalogContainer: ModelContainer, cloudContainer: ModelContainer, cloudKitContainerIdentifier: String, cloudKitEnabled: Bool) {
         engine = CloudSyncEngine(catalogContainer: catalogContainer, cloudContainer: cloudContainer)
         self.cloudKitContainerIdentifier = cloudKitContainerIdentifier
-        self.cloudKitEnabled = cloudKitEnabled
+        self.isCloudKitEnabled = cloudKitEnabled
         // Nothing to sync under previews / tests: open the launch gate now so an
         // empty store shows the add-playlist form immediately, as before.
         status.hasCompletedInitialSync = !cloudKitEnabled
+        if !cloudKitEnabled {
+            status.account = .localOnly
+        }
         guard cloudKitEnabled else { return }
         observeCloudKitEvents()
         observeRemoteChanges()
@@ -81,7 +82,7 @@ final class CloudSyncCoordinator {
     /// before showing the add-playlist form.
     func start() async {
         await refreshAccountStatus()
-        guard cloudKitEnabled else {
+        guard isCloudKitEnabled else {
             // Gate already open from `init`; just reconcile the local store.
             reconcile(reason: .launch)
             return
@@ -234,7 +235,7 @@ final class CloudSyncCoordinator {
     /// or fall back to the add-playlist form if not. Idempotent: only the first
     /// call has any effect.
     private func completeInitialSync() {
-        guard cloudKitEnabled, !status.hasCompletedInitialSync, !shouldOpenInitialSyncGate else { return }
+        guard isCloudKitEnabled, !status.hasCompletedInitialSync, !shouldOpenInitialSyncGate else { return }
         shouldOpenInitialSyncGate = true
         reconcile(reason: .launch)
     }
@@ -259,13 +260,38 @@ final class CloudSyncCoordinator {
     // MARK: - Account status
 
     func refreshAccountStatus() async {
-        guard cloudKitEnabled else { return }
+        guard isCloudKitEnabled else {
+            status.account = .localOnly
+            return
+        }
         let container = CKContainer(identifier: cloudKitContainerIdentifier)
-        do {
-            let status = try await container.accountStatus()
-            self.status.account = Self.map(status)
-        } catch {
+        let accountStatus = await fetchAccountStatus(from: container)
+        if let accountStatus {
+            status.account = Self.map(accountStatus)
+        } else {
+            Logger.sync.error("iCloud account status timed out for \(self.cloudKitContainerIdentifier, privacy: .public)")
             status.account = .couldNotDetermine
+        }
+    }
+
+    /// `CKContainer.accountStatus()` can hang when the container isn't provisioned
+    /// or the network stalls; cap the wait so Settings doesn't spin forever.
+    private func fetchAccountStatus(from container: CKContainer) async -> CKAccountStatus? {
+        await withTaskGroup(of: CKAccountStatus?.self) { group in
+            group.addTask {
+                do {
+                    return try await container.accountStatus()
+                } catch {
+                    Logger.sync.error("iCloud account status failed: \(error.localizedDescription, privacy: .public)")
+                    return nil
+                }
+            }
+            group.addTask {
+                try? await Task.sleep(for: .seconds(10))
+                return nil
+            }
+            defer { group.cancelAll() }
+            return await group.next() ?? nil
         }
     }
 
@@ -415,7 +441,7 @@ final class CloudSyncCoordinator {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated {
+            Task { @MainActor [weak self] in
                 self?.reconcile(reason: .contentSync)
             }
         }

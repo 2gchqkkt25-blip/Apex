@@ -44,7 +44,11 @@ struct MoviesView: View {
     /// How many categories render as full inline preview rows. Each preview row
     /// carries its own live `@Query`, so capping them keeps the browse screen
     /// fast; the remaining categories surface as lightweight name tiles below.
+    #if os(iOS)
     private let previewCategoryLimit = 4
+    #else
+    private let previewCategoryLimit = 4
+    #endif
 
     var body: some View {
         // Resolve once per render — `sortedCategories` filters + sorts every

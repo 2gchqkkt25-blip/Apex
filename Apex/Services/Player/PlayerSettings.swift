@@ -135,6 +135,13 @@ enum PlayerSettings {
             UserDefaults.standard.object(forKey: showSkipIntroButtonKey) as? Bool
                 ?? showSkipIntroButtonDefault
         }
+
+        /// Whether Skip Intro should actually run — honours the user toggle only.
+        /// (Autoplay / Next Episode remain Premium-gated separately.)
+        @MainActor
+        static var canUseSkipIntro: Bool {
+            showSkipIntroButton
+        }
     }
 
     /// Legacy top-level key for VLC's deinterlace toggle, kept stable so the

@@ -53,6 +53,7 @@ extension Series {
             episode.rating = parsed.rating
             episode.airDate = parsed.airDate
             episode.plot = parsed.plot
+            episode.series = self
             context.insert(episode)
             episodes.append(episode)
         }
@@ -69,7 +70,9 @@ actor ContentSyncManager {
     let xtreamClient: XtreamClient
     private var activeSyncPlaylistIDs: Set<UUID> = []
 
-    /// Number of items to process before saving and resetting the context.
+    /// Kept at 2000 (matching upstream Lume) so a 20k+ library triggers far fewer
+    /// main-context save notifications than smaller batches — each save was freezing
+    /// the sync UI on device.
     private let batchSize = 2000
 
     // MARK: - Initialization
@@ -252,34 +255,84 @@ actor ContentSyncManager {
 
     /// Syncs movies in memory-bounded batches.
     ///
-    /// Movies store their category as a plain `categoryId` foreign-key string —
-    /// no SwiftData relationship — so each insert avoids the inverse-array
-    /// updates that previously slowed sync as categories grew.
+    /// Fetches one VOD category at a time from the provider so a 20k+ library
+    /// never lands in memory as a single decoded JSON array (the main device OOM
+    /// trigger). Falls back to a single full fetch when no categories exist yet.
     func syncMovies(for playlist: Playlist, playlistId: UUID, progress: SyncProgress? = nil) async throws {
         await progress?.start(.movies)
-        let movieDTOs = try await xtreamClient.getVODStreams(playlist: playlist)
-        let totalCount = movieDTOs.count
-        // swiftformat:disable:next redundantSelf
-        Logger.database.info("Fetched \(totalCount) movies, syncing in batches of \(self.batchSize)")
-        await progress?.update(detail: "0 of \(totalCount)", fraction: 0)
-
+        let categories = localCategories(playlistId: playlistId, type: .vod)
         let playlistPrefix = "\(playlistId.uuidString)-\(CategoryType.vod.rawValue)-"
+        var seenIds = Set<String>()
+        var syncedTotal = 0
 
-        for batchStart in stride(from: 0, to: totalCount, by: batchSize) {
+        if categories.isEmpty {
+            let movieDTOs = try await xtreamClient.getVODStreams(playlist: playlist)
+            syncedTotal = try await upsertMovieBatch(
+                movieDTOs,
+                playlist: playlist,
+                playlistId: playlistId,
+                playlistPrefix: playlistPrefix,
+                seenIds: &seenIds,
+                progress: progress,
+                totalCount: movieDTOs.count,
+                syncedSoFar: 0
+            )
+        } else {
+            Logger.database.info("Syncing movies across \(categories.count) categories")
+            for (index, category) in categories.enumerated() {
+                try Task.checkCancellation()
+                let movieDTOs = try await xtreamClient.getVODStreams(playlist: playlist, categoryId: category.apiId)
+                syncedTotal = try await upsertMovieBatch(
+                    movieDTOs,
+                    playlist: playlist,
+                    playlistId: playlistId,
+                    playlistPrefix: playlistPrefix,
+                    seenIds: &seenIds,
+                    progress: progress,
+                    totalCount: nil,
+                    syncedSoFar: syncedTotal,
+                    categoryProgress: (index + 1, categories.count)
+                )
+            }
+        }
+
+        if !seenIds.isEmpty {
+            pruneStaleMovies(playlistId: playlistId, seenIds: seenIds)
+        }
+
+        Logger.database.info("Completed syncing \(syncedTotal) movies")
+        await progress?.complete(.movies)
+    }
+
+    private func upsertMovieBatch(
+        _ movieDTOs: [XtreamVODStream],
+        playlist: Playlist,
+        playlistId: UUID,
+        playlistPrefix: String,
+        seenIds: inout Set<String>,
+        progress: SyncProgress?,
+        totalCount: Int?,
+        syncedSoFar: Int,
+        categoryProgress: (current: Int, total: Int)? = nil
+    ) async throws -> Int {
+        let count = movieDTOs.count
+        guard count > 0 else { return syncedSoFar }
+
+        var runningTotal = syncedSoFar
+        for batchStart in stride(from: 0, to: count, by: batchSize) {
             try Task.checkCancellation()
             try autoreleasepool {
-                let batchEnd = min(batchStart + batchSize, totalCount)
+                let batchEnd = min(batchStart + batchSize, count)
                 let batch = movieDTOs[batchStart ..< batchEnd]
 
                 let context = ModelContext(modelContainer)
                 context.autosaveEnabled = false
-
-                // Update existing rows in place; see existingMovies for why.
                 let existing = existingMovies(in: batch, playlistId: playlistId, context: context)
 
                 for movieDTO in batch {
                     guard let streamId = movieDTO.streamId else { continue }
                     let movieId = "\(playlistId.uuidString)-movie-\(streamId)"
+                    seenIds.insert(movieId)
 
                     let movie: Movie
                     if let found = existing[movieId] {
@@ -292,47 +345,101 @@ actor ContentSyncManager {
                 }
 
                 try context.save()
-                Logger.database.info("Synced movies \(batchStart + 1)–\(batchEnd) of \(totalCount)")
+                runningTotal += batch.count
+                Logger.database.info("Synced movies \(runningTotal) total (\(batchStart + 1)–\(batchEnd) in category batch)")
             }
-            await progress?.update(
-                detail: "\(min(batchStart + batchSize, totalCount)) of \(totalCount)",
-                fraction: totalCount == 0 ? 1 : Double(min(batchStart + batchSize, totalCount)) / Double(totalCount)
-            )
+
+            if let totalCount {
+                await progress?.update(
+                    detail: "\(min(runningTotal, totalCount)) of \(totalCount)",
+                    fraction: totalCount == 0 ? 1 : Double(min(runningTotal, totalCount)) / Double(totalCount)
+                )
+            } else if let categoryProgress {
+                await progress?.update(
+                    detail: "\(runningTotal) movies · category \(categoryProgress.current)/\(categoryProgress.total)",
+                    fraction: Double(categoryProgress.current) / Double(categoryProgress.total)
+                )
+            }
         }
-
-        // Remove movies the provider has dropped (see pruneMovies for the guard).
-        pruneMovies(playlistId: playlistId, against: movieDTOs)
-
-        Logger.database.info("Completed syncing \(totalCount) movies")
-        await progress?.complete(.movies)
+        return runningTotal
     }
 
-    /// Syncs series in memory-bounded batches.
+    /// Syncs series in memory-bounded batches, one provider category at a time.
     func syncSeries(for playlist: Playlist, playlistId: UUID, progress: SyncProgress? = nil) async throws {
         await progress?.start(.series)
-        let seriesDTOs = try await xtreamClient.getSeries(playlist: playlist)
-        let totalCount = seriesDTOs.count
-        // swiftformat:disable:next redundantSelf
-        Logger.database.info("Fetched \(totalCount) series, syncing in batches of \(self.batchSize)")
-        await progress?.update(detail: "0 of \(totalCount)", fraction: 0)
-
+        let categories = localCategories(playlistId: playlistId, type: .series)
         let playlistPrefix = "\(playlistId.uuidString)-\(CategoryType.series.rawValue)-"
+        var seenIds = Set<String>()
+        var syncedTotal = 0
 
-        for batchStart in stride(from: 0, to: totalCount, by: batchSize) {
+        if categories.isEmpty {
+            let seriesDTOs = try await xtreamClient.getSeries(playlist: playlist)
+            syncedTotal = try await upsertSeriesBatch(
+                seriesDTOs,
+                playlist: playlist,
+                playlistId: playlistId,
+                playlistPrefix: playlistPrefix,
+                seenIds: &seenIds,
+                progress: progress,
+                totalCount: seriesDTOs.count,
+                syncedSoFar: 0
+            )
+        } else {
+            Logger.database.info("Syncing series across \(categories.count) categories")
+            for (index, category) in categories.enumerated() {
+                try Task.checkCancellation()
+                let seriesDTOs = try await xtreamClient.getSeries(playlist: playlist, categoryId: category.apiId)
+                syncedTotal = try await upsertSeriesBatch(
+                    seriesDTOs,
+                    playlist: playlist,
+                    playlistId: playlistId,
+                    playlistPrefix: playlistPrefix,
+                    seenIds: &seenIds,
+                    progress: progress,
+                    totalCount: nil,
+                    syncedSoFar: syncedTotal,
+                    categoryProgress: (index + 1, categories.count)
+                )
+            }
+        }
+
+        if !seenIds.isEmpty {
+            pruneStaleSeries(playlistId: playlistId, seenIds: seenIds)
+        }
+
+        Logger.database.info("Completed syncing \(syncedTotal) series")
+        await progress?.complete(.series)
+    }
+
+    private func upsertSeriesBatch(
+        _ seriesDTOs: [XtreamSeries],
+        playlist: Playlist,
+        playlistId: UUID,
+        playlistPrefix: String,
+        seenIds: inout Set<String>,
+        progress: SyncProgress?,
+        totalCount: Int?,
+        syncedSoFar: Int,
+        categoryProgress: (current: Int, total: Int)? = nil
+    ) async throws -> Int {
+        let count = seriesDTOs.count
+        guard count > 0 else { return syncedSoFar }
+
+        var runningTotal = syncedSoFar
+        for batchStart in stride(from: 0, to: count, by: batchSize) {
             try Task.checkCancellation()
             try autoreleasepool {
-                let batchEnd = min(batchStart + batchSize, totalCount)
+                let batchEnd = min(batchStart + batchSize, count)
                 let batch = seriesDTOs[batchStart ..< batchEnd]
 
                 let context = ModelContext(modelContainer)
                 context.autosaveEnabled = false
-
-                // Update existing rows in place; see existingSeries for why.
                 let existing = existingSeries(in: batch, playlistId: playlistId, context: context)
 
                 for seriesDTO in batch {
                     guard let seriesId = seriesDTO.seriesId else { continue }
                     let id = "\(playlistId.uuidString)-series-\(seriesId)"
+                    seenIds.insert(id)
 
                     let series: Series
                     if let found = existing[id] {
@@ -345,19 +452,23 @@ actor ContentSyncManager {
                 }
 
                 try context.save()
-                Logger.database.info("Synced series \(batchStart + 1)–\(batchEnd) of \(totalCount)")
+                runningTotal += batch.count
+                Logger.database.info("Synced series \(runningTotal) total (\(batchStart + 1)–\(batchEnd) in category batch)")
             }
-            await progress?.update(
-                detail: "\(min(batchStart + batchSize, totalCount)) of \(totalCount)",
-                fraction: totalCount == 0 ? 1 : Double(min(batchStart + batchSize, totalCount)) / Double(totalCount)
-            )
+
+            if let totalCount {
+                await progress?.update(
+                    detail: "\(min(runningTotal, totalCount)) of \(totalCount)",
+                    fraction: totalCount == 0 ? 1 : Double(min(runningTotal, totalCount)) / Double(totalCount)
+                )
+            } else if let categoryProgress {
+                await progress?.update(
+                    detail: "\(runningTotal) series · category \(categoryProgress.current)/\(categoryProgress.total)",
+                    fraction: Double(categoryProgress.current) / Double(categoryProgress.total)
+                )
+            }
         }
-
-        // Remove series the provider has dropped (episodes/cast cascade).
-        pruneSeries(playlistId: playlistId, against: seriesDTOs)
-
-        Logger.database.info("Completed syncing \(totalCount) series")
-        await progress?.complete(.series)
+        return runningTotal
     }
 
     /// Syncs episodes for a series
@@ -433,27 +544,76 @@ actor ContentSyncManager {
         return raw[match.upperBound...].trimmingCharacters(in: separators)
     }
 
-    /// Syncs live streams in memory-bounded batches.
+    /// Syncs live streams in memory-bounded batches, one provider category at a time.
     func syncLiveStreams(for playlist: Playlist, playlistId: UUID, progress: SyncProgress? = nil) async throws {
         await progress?.start(.liveStreams)
-        let streamDTOs = try await xtreamClient.getLiveStreams(playlist: playlist)
-        let totalCount = streamDTOs.count
-        // swiftformat:disable:next redundantSelf
-        Logger.database.info("Fetched \(totalCount) live streams, syncing in batches of \(self.batchSize)")
-        await progress?.update(detail: "0 of \(totalCount)", fraction: 0)
-
+        let categories = localCategories(playlistId: playlistId, type: .live)
         let playlistPrefix = "\(playlistId.uuidString)-\(CategoryType.live.rawValue)-"
+        var seenIds = Set<String>()
+        var syncedTotal = 0
 
-        for batchStart in stride(from: 0, to: totalCount, by: batchSize) {
+        if categories.isEmpty {
+            let streamDTOs = try await xtreamClient.getLiveStreams(playlist: playlist)
+            syncedTotal = try await upsertLiveStreamBatch(
+                streamDTOs,
+                playlist: playlist,
+                playlistId: playlistId,
+                playlistPrefix: playlistPrefix,
+                seenIds: &seenIds,
+                progress: progress,
+                totalCount: streamDTOs.count,
+                syncedSoFar: 0
+            )
+        } else {
+            Logger.database.info("Syncing live streams across \(categories.count) categories")
+            for (index, category) in categories.enumerated() {
+                try Task.checkCancellation()
+                let streamDTOs = try await xtreamClient.getLiveStreams(playlist: playlist, categoryId: category.apiId)
+                syncedTotal = try await upsertLiveStreamBatch(
+                    streamDTOs,
+                    playlist: playlist,
+                    playlistId: playlistId,
+                    playlistPrefix: playlistPrefix,
+                    seenIds: &seenIds,
+                    progress: progress,
+                    totalCount: nil,
+                    syncedSoFar: syncedTotal,
+                    categoryProgress: (index + 1, categories.count)
+                )
+            }
+        }
+
+        if !seenIds.isEmpty {
+            pruneStaleLiveStreams(playlistId: playlistId, seenIds: seenIds)
+        }
+
+        Logger.database.info("Completed syncing \(syncedTotal) live streams")
+        await progress?.complete(.liveStreams)
+    }
+
+    private func upsertLiveStreamBatch(
+        _ streamDTOs: [XtreamLiveStream],
+        playlist: Playlist,
+        playlistId: UUID,
+        playlistPrefix: String,
+        seenIds: inout Set<String>,
+        progress: SyncProgress?,
+        totalCount: Int?,
+        syncedSoFar: Int,
+        categoryProgress: (current: Int, total: Int)? = nil
+    ) async throws -> Int {
+        let count = streamDTOs.count
+        guard count > 0 else { return syncedSoFar }
+
+        var runningTotal = syncedSoFar
+        for batchStart in stride(from: 0, to: count, by: batchSize) {
             try Task.checkCancellation()
             try autoreleasepool {
-                let batchEnd = min(batchStart + batchSize, totalCount)
+                let batchEnd = min(batchStart + batchSize, count)
                 let batch = streamDTOs[batchStart ..< batchEnd]
 
                 let context = ModelContext(modelContainer)
                 context.autosaveEnabled = false
-
-                // Update existing rows in place; see existingLiveStreams for why.
                 let existing = existingLiveStreams(in: batch, playlistId: playlistId, context: context)
 
                 var iconSampleCount = 0
@@ -465,6 +625,7 @@ actor ContentSyncManager {
                         iconSampleCount += 1
                     }
                     let id = "\(playlistId.uuidString)-live-\(streamId)"
+                    seenIds.insert(id)
 
                     let liveStream: LiveStream
                     if let found = existing[id] {
@@ -489,19 +650,23 @@ actor ContentSyncManager {
                 }
 
                 try context.save()
-                Logger.database.info("Synced streams \(batchStart + 1)–\(batchEnd) of \(totalCount)")
+                runningTotal += batch.count
+                Logger.database.info("Synced streams \(runningTotal) total (\(batchStart + 1)–\(batchEnd) in category batch)")
             }
-            await progress?.update(
-                detail: "\(min(batchStart + batchSize, totalCount)) of \(totalCount)",
-                fraction: totalCount == 0 ? 1 : Double(min(batchStart + batchSize, totalCount)) / Double(totalCount)
-            )
+
+            if let totalCount {
+                await progress?.update(
+                    detail: "\(min(runningTotal, totalCount)) of \(totalCount)",
+                    fraction: totalCount == 0 ? 1 : Double(min(runningTotal, totalCount)) / Double(totalCount)
+                )
+            } else if let categoryProgress {
+                await progress?.update(
+                    detail: "\(runningTotal) channels · category \(categoryProgress.current)/\(categoryProgress.total)",
+                    fraction: Double(categoryProgress.current) / Double(categoryProgress.total)
+                )
+            }
         }
-
-        // Remove live channels the provider has dropped.
-        pruneLiveStreams(playlistId: playlistId, against: streamDTOs)
-
-        Logger.database.info("Completed syncing \(totalCount) live streams")
-        await progress?.complete(.liveStreams)
+        return runningTotal
     }
 }
 

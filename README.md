@@ -20,7 +20,7 @@ Browse, search, and stream your Xtream Codes or **M3U/M3U8** playlists with a cl
 [![SwiftUI](https://img.shields.io/badge/UI-SwiftUI-0A84FF)](https://developer.apple.com/xcode/swiftui/)
 [![SwiftData](https://img.shields.io/badge/Persistence-SwiftData-30B0C7)](https://developer.apple.com/documentation/swiftdata)
 [![Issues](https://img.shields.io/github/issues/2gchqkkt25-blip/Apex?color=F9EE00&labelColor=1f1f2e)](https://github.com/2gchqkkt25-blip/Apex/issues)
-[![Discord](https://img.shields.io/badge/chat-Discord-5865F2?logo=discord&logoColor=white&labelColor=1f1f2e)](https://discord.gg/DMnQfr69Ug)
+[![Discord](https://img.shields.io/badge/chat-Discord-5865F2?logo=discord&logoColor=white&labelColor=1f1f2e)](https://discord.gg/fKhGp6xpB)
 [![License](https://img.shields.io/badge/license-AGPL--3.0-blue?labelColor=1f1f2e)](LICENSE)
 
 </div>
@@ -85,8 +85,8 @@ Metacritic), and your viewing activity can be scrobbled to **Trakt**.
 - Quality / source picker when multiple streams are available
 
 #### 🏠 Home
-- Personalized dashboard with a hero carousel
-- **Immersive full-screen tvOS home** with TMDB backdrop, crossfading hero, and fold-based scroll snapping
+- Personalized dashboard with a hero carousel (iPhone) or immersive full-screen TMDB backdrop (iPad, tvOS)
+- **Immersive full-screen tvOS home** with horizontally paging TMDB backdrop and fold-based scroll snapping
 - Continue Watching, Favorites, Recently Watched, and Trending rails
 - **For You** rail — on-device recommendations from your watch history and favorites; thumbs-up / thumbs-down a suggestion to tune what you see next, with your votes syncing across devices via iCloud (can be turned off in Settings)
 
@@ -352,7 +352,7 @@ Planned features and enhancements are tracked as
 ## Contributing
 
 > 💬 Have a question, want to share feedback, or just hang out? Join the community on
-> **[Discord](https://discord.gg/DMnQfr69Ug)**.
+> **[Discord](https://discord.gg/fKhGp6xpB)**.
 
 Contributions are welcome! The short version:
 

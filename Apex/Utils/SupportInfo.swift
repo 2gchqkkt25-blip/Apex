@@ -13,7 +13,7 @@ import Foundation
 nonisolated enum SupportInfo {
     static let website = "https://github.com/2gchqkkt25-blip/Apex"
     static let email = "support@streaminfinitytv.com"
-    static let discord = "https://discord.gg/DMnQfr69Ug"
+    static let discord = "https://discord.gg/fKhGp6xpB"
 
     /// App Store listing, and the deep link that opens straight to the
     /// write-a-review composer (`?action=write-review`).
@@ -22,7 +22,7 @@ nonisolated enum SupportInfo {
 
     /// Scheme-stripped forms for compact on-screen display.
     static let websiteDisplay = "github.com/2gchqkkt25-blip/Apex"
-    static let discordDisplay = "discord.gg/DMnQfr69Ug"
+    static let discordDisplay = "discord.gg/fKhGp6xpB"
     static let appStoreDisplay = "App Store"
 
     static var websiteURL: URL? {

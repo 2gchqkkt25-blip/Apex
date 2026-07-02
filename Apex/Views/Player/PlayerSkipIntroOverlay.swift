@@ -1,40 +1,30 @@
+import Combine
+import OSLog
 import SwiftUI
 
 /// In-player "Skip Intro" / "Skip Recap" affordance, layered above the active
-/// engine's own controls by each engine view (mirroring `PlayerNextUpOverlay`,
-/// so it can see whether the controls are showing and keep focus sane on tvOS).
-///
-/// A focused button fades in whenever the playhead sits inside a known intro or
-/// recap window (data from `IntroDBClient`) and seeks just past it on activation.
-/// Outro / end-credits skipping is intentionally left to the existing Next
-/// Episode button and auto-advance, so the two affordances never overlap.
-///
-/// Reads the high-frequency `PlaybackClock`, so it re-renders on each tick — a
-/// deliberately small leaf (like the scrubber) that never lifts that dependency
-/// up into the engine view. Only mounted by the engine view when segments exist.
+/// engine stack by `FullScreenPlayerView`.
 struct PlayerSkipIntroOverlay: View {
     let segments: IntroSegments
-    /// The shared playback clock. Read here (and only here) so ticking it
-    /// invalidates just this overlay, not the engine view above it.
-    let clock: PlaybackClock
-    /// Whether the engine's own controls overlay is currently showing. The
-    /// button hides while the controls are up, so the two don't fight for focus
-    /// (tvOS) or overlap the scrubber (iOS/macOS).
-    let controlsVisible: Bool
-    /// Seeks the underlying player to an absolute time, in seconds.
+    @Bindable var clock: PlaybackClock
+    /// Resume offset when the episode opens part-way through — used until the
+    /// engine publishes the first playhead sample on `clock`.
+    var startTime: TimeInterval = 0
     let onSeek: (TimeInterval) -> Void
 
     #if os(tvOS)
         @FocusState private var buttonFocused: Bool
-        /// Set when the viewer presses Menu on the button, so it stays dismissed
-        /// for the current segment rather than reappearing each tick. Cleared
-        /// when the segments change (a new episode swaps in).
         @State private var dismissedSegment: ActiveSegment?
     #endif
 
-    /// Segments shorter than this aren't worth a button — avoids flashing an
-    /// affordance for a one-second stinger.
-    private let minimumDuration: TimeInterval = 5
+    /// Drives re-renders on a cadence so the overlay tracks the playhead even
+    /// when Observation doesn't propagate ticks from the host-owned clock.
+    @State private var pollTick = 0
+
+    private let minimumDuration: TimeInterval = 3
+    /// Widen the match window slightly — IPTV streams often drift vs. streaming
+    /// masters that IntroDB was tagged against.
+    private let timingSlack: TimeInterval = 20
 
     private enum Kind: Equatable { case intro, recap }
 
@@ -44,20 +34,28 @@ struct PlayerSkipIntroOverlay: View {
     }
 
     var body: some View {
+        let _ = pollTick
+        let position = playbackPosition
+        let activeSegment = activeSegment(at: position)
+
         Group {
-            if let active, showsButton(for: active) {
-                skipButton(for: active)
+            if let activeSegment, showsButton(for: activeSegment) {
+                skipButton(for: activeSegment)
                     .transition(.opacity.combined(with: .move(edge: .trailing)))
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-        .allowsHitTesting(active != nil)
-        .animation(.easeInOut(duration: 0.25), value: active)
+        .allowsHitTesting(activeSegment != nil)
+        .animation(.easeInOut(duration: 0.25), value: activeSegment?.segment.end)
+        .onAppear {
+            Logger.player.info("[SkipIntro] Overlay mounted — intro=\(segments.intro != nil, privacy: .public) start=\(segments.intro.map { String(format: "%.1f", $0.start) } ?? "nil", privacy: .public) end=\(segments.intro.map { String(format: "%.1f", $0.end) } ?? "nil", privacy: .public) recap=\(segments.recap != nil, privacy: .public) resume=\(startTime, privacy: .public)")
+        }
+        .onReceive(Timer.publish(every: 0.25, on: .main, in: .common).autoconnect()) { _ in
+            pollTick &+= 1
+        }
         #if os(tvOS)
-            .onChange(of: active) { _, value in
-                // Pull focus onto the button the moment it appears so the viewer can
-                // skip with a single Select.
-                if value != nil { Task { @MainActor in buttonFocused = true } }
+            .onChange(of: activeSegment?.segment.end) { _, _ in
+                if activeSegment != nil { Task { @MainActor in buttonFocused = true } }
             }
             .onChange(of: segments) { _, _ in
                 dismissedSegment = nil
@@ -65,34 +63,36 @@ struct PlayerSkipIntroOverlay: View {
         #endif
     }
 
-    // MARK: - Gating
+    private var playbackPosition: TimeInterval {
+        let current = clock.current
+        if current.isFinite, current > 0 { return current }
+        if startTime.isFinite, startTime > 0 { return startTime }
+        return 0
+    }
 
-    /// The segment the playhead currently sits inside, or `nil` when between or
-    /// outside segments. A recap takes precedence over an intro when both windows
-    /// would match (some shows tag a "previously on" recap ahead of the titles).
-    private var active: ActiveSegment? {
-        let now = clock.current
-        guard now > 0 else { return nil }
-        if let recap = segments.recap, contains(recap, now) {
+    private func activeSegment(at position: TimeInterval) -> ActiveSegment? {
+        guard position > 0 else { return nil }
+        if let recap = segments.recap, contains(recap, position) {
             return ActiveSegment(kind: .recap, segment: recap)
         }
-        if let intro = segments.intro, contains(intro, now) {
+        if let intro = segments.intro, contains(intro, position) {
             return ActiveSegment(kind: .intro, segment: intro)
         }
         return nil
     }
 
     private func contains(_ segment: IntroSegments.Segment, _ time: TimeInterval) -> Bool {
-        segment.duration >= minimumDuration && time >= segment.start && time < segment.end
+        let start = max(0, segment.start - timingSlack)
+        let end = segment.end + timingSlack
+        let duration = end - start
+        return duration >= minimumDuration && time >= start && time < end
     }
 
     private func showsButton(for active: ActiveSegment) -> Bool {
         #if os(tvOS)
             if dismissedSegment == active { return false }
         #endif
-        // Hide while the controls own the screen — their scrubber covers the
-        // same bottom-trailing space (iOS/macOS) and focus (tvOS).
-        return !controlsVisible
+        return true
     }
 
     private func label(for kind: Kind) -> LocalizedStringKey {
@@ -103,14 +103,9 @@ struct PlayerSkipIntroOverlay: View {
         onSeek(active.segment.end)
     }
 
-    // MARK: - Button
-
     @ViewBuilder
     private func skipButton(for active: ActiveSegment) -> some View {
         #if os(tvOS)
-            // Matches `PlayerNextUpOverlay`'s tvOS button verbatim (glass style,
-            // 26pt leading glyph, trailing Spacer + fixed 460pt width) so the two
-            // in-player affordances are visually identical.
             Button { skip(active) } label: {
                 HStack(spacing: 18) {
                     Image(systemName: "forward.fill")
@@ -126,8 +121,6 @@ struct PlayerSkipIntroOverlay: View {
             .frame(width: 460)
             .padding(.trailing, 80)
             .padding(.bottom, 60)
-            // Menu on the button dismisses it for this segment (focus falls back
-            // to the player) rather than closing the player outright.
             .onExitCommand { dismissedSegment = active }
         #else
             Button { skip(active) } label: {
@@ -145,7 +138,7 @@ struct PlayerSkipIntroOverlay: View {
             }
             .buttonStyle(.plain)
             .padding(.trailing, 20)
-            .padding(.bottom, 40)
+            .padding(.bottom, 100)
         #endif
     }
 }
