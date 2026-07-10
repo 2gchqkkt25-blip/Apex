@@ -6,9 +6,9 @@
 //  left, a frozen time ruler across the top, and programme blocks sized to
 //  their duration. A live "now" line tracks the current moment.
 //
-//  Data (channels + listings) is queried and shaped into rows once, in this
-//  parent. Scroll offset lives in the child scroller, so panning the grid never
-//  re-runs the row-building work.
+//  Guide data: SwiftData first, then on-demand API for gaps (`EPGBrowseLoader`).
+//  Channel logos paint immediately; programmes fill in after fetch.
+//  See `EPG.md` for architecture and stale-timestamp alignment.
 //
 
 import SwiftData
@@ -17,39 +17,40 @@ import SwiftUI
 struct EPGGuideView: View {
     let scope: LiveChannelScope
     let playlistPrefix: String
+    let playlist: Playlist?
+    let sectionToken: String
+    @Bindable var epgCache: LiveTVSectionEPGCache
     let onPlay: (LiveStream) -> Void
 
+    @Environment(\.modelContext) private var modelContext
     @Query private var streams: [LiveStream]
-    @Query private var listings: [EPGListing]
 
     private let timeline: EPGTimeline
 
-    /// Cached rows built off‑main‑actor to keep the expensive Dictionary(grouping:)
-    /// and row‑tiling work out of `body`.
-    @State private var rows: [EPGChannelRow] = []
-    /// Bumped after logo prefetch so the frozen column re-reads the warm cache.
     @State private var logoRefreshID = 0
+    @State private var visibleCount = LiveChannelQuery.pageSize
+    @State private var epgSync = EPGSyncService.shared
 
-    init(scope: LiveChannelScope, playlistPrefix: String, sort: ContentSortOption, onPlay: @escaping (LiveStream) -> Void) {
+    init(
+        scope: LiveChannelScope,
+        playlistPrefix: String,
+        playlist: Playlist? = nil,
+        sort: ContentSortOption,
+        sectionToken: String,
+        epgCache: LiveTVSectionEPGCache,
+        onPlay: @escaping (LiveStream) -> Void
+    ) {
         self.scope = scope
         self.playlistPrefix = playlistPrefix
+        self.playlist = playlist
+        self.sectionToken = sectionToken
+        self._epgCache = Bindable(epgCache)
         self.onPlay = onPlay
 
-        // 6‑hour window (1 hour behind, 5 hours ahead) instead of the previous
-        // 25‑hour window — cuts the loaded EPGListing count by ~75 % and keeps
-        // the guide responsive even with thousands of channels.
         let timeline = EPGTimeline.live(now: Date(), pointsPerMinute: EPGMetrics.current.pointsPerMinute, hoursBehind: 1, hoursAhead: 5)
         self.timeline = timeline
 
         _streams = Query(LiveChannelQuery.descriptor(for: scope, sort: sort))
-
-        // Fetch only listings overlapping the window, then group in memory.
-        let windowStart = timeline.start
-        let windowEnd = timeline.end
-        _listings = Query(
-            filter: #Predicate<EPGListing> { $0.end > windowStart && $0.start < windowEnd },
-            sort: [SortDescriptor(\.start)]
-        )
     }
 
     private var scopedStreams: [LiveStream] {
@@ -57,44 +58,75 @@ struct EPGGuideView: View {
     }
 
     var body: some View {
-        if scopedStreams.isEmpty {
+        let channels = scopedStreams
+        let visible = Array(channels.prefix(visibleCount))
+        let displayRows = EPGGridBuilder.rows(
+            streams: visible,
+            programsByChannel: epgCache.programsByChannel,
+            timeline: timeline
+        )
+
+        if channels.isEmpty {
             ContentUnavailableView(
                 "No Channels",
                 systemImage: "antenna.radiowaves.left.and.right",
                 description: Text("This category has no channels")
             )
         } else {
-            EPGGridScroller(rows: rows, timeline: timeline, logoRefreshID: logoRefreshID, onPlay: onPlay)
-                .task(id: listingsChecksum) {
-                    // Defer the expensive grouping + tiling to after the first
-                    // paint so the guide frame appears instantly.  The work still
-                    // runs on the main actor, but a 6‑hour window limits the
-                    // listing count enough that it finishes in < 50 ms.
-                    let built = buildRows()
-                    rows = built
-                    await ChannelLogoLoader.prefetch(built.compactMap(\.logoURL))
-                    logoRefreshID += 1
+            EPGGridScroller(
+                rows: displayRows,
+                timeline: timeline,
+                logoRefreshID: logoRefreshID,
+                onPlay: onPlay,
+                onNearEnd: {
+                    guard visibleCount < channels.count else { return }
+                    visibleCount = min(visibleCount + LiveChannelQuery.pageSize, channels.count)
                 }
+            )
+            .task(id: sectionToken) {
+                epgCache.activate(section: sectionToken)
+                await loadGuide(for: visible)
+            }
+            .onChange(of: sectionToken) {
+                visibleCount = LiveChannelQuery.pageSize
+            }
+            .onChange(of: epgSync.refreshGeneration) {
+                Task { await loadGuide(for: visible, force: true) }
+            }
+            .onChange(of: visibleCount) { _, count in
+                let page = Array(scopedStreams.prefix(count))
+                Task { await loadGuide(for: page) }
+            }
         }
     }
 
-    /// Stable fingerprint of the listing set — triggers a row rebuild only when
-    /// the underlying `@Query` result actually changes, not on every body eval.
-    private var listingsChecksum: Int {
-        var hasher = Hasher()
-        hasher.combine(listings.count)
-        // Hash the first 5 and last 5 for a fast fingerprint that catches bulk
-        // changes without iterating thousands of items.
-        for item in listings.prefix(5) { hasher.combine(item.id) }
-        for item in listings.suffix(5) { hasher.combine(item.id) }
-        return hasher.finalize()
-    }
+    @MainActor
+    private func loadGuide(for channels: [LiveStream], force: Bool = false) async {
+        guard !channels.isEmpty else { return }
 
-    /// Groups the windowed listings by channel and tiles each stream into a row.
-    /// Called from `.task` so the first paint happens before the grouping work.
-    private func buildRows() -> [EPGChannelRow] {
-        let grouped = Dictionary(grouping: listings, by: \.channelId)
-        return EPGGridBuilder.rows(streams: scopedStreams, listingsByChannel: grouped, timeline: timeline)
+        let targets = force ? channels : epgCache.channelsNeedingLoad(channels)
+        guard !targets.isEmpty else { return }
+
+        // Same `EPGBrowseLoader.load` path as the list — identical store window
+        // and speed. The grid clamps programmes to `timeline` when rendering.
+        let loaded = await EPGBrowseLoader.load(
+            container: modelContext.container,
+            channels: targets,
+            playlist: playlist
+        )
+        guard !Task.isCancelled else { return }
+
+        epgCache.merge(section: sectionToken, loaded: loaded)
+
+        Task {
+            let rows = EPGGridBuilder.rows(
+                streams: channels,
+                programsByChannel: epgCache.programsByChannel,
+                timeline: timeline
+            )
+            await ChannelLogoLoader.prefetch(rows.compactMap(\.logoURL))
+            logoRefreshID += 1
+        }
     }
 }
 
@@ -129,6 +161,7 @@ private struct EPGGridScroller: View {
     let timeline: EPGTimeline
     let logoRefreshID: Int
     let onPlay: (LiveStream) -> Void
+    var onNearEnd: () -> Void = {}
 
     private let metrics = EPGMetrics.current
     private let now = Date()
@@ -170,7 +203,8 @@ private struct EPGGridScroller: View {
                     onPlay: { row, _ in onPlay(row.stream) },
                     onShowDetails: { row, cell in
                         selection = EPGSelection(id: cell.id, stream: row.stream, cell: cell)
-                    }
+                    },
+                    onNearEnd: onNearEnd
                 )
             }
         }
@@ -375,6 +409,7 @@ private struct EPGGrid: View {
     let nowTarget: CGFloat
     let onPlay: (EPGChannelRow, EPGProgramCell) -> Void
     let onShowDetails: (EPGChannelRow, EPGProgramCell) -> Void
+    var onNearEnd: () -> Void = {}
 
     @State private var position = ScrollPosition()
     @State private var didInitialScroll = false
@@ -387,7 +422,15 @@ private struct EPGGrid: View {
 
     var body: some View {
         ScrollView([.horizontal, .vertical]) {
-            EPGRows(rows: rows, timeline: timeline, metrics: metrics, now: now, onPlay: onPlay, onShowDetails: onShowDetails)
+            EPGRows(
+                rows: rows,
+                timeline: timeline,
+                metrics: metrics,
+                now: now,
+                onPlay: onPlay,
+                onShowDetails: onShowDetails,
+                onNearEnd: onNearEnd
+            )
                 .frame(minHeight: viewportHeight, alignment: .topLeading)
         }
         .background {
@@ -426,6 +469,7 @@ private struct EPGRows: View {
     let now: Date
     let onPlay: (EPGChannelRow, EPGProgramCell) -> Void
     let onShowDetails: (EPGChannelRow, EPGProgramCell) -> Void
+    var onNearEnd: () -> Void = {}
 
     private var contentHeight: CGFloat {
         guard !rows.isEmpty else { return 0 }
@@ -443,6 +487,11 @@ private struct EPGRows: View {
                     onPlay: { cell in onPlay(row, cell) },
                     onShowDetails: { cell in onShowDetails(row, cell) }
                 )
+                .onAppear {
+                    if row.id == rows.last?.id {
+                        onNearEnd()
+                    }
+                }
             }
         }
         .frame(width: timeline.totalWidth, alignment: .topLeading)
@@ -587,7 +636,13 @@ private struct EPGProgramStrip: View {
         }
 
         var body: some View {
-            EPGGuideView(scope: .category(category.id), playlistPrefix: "", sort: .playlist) { _ in }
+            EPGGuideView(
+                scope: .category(category.id),
+                playlistPrefix: "",
+                sort: .playlist,
+                sectionToken: category.id,
+                epgCache: LiveTVSectionEPGCache()
+            ) { _ in }
                 .modelContainer(container)
                 .frame(minHeight: 520)
         }

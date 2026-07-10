@@ -70,6 +70,7 @@
         enum TabKind: Hashable { case episodes, recent, info }
         @State var openTab: TabKind?
         @FocusState var focus: TVPlayerFocus?
+        @State private var epgSync = EPGSyncService.shared
 
         // MARK: - Body
 
@@ -108,6 +109,10 @@
                 if isScrubbing { cancelScrub() } else { closePanel() }
             }
             .task(id: media.id) { resolveContent() }
+            .onChange(of: epgSync.refreshGeneration) {
+                guard media.isLive else { return }
+                resolveContent()
+            }
             .onAppear {
                 // Every time the controls reappear this is a fresh subtree;
                 // `defaultFocus` alone is unreliable here, so place focus on the

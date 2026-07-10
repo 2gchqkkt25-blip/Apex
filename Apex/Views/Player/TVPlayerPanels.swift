@@ -298,7 +298,7 @@
                         TVPlayerChannelCard(
                             channel: channel,
                             isCurrent: channel.id == currentChannelID,
-                            nowTitle: channel.epgChannelId.flatMap { nowTitles[$0] },
+                            nowTitle: nowTitles[channel.primaryEPGChannelId],
                             action: { onSelect(channel) }
                         )
                         .focused(focus, equals: .channel(channel.id))

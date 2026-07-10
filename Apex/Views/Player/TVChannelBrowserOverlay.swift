@@ -50,6 +50,7 @@
         @State private var loadTask: Task<Void, Never>?
         /// Debounces guide loads the same way as the channel column sweeps.
         @State private var guideLoadTask: Task<Void, Never>?
+        @State private var epgSync = EPGSyncService.shared
 
         @FocusState private var focus: FocusTarget?
 
@@ -125,6 +126,12 @@
             .onDisappear {
                 loadTask?.cancel()
                 guideLoadTask?.cancel()
+            }
+            .onChange(of: epgSync.refreshGeneration) {
+                refreshNowTitles(for: channels)
+                if let guideChannelID {
+                    Task { await loadGuide(channelID: guideChannelID) }
+                }
             }
         }
 
@@ -238,7 +245,7 @@
                 VStack(alignment: .leading, spacing: 3) {
                     Text(channel.name)
                         .lineLimit(1)
-                    if let nowTitle = channel.epgChannelId.flatMap({ nowTitles[$0] }) {
+                    if let nowTitle = nowTitles[channel.primaryEPGChannelId] {
                         Text(nowTitle)
                             .font(.system(size: 20))
                             .opacity(0.6)
@@ -353,13 +360,13 @@
             selectedSectionID = initialID
             if let initialID, let section = rail.first(where: { $0.id == initialID }) {
                 channels = fetchChannels(scope: section.scope)
-                nowTitles = TVPlayerContent.nowProgrammeTitles(for: channels, in: modelContext)
+                refreshNowTitles(for: channels)
             }
 
             // Fill the guide column with the playing channel up front, so the
             // third column isn't blank before focus first settles on a channel.
             if let currentChannelID, channels.contains(where: { $0.id == currentChannelID }) {
-                loadGuide(channelID: currentChannelID)
+                Task { await loadGuide(channelID: currentChannelID) }
             }
         }
 
@@ -383,7 +390,7 @@
                       let section = sections.first(where: { $0.id == sectionID }) else { return }
                 selectedSectionID = sectionID
                 channels = fetchChannels(scope: section.scope)
-                nowTitles = TVPlayerContent.nowProgrammeTitles(for: channels, in: modelContext)
+                refreshNowTitles(for: channels)
                 // The previous channel's guide no longer belongs to this column;
                 // clear it until focus lands on a channel in the new category.
                 guideChannelID = nil
@@ -400,14 +407,37 @@
             guideLoadTask = Task { @MainActor in
                 try? await Task.sleep(nanoseconds: 150_000_000)
                 guard !Task.isCancelled else { return }
-                loadGuide(channelID: channelID)
+                await loadGuide(channelID: channelID)
+            }
+        }
+
+        /// Now-playing titles from SwiftData, then on-demand API for gaps (same
+        /// path as Live TV cards — keeps tvOS player in parity with iOS).
+        private func refreshNowTitles(for channels: [LiveStream]) {
+            nowTitles = TVPlayerContent.nowProgrammeTitles(for: channels, in: modelContext)
+            let missing = channels.filter { nowTitles[$0.primaryEPGChannelId] == nil }
+            guard !missing.isEmpty, let playlist = playlist(for: channels) else { return }
+            Task { @MainActor in
+                let loaded = await EPGBrowseLoader.load(
+                    container: modelContext.container,
+                    channels: missing,
+                    playlist: playlist
+                )
+                var titles = nowTitles
+                for (channelId, epg) in loaded.channelEPG {
+                    if let title = epg.current?.title ?? epg.next?.title {
+                        titles[channelId] = title
+                    }
+                }
+                nowTitles = titles
             }
         }
 
         /// Fetch the focused channel's guide. Catch-up channels reach back over
         /// their archive window so aired programmes are replayable; others show
-        /// only what's on now and next.
-        private func loadGuide(channelID: String) {
+        /// only what's on now and next. Falls back to the shared browse loader
+        /// when SwiftData has no rows yet.
+        private func loadGuide(channelID: String) async {
             guideChannelID = channelID
             guard let stream = channels.first(where: { $0.id == channelID }) else {
                 guideEntries = []
@@ -415,11 +445,34 @@
             }
             let archiveDays = stream.tvArchive > 0 ? max(1, stream.tvArchiveDuration) : 0
             let listings = TVPlayerContent.guideListings(
-                channelId: stream.epgChannelId, archiveDays: archiveDays, in: modelContext
+                for: stream, archiveDays: archiveDays, in: modelContext
             )
-            guideEntries = listings.map {
+            if !listings.isEmpty {
+                guideEntries = listings.map {
+                    GuideEntry(id: $0.id, title: $0.title, start: $0.start, end: $0.end)
+                }
+                return
+            }
+
+            guideEntries = []
+            guard let playlist = playlist(for: [stream]) else { return }
+            let loaded = await EPGBrowseLoader.load(
+                container: modelContext.container,
+                channels: [stream],
+                playlist: playlist
+            )
+            guard guideChannelID == channelID else { return }
+            let programs = loaded.programs[stream.primaryEPGChannelId] ?? []
+            guideEntries = programs.map {
                 GuideEntry(id: $0.id, title: $0.title, start: $0.start, end: $0.end)
             }
+        }
+
+        private func playlist(for channels: [LiveStream]) -> Playlist? {
+            guard let playlistID = channels.first?.owningPlaylistID else { return nil }
+            return try? modelContext.fetch(
+                FetchDescriptor<Playlist>(predicate: #Predicate { $0.id == playlistID })
+            ).first
         }
 
         // MARK: - Focus

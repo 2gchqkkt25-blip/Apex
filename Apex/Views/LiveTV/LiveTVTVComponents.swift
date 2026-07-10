@@ -16,21 +16,32 @@
     struct TVChannelsList: View {
         let scope: LiveChannelScope
         let playlistPrefix: String
+        let playlist: Playlist?
+        let sectionToken: String
+        @Bindable var epgCache: LiveTVSectionEPGCache
         let onPlay: (LiveStream) -> Void
         @Environment(\.modelContext) private var modelContext
         @Query private var streams: [LiveStream]
-        /// Now/next EPG for the visible channels, resolved in one off-main fetch
-        /// (see `ChannelEPGSnapshot`) instead of a per-row `@Query`.
-        @State private var epgByChannel: [String: ChannelEPG] = [:]
-        /// Observed so the EPG lookup refreshes when a guide import finishes.
+        /// Observed so the list can reload after a manual full-guide sync finishes.
         @State private var epgSync = EPGSyncService.shared
         /// How many channels are currently rendered. Grows by a page as the list
         /// nears its end so a large category loads lazily instead of all at once.
         @State private var visibleCount = LiveChannelQuery.pageSize
 
-        init(scope: LiveChannelScope, playlistPrefix: String, sort: ContentSortOption, onPlay: @escaping (LiveStream) -> Void) {
+        init(
+            scope: LiveChannelScope,
+            playlistPrefix: String,
+            playlist: Playlist?,
+            sort: ContentSortOption,
+            sectionToken: String,
+            epgCache: LiveTVSectionEPGCache,
+            onPlay: @escaping (LiveStream) -> Void
+        ) {
             self.scope = scope
             self.playlistPrefix = playlistPrefix
+            self.playlist = playlist
+            self.sectionToken = sectionToken
+            self._epgCache = Bindable(epgCache)
             self.onPlay = onPlay
             _streams = Query(LiveChannelQuery.descriptor(for: scope, sort: sort))
         }
@@ -55,7 +66,7 @@
                         ForEach(visible) { stream in
                             TVChannelRow(
                                 stream: stream,
-                                epg: epgByChannel[stream.epgChannelId ?? ""],
+                                epg: epgCache.epgByChannel[stream.primaryEPGChannelId],
                                 onRemove: scope == .recentlyWatched ? { removeFromRecentlyWatched(stream) } : nil
                             ) {
                                 onPlay(stream)
@@ -73,24 +84,51 @@
                 .padding(.vertical, 40)
             }
             .focusSection()
-            // Reload when the visible window or channel set changes, or a guide
-            // import settles — EPG is resolved only for the channels on screen.
-            .task(id: "\(channels.count)-\(visible.count)-\(epgSync.isSyncing)") {
+            .task(id: sectionToken) {
+                epgCache.activate(section: sectionToken)
                 await loadEPG(for: visible)
+                await recomputeEPGPeriodically()
+            }
+            .onChange(of: visibleCount) { _, count in
+                let page = Array(scopedStreams.prefix(count))
+                Task { await loadEPG(for: page) }
+            }
+            .onChange(of: sectionToken) {
+                visibleCount = LiveChannelQuery.pageSize
+            }
+            .onChange(of: epgSync.refreshGeneration) {
+                Task { await loadEPG(for: visible, force: true) }
             }
         }
 
-        private func loadEPG(for channels: [LiveStream]) async {
-            let channelIds = Array(Set(channels.compactMap(\.epgChannelId).filter { !$0.isEmpty }))
-            guard !channelIds.isEmpty else {
-                epgByChannel = [:]
-                return
+        private func loadEPG(for channels: [LiveStream], force: Bool = false) async {
+            guard !channels.isEmpty else { return }
+            let targets = force ? channels : epgCache.channelsNeedingLoad(channels)
+            guard !targets.isEmpty else { return }
+
+            let loaded = await EPGBrowseLoader.load(
+                container: modelContext.container,
+                channels: targets,
+                playlist: playlist
+            )
+            guard !Task.isCancelled else { return }
+
+            epgCache.merge(section: sectionToken, loaded: loaded)
+        }
+
+        /// Re-derives now/next from already-fetched programme lists once a
+        /// minute, with no network call — otherwise a row keeps showing whatever
+        /// was "now" at the last fetch even after that programme ended.
+        private func recomputeEPGPeriodically() async {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(60))
+                guard !Task.isCancelled else { return }
+                recomputeEPGFromCache()
             }
-            let container = modelContext.container
-            let now = Date()
-            epgByChannel = await Task.detached(priority: .userInitiated) {
-                ChannelEPGLoader.load(container: container, channelIds: channelIds, now: now)
-            }.value
+        }
+
+        private func recomputeEPGFromCache() {
+            epgCache.recomputeNowNext()
         }
 
         /// Clears a channel's watch timestamp so it drops out of the Recently
@@ -153,7 +191,15 @@
                                 .font(.system(size: 22))
                                 .foregroundStyle(tertiaryColor)
                             }
-                        } else if stream.epgChannelId != nil {
+                        } else if let next = nextEPG {
+                            Text(next.title)
+                                .font(.system(size: 25))
+                                .foregroundStyle(secondaryColor)
+                                .lineLimit(1)
+                            Text(next.start, style: .time)
+                                .font(.system(size: 22))
+                                .foregroundStyle(tertiaryColor)
+                        } else if stream.epgChannelId != nil || epg != nil {
                             Text("No EPG data")
                                 .font(.system(size: 22))
                                 .foregroundStyle(tertiaryColor)
@@ -225,6 +271,8 @@
         /// The active playlist's id prefix, needed to scope the virtual
         /// (favorites / recently watched) collections in-memory.
         let playlistPrefix: String
+        let playlist: Playlist?
+        @Bindable var epgCache: LiveTVSectionEPGCache
 
         private var layoutMode: LiveTVLayoutMode {
             LiveTVLayoutMode(rawValue: layoutModeRaw) ?? .list
@@ -248,15 +296,39 @@
         @ViewBuilder
         private var content: some View {
             if let section = displayedSection {
-                switch layoutMode {
-                case .guide:
-                    EPGGuideView(scope: section.scope, playlistPrefix: playlistPrefix, sort: contentSort, onPlay: onPlay)
-                        .id("\(section.id)-\(contentSort.rawValue)-guide")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                case .list:
-                    TVChannelsList(scope: section.scope, playlistPrefix: playlistPrefix, sort: contentSort, onPlay: onPlay)
-                        .id("\(section.id)-\(contentSort.rawValue)-list")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                let token = section.id
+                ZStack {
+                    TVChannelsList(
+                        scope: section.scope,
+                        playlistPrefix: playlistPrefix,
+                        playlist: playlist,
+                        sort: contentSort,
+                        sectionToken: token,
+                        epgCache: epgCache,
+                        onPlay: onPlay
+                    )
+                    .opacity(layoutMode == .list ? 1 : 0)
+                    .allowsHitTesting(layoutMode == .list)
+                    .accessibilityHidden(layoutMode != .list)
+
+                    EPGGuideView(
+                        scope: section.scope,
+                        playlistPrefix: playlistPrefix,
+                        playlist: playlist,
+                        sort: contentSort,
+                        sectionToken: token,
+                        epgCache: epgCache,
+                        onPlay: onPlay
+                    )
+                    .opacity(layoutMode == .guide ? 1 : 0)
+                    .allowsHitTesting(layoutMode == .guide)
+                    .accessibilityHidden(layoutMode != .guide)
+                }
+                .id(contentSort.rawValue)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .onAppear { epgCache.activate(section: token) }
+                .onChange(of: token) { _, newToken in
+                    epgCache.activate(section: newToken)
                 }
             } else {
                 ContentUnavailableView(

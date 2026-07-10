@@ -126,6 +126,56 @@ struct EPGChannelRow: Identifiable {
 // MARK: - Builder
 
 enum EPGGridBuilder {
+    static func cells(for programs: [EPGProgram], timeline: EPGTimeline) -> [EPGProgramCell] {
+        var cells: [EPGProgramCell] = []
+        var cursor = timeline.start
+
+        for program in programs {
+            let clampedStart = max(program.start, timeline.start)
+            let clampedEnd = min(program.end, timeline.end)
+            guard clampedEnd > clampedStart else { continue }
+
+            if clampedStart > cursor {
+                cells.append(gap(from: cursor, to: clampedStart, timeline: timeline))
+            }
+
+            cells.append(EPGProgramCell(
+                id: program.id,
+                title: program.title,
+                detail: program.description,
+                start: clampedStart,
+                end: clampedEnd,
+                listingID: program.id,
+                isGap: false,
+                width: timeline.width(from: clampedStart, to: clampedEnd)
+            ))
+            cursor = clampedEnd
+        }
+
+        if cursor < timeline.end {
+            cells.append(gap(from: cursor, to: timeline.end, timeline: timeline))
+        }
+
+        return cells
+    }
+
+    /// Builds one row per stream from on-demand programme data.
+    @MainActor
+    static func rows(
+        streams: [LiveStream],
+        programsByChannel: [String: [EPGProgram]],
+        timeline: EPGTimeline
+    ) -> [EPGChannelRow] {
+        streams.map { stream in
+            let programs = programsByChannel[stream.primaryEPGChannelId] ?? []
+            return EPGChannelRow(
+                id: stream.id,
+                stream: stream,
+                cells: cells(for: programs, timeline: timeline)
+            )
+        }
+    }
+
     /// Builds one row per stream, tiling each channel's listings across the
     /// window. `listingsByChannel` is expected to be grouped by `channelId` and
     /// sorted ascending by `start`.
@@ -136,7 +186,7 @@ enum EPGGridBuilder {
         timeline: EPGTimeline
     ) -> [EPGChannelRow] {
         streams.map { stream in
-            let listings = stream.epgChannelId.flatMap { listingsByChannel[$0] } ?? []
+            let listings = stream.epgListings(in: listingsByChannel)
             return EPGChannelRow(
                 id: stream.id,
                 stream: stream,

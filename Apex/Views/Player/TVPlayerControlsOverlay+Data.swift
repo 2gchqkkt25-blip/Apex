@@ -45,7 +45,7 @@
             case .live:
                 guard let stream = TVPlayerContent.liveStream(for: media.contentRef, in: modelContext) else { return }
                 liveStream = stream
-                let listings = TVPlayerContent.epgListings(channelId: stream.epgChannelId, in: modelContext)
+                let listings = TVPlayerContent.epgListings(for: stream, in: modelContext)
                 let now = Date()
                 epgNow = listings.first { $0.start <= now && now < $0.end }
                 epgNext = listings.first { $0.start > now }

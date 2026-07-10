@@ -42,17 +42,35 @@ struct LiveTVView: View {
     private var categories: [Category]
 
     /// Drives whether the Favorites / Recently Watched virtual sections appear in
-    /// the rail. Queried across all playlists, then scoped in-memory by prefix.
-    @Query(filter: #Predicate<LiveStream> { $0.isFavorite && $0.isHidden == false })
-    private var favoriteStreams: [LiveStream]
-    @Query(filter: #Predicate<LiveStream> { $0.lastWatchedDate != nil && $0.isHidden == false })
-    private var recentStreams: [LiveStream]
+    /// the rail. Capped like Home's collection queries — an unbounded fetch of
+    /// every favorite across a 28K library re-runs on every main-context merge.
+    @Query private var favoriteStreams: [LiveStream]
+    @Query private var recentStreams: [LiveStream]
+
+    init() {
+        var favorites = FetchDescriptor<LiveStream>(
+            predicate: #Predicate { $0.isFavorite && $0.isHidden == false },
+            sortBy: [SortDescriptor(\.name)]
+        )
+        favorites.fetchLimit = 50
+        _favoriteStreams = Query(favorites)
+
+        var recents = FetchDescriptor<LiveStream>(
+            predicate: #Predicate { $0.lastWatchedDate != nil && $0.isHidden == false },
+            sortBy: [SortDescriptor(\.lastWatchedDate, order: .reverse)]
+        )
+        recents.fetchLimit = 30
+        _recentStreams = Query(recents)
+    }
 
     @AppStorage(PlaylistSelectionStore.key) private var selectedPlaylistID: String = ""
     @State private var selectedSection: LiveTVSection?
     @State private var showingSync = false
     @State private var playingMedia: PlayableMedia?
     @State private var showingSettings = false
+    /// Shared list + guide EPG cache — survives list↔guide toggles and category
+    /// switches (Build 19). SwiftData remains source of truth.
+    @State private var epgCache = LiveTVSectionEPGCache()
 
     @AppStorage(SortStorageKey.liveCategories) private var categorySortRaw: String = CategorySortOption.playlist.rawValue
     @AppStorage(SortStorageKey.liveContent) private var contentSortRaw: String = ContentSortOption.playlist.rawValue
@@ -83,28 +101,59 @@ struct LiveTVView: View {
 
     /// The channel detail area for the selected section, honouring the current
     /// layout mode. Shared by every platform's layout.
+    @ViewBuilder
     private func detail(for section: LiveTVSection) -> some View {
-        Group {
-            if layoutMode == .guide {
-                EPGGuideView(scope: section.scope, playlistPrefix: playlistPrefix, sort: contentSort) { stream in
-                    playChannel(stream)
-                }
-            } else {
-                channelList(for: section)
+        let token = section.id
+        ZStack {
+            channelList(for: section, sectionToken: token)
+                .opacity(layoutMode == .list ? 1 : 0)
+                .allowsHitTesting(layoutMode == .list)
+                .accessibilityHidden(layoutMode != .list)
+
+            EPGGuideView(
+                scope: section.scope,
+                playlistPrefix: playlistPrefix,
+                playlist: activePlaylist,
+                sort: contentSort,
+                sectionToken: token,
+                epgCache: epgCache
+            ) { stream in
+                playChannel(stream)
             }
+            .opacity(layoutMode == .guide ? 1 : 0)
+            .allowsHitTesting(layoutMode == .guide)
+            .accessibilityHidden(layoutMode != .guide)
         }
-        .id("\(section.id)-\(contentSort.rawValue)-\(layoutModeRaw)")
+        .id(contentSort.rawValue)
+        .onAppear { epgCache.activate(section: token) }
+        .onChange(of: token) { _, newToken in
+            epgCache.activate(section: newToken)
+        }
     }
 
     @ViewBuilder
-    private func channelList(for section: LiveTVSection) -> some View {
+    private func channelList(for section: LiveTVSection, sectionToken: String) -> some View {
         #if os(tvOS)
-            TVChannelsList(scope: section.scope, playlistPrefix: playlistPrefix, sort: contentSort) { stream in
+            TVChannelsList(
+                scope: section.scope,
+                playlistPrefix: playlistPrefix,
+                playlist: activePlaylist,
+                sort: contentSort,
+                sectionToken: sectionToken,
+                epgCache: epgCache
+            ) { stream in
                 playChannel(stream)
             }
             .frame(maxWidth: .infinity)
         #else
-            ChannelsList(scope: section.scope, playlistPrefix: playlistPrefix, sort: contentSort) { stream in
+            ChannelsList(
+                scope: section.scope,
+                playlistPrefix: playlistPrefix,
+                playlist: activePlaylist,
+                sort: contentSort,
+                sectionToken: sectionToken,
+                epgCache: epgCache
+            ) { stream in
                 playChannel(stream)
             }
         #endif
@@ -249,7 +298,9 @@ struct LiveTVView: View {
                 layoutModeRaw: $layoutModeRaw,
                 contentSort: contentSort,
                 onPlay: { playChannel($0) },
-                playlistPrefix: playlistPrefix
+                playlistPrefix: playlistPrefix,
+                playlist: activePlaylist,
+                epgCache: epgCache
             )
         }
     #endif
@@ -481,34 +532,35 @@ struct CategorySidebar: View {
 struct ChannelsList: View {
     let scope: LiveChannelScope
     let playlistPrefix: String
+    let playlist: Playlist?
+    let sectionToken: String
+  @Bindable var epgCache: LiveTVSectionEPGCache
     let onPlay: (LiveStream) -> Void
     @Environment(\.modelContext) private var modelContext
     @Environment(\.contentRestriction) private var restriction
     @Query private var streams: [LiveStream]
-    /// Now/next EPG for the visible channels, resolved in one off-main fetch
-    /// (see `ChannelEPGSnapshot`) instead of a per-card `@Query`.
-    @State private var epgByChannel: [String: ChannelEPG] = [:]
-    /// Observed so the EPG lookup refreshes when a guide import finishes.
+    /// Observed only so the list can refresh after a manual guide sync finishes.
     @State private var epgSync = EPGSyncService.shared
     /// How many channels are currently rendered. Grows by a page as the list
     /// nears its end so a large category loads lazily instead of all at once.
     @State private var visibleCount = LiveChannelQuery.pageSize
 
-    init(scope: LiveChannelScope, playlistPrefix: String, sort: ContentSortOption, onPlay: @escaping (LiveStream) -> Void) {
+    init(
+        scope: LiveChannelScope,
+        playlistPrefix: String,
+        playlist: Playlist?,
+        sort: ContentSortOption,
+        sectionToken: String,
+        epgCache: LiveTVSectionEPGCache,
+        onPlay: @escaping (LiveStream) -> Void
+    ) {
         self.scope = scope
         self.playlistPrefix = playlistPrefix
+        self.playlist = playlist
+        self.sectionToken = sectionToken
+        self._epgCache = Bindable(epgCache)
         self.onPlay = onPlay
         _streams = Query(LiveChannelQuery.descriptor(for: scope, sort: sort))
-    }
-
-    /// Bumps when the user picks a different category / collection so pagination
-    /// and prefetch state don't leak from the previous section.
-    private var sectionToken: String {
-        switch scope {
-        case let .category(id): "cat-\(id)"
-        case .favorites: "favorites"
-        case .recentlyWatched: "recent"
-        }
     }
 
     private var scopedStreams: [LiveStream] {
@@ -526,19 +578,29 @@ struct ChannelsList: View {
     var body: some View {
         let channels = scopedStreams
         let visible = Array(channels.prefix(visibleCount))
-        #if os(iOS)
-            channelListIOS(visible: visible, channels: channels)
-                .id(sectionToken)
-                .onChange(of: sectionToken) {
-                    visibleCount = LiveChannelQuery.pageSize
-                }
-        #else
-            channelListScroll(visible: visible, channels: channels)
-                .id(sectionToken)
-                .onChange(of: sectionToken) {
-                    visibleCount = LiveChannelQuery.pageSize
-                }
-        #endif
+        Group {
+            #if os(iOS)
+                channelListIOS(visible: visible, channels: channels)
+            #else
+                channelListScroll(visible: visible, channels: channels)
+            #endif
+        }
+        .task(id: sectionToken) {
+            epgCache.activate(section: sectionToken)
+            await loadEPG(for: visible)
+            await ChannelLogoLoader.prefetch(visible.compactMap(\.iconURL))
+            await recomputeEPGPeriodically()
+        }
+        .onChange(of: sectionToken) {
+            visibleCount = LiveChannelQuery.pageSize
+        }
+        .onChange(of: epgSync.refreshGeneration) {
+            Task { await loadEPG(for: visible, force: true) }
+        }
+        .onChange(of: visibleCount) { _, count in
+            let page = Array(scopedStreams.prefix(count))
+            Task { await loadEPG(for: page) }
+        }
     }
 
     #if os(iOS)
@@ -555,7 +617,7 @@ struct ChannelsList: View {
                     .listRowBackground(Color.clear)
                 } else {
                     ForEach(visible) { stream in
-                        LiveStreamCardView(stream: stream, epg: epgByChannel[stream.epgChannelId ?? ""])
+                        LiveStreamCardView(stream: stream, epg: epgCache.epgByChannel[stream.primaryEPGChannelId])
                             .contentShape(Rectangle())
                             .onTapGesture { onPlay(stream) }
                             .id(stream.id)
@@ -573,10 +635,6 @@ struct ChannelsList: View {
             #if !os(tvOS)
                 .scrollContentBackground(.hidden)
             #endif
-            .task(id: "\(sectionToken)-\(visible.count)-\(epgSync.isSyncing)") {
-                await loadEPG(for: visible)
-                await ChannelLogoLoader.prefetch(visible.compactMap(\.iconURL))
-            }
         }
     #endif
 
@@ -591,7 +649,7 @@ struct ChannelsList: View {
                     )
                 } else {
                     ForEach(visible) { stream in
-                        LiveStreamCardView(stream: stream, epg: epgByChannel[stream.epgChannelId ?? ""])
+                        LiveStreamCardView(stream: stream, epg: epgCache.epgByChannel[stream.primaryEPGChannelId])
                             .padding(.horizontal)
                             .contentShape(Rectangle())
                             .onTapGesture { onPlay(stream) }
@@ -609,23 +667,39 @@ struct ChannelsList: View {
                 }
             }
         }
-        .task(id: "\(sectionToken)-\(visible.count)-\(epgSync.isSyncing)") {
-            await loadEPG(for: visible)
-            await ChannelLogoLoader.prefetch(visible.compactMap(\.iconURL))
+    }
+
+    /// Re-derives now/next from already-fetched programme lists once a minute,
+    /// with no network call. Without this, a card kept showing whatever was
+    /// "now" at the last fetch even after that programme ended — the guide
+    /// looked fresh but the label the user saw before tapping play could be
+    /// well out of date.
+    private func recomputeEPGPeriodically() async {
+        while !Task.isCancelled {
+            try? await Task.sleep(for: .seconds(60))
+            guard !Task.isCancelled else { return }
+            recomputeEPGFromCache()
         }
     }
 
-    private func loadEPG(for channels: [LiveStream]) async {
-        let channelIds = Array(Set(channels.compactMap(\.epgChannelId).filter { !$0.isEmpty }))
-        guard !channelIds.isEmpty else {
-            epgByChannel = [:]
-            return
-        }
-        let container = modelContext.container
-        let now = Date()
-        epgByChannel = await Task.detached(priority: .userInitiated) {
-            ChannelEPGLoader.load(container: container, channelIds: channelIds, now: now)
-        }.value
+    private func recomputeEPGFromCache() {
+        epgCache.recomputeNowNext()
+    }
+
+    /// Loads EPG for channels missing from the shared section cache.
+    private func loadEPG(for channels: [LiveStream], force: Bool = false) async {
+        guard !channels.isEmpty else { return }
+        let targets = force ? channels : epgCache.channelsNeedingLoad(channels)
+        guard !targets.isEmpty else { return }
+
+        let loaded = await EPGBrowseLoader.load(
+            container: modelContext.container,
+            channels: targets,
+            playlist: playlist
+        )
+        guard !Task.isCancelled else { return }
+
+        epgCache.merge(section: sectionToken, loaded: loaded)
     }
 }
 

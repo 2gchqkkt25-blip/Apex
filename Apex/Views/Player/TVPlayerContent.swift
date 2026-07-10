@@ -76,24 +76,35 @@
         /// keyed by EPG channel id — a single fetch that backs the subtitle line
         /// on each card in the "Recent" rail.
         static func nowProgrammeTitles(for channels: [LiveStream], in context: ModelContext) -> [String: String] {
-            let epgIds = Set(channels.compactMap(\.epgChannelId).filter { !$0.isEmpty })
+            let epgIds = Set(channels.flatMap(\.epgLookupIDs))
             guard !epgIds.isEmpty else { return [:] }
             let now = Date()
             let descriptor = FetchDescriptor<EPGListing>(
                 predicate: #Predicate { epgIds.contains($0.channelId) && $0.start <= now && now < $0.end }
             )
             let listings = (try? context.fetch(descriptor)) ?? []
-            return Dictionary(listings.map { ($0.channelId, $0.title) }, uniquingKeysWith: { first, _ in first })
+            let titlesByChannel = Dictionary(listings.map { ($0.channelId, $0.title) }, uniquingKeysWith: { first, _ in first })
+            var result: [String: String] = [:]
+            for channel in channels {
+                for key in channel.epgLookupIDs {
+                    if let title = titlesByChannel[key] {
+                        result[channel.primaryEPGChannelId] = title
+                        break
+                    }
+                }
+            }
+            return result
         }
 
         // MARK: - EPG
 
         /// Upcoming/ongoing EPG listings for a channel, soonest first.
-        static func epgListings(channelId: String?, in context: ModelContext) -> [EPGListing] {
-            guard let channelId, !channelId.isEmpty else { return [] }
+        static func epgListings(for stream: LiveStream, in context: ModelContext) -> [EPGListing] {
+            let ids = stream.epgLookupIDs
+            guard !ids.isEmpty else { return [] }
             let now = Date()
             let descriptor = FetchDescriptor<EPGListing>(
-                predicate: #Predicate { $0.channelId == channelId && $0.end > now },
+                predicate: #Predicate { ids.contains($0.channelId) && $0.end > now },
                 sortBy: [SortDescriptor(\.start)]
             )
             return (try? context.fetch(descriptor)) ?? []
@@ -104,6 +115,31 @@
         /// so already-aired programmes are available to replay; otherwise it
         /// returns only what's airing now and later. The `channelId + end` index
         /// keeps this to a small slice of the guide table.
+        static func guideListings(for stream: LiveStream, archiveDays: Int, in context: ModelContext) -> [EPGListing] {
+            let ids = stream.epgLookupIDs
+            guard !ids.isEmpty else { return [] }
+            let now = Date()
+            let earliest = archiveDays > 0
+                ? Calendar.current.date(byAdding: .day, value: -archiveDays, to: now) ?? now
+                : now
+            let descriptor = FetchDescriptor<EPGListing>(
+                predicate: #Predicate { ids.contains($0.channelId) && $0.end > earliest },
+                sortBy: [SortDescriptor(\.start)]
+            )
+            return (try? context.fetch(descriptor)) ?? []
+        }
+
+        /// Legacy single-id lookup — prefer `epgListings(for:in:)`.
+        static func epgListings(channelId: String?, in context: ModelContext) -> [EPGListing] {
+            guard let channelId, !channelId.isEmpty else { return [] }
+            let now = Date()
+            let descriptor = FetchDescriptor<EPGListing>(
+                predicate: #Predicate { $0.channelId == channelId && $0.end > now },
+                sortBy: [SortDescriptor(\.start)]
+            )
+            return (try? context.fetch(descriptor)) ?? []
+        }
+
         static func guideListings(channelId: String?, archiveDays: Int, in context: ModelContext) -> [EPGListing] {
             guard let channelId, !channelId.isEmpty else { return [] }
             let now = Date()

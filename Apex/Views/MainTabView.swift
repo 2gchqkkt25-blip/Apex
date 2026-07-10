@@ -39,12 +39,9 @@ struct MainTabView: View {
     /// that's already been handled.
     @State private var autoSyncAttempted: Set<UUID> = []
 
-    #if os(tvOS)
-        /// Browse tabs mount on first selection only. tvOS `TabView` keeps every
-        /// tab's `@Query`s live once mounted — with six tabs and a 20k+ library,
-        /// mounting them all at launch pins the main thread for minutes.
-        @State private var activatedTabs: Set<AppTab> = [.home]
-    #endif
+    /// Browse tabs mount on first selection only. Mounting every tab at launch
+    /// pins the main thread with parallel `@Query`s on large libraries.
+    @State private var activatedTabs: Set<AppTab> = [.home]
 
     private var syncFrequency: SyncFrequency {
         SyncFrequency.resolve(syncFrequencyRaw)
@@ -110,86 +107,96 @@ struct MainTabView: View {
         private func tabView(selection: Binding<AppTab>) -> some View {
             TabView(selection: selection) {
                 Tab(value: AppTab.search) {
-                    tvTab(.search) { SearchView() }
+                    lazyTab(.search, selection: selection.wrappedValue) { SearchView() }
                 } label: {
                     Image(systemName: "magnifyingglass")
                 }
 
                 Tab(value: AppTab.home) {
-                    tvTab(.home) { HomeView() }
+                    lazyTab(.home, selection: selection.wrappedValue) { HomeView() }
                 } label: {
                     Text("Home")
                 }
 
                 Tab(value: AppTab.movies) {
-                    tvTab(.movies) { MoviesView() }
+                    lazyTab(.movies, selection: selection.wrappedValue) { MoviesView() }
                 } label: {
                     Text("Movies")
                 }
 
                 Tab(value: AppTab.series) {
-                    tvTab(.series) { SeriesView() }
+                    lazyTab(.series, selection: selection.wrappedValue) { SeriesView() }
                 } label: {
                     Text("Series")
                 }
 
                 Tab(value: AppTab.liveTV) {
-                    tvTab(.liveTV) { LiveTVView() }
+                    lazyTab(.liveTV, selection: selection.wrappedValue) { LiveTVView() }
                 } label: {
                     Text("Live TV")
                 }
 
                 Tab(value: AppTab.settings) {
-                    tvTab(.settings) { SettingsView() }
+                    lazyTab(.settings, selection: selection.wrappedValue) { SettingsView() }
                 } label: {
                     Image(systemName: "gear")
                 }
             }
             .onChange(of: selection.wrappedValue) { _, tab in
                 activatedTabs.insert(tab)
+                ContentIndexingService.shared.pauseForBrowse()
             }
-        }
-
-        /// Defers mounting a tab's browse surface until the user selects it (or a
-        /// deep link targets it). Home is always mounted so the launch screen is
-        /// usable immediately after sync.
-        @ViewBuilder
-        private func tvTab(_ tab: AppTab, @ViewBuilder content: () -> some View) -> some View {
-            if activatedTabs.contains(tab) {
-                content()
-            } else {
-                Color.clear
-            }
-        }
-
-        private func activateTab(_ tab: AppTab) {
-            activatedTabs.insert(tab)
         }
     #else
         private func tabView(selection: Binding<AppTab>) -> some View {
             TabView(selection: selection) {
                 Tab("Home", systemImage: "house", value: AppTab.home) {
-                    HomeView()
+                    lazyTab(.home, selection: selection.wrappedValue) { HomeView() }
                 }
 
                 Tab("Movies", systemImage: "film", value: AppTab.movies) {
-                    MoviesView()
+                    lazyTab(.movies, selection: selection.wrappedValue) { MoviesView() }
                 }
 
                 Tab("Series", systemImage: "tv", value: AppTab.series) {
-                    SeriesView()
+                    lazyTab(.series, selection: selection.wrappedValue) { SeriesView() }
                 }
 
                 Tab("Live TV", systemImage: "antenna.radiowaves.left.and.right", value: AppTab.liveTV) {
-                    LiveTVView()
+                    lazyTab(.liveTV, selection: selection.wrappedValue) { LiveTVView() }
                 }
 
                 Tab(value: AppTab.search, role: .search) {
-                    SearchView()
+                    lazyTab(.search, selection: selection.wrappedValue) { SearchView() }
                 }
+            }
+            .onChange(of: selection.wrappedValue) { _, tab in
+                activatedTabs.insert(tab)
+                ContentIndexingService.shared.pauseForBrowse()
             }
         }
     #endif
+
+    /// Defers mounting a tab's browse surface until the user selects it (or a
+    /// deep link targets it). Home is always mounted so the launch screen is
+    /// usable immediately after sync.
+    ///
+    /// Mounts synchronously when `selection == tab` so the first switch never
+    /// shows a blank frame — `onChange` alone ran one render too late and left
+    /// tabs empty until the user switched away and back.
+    @ViewBuilder
+    private func lazyTab(_ tab: AppTab, selection: AppTab, @ViewBuilder content: () -> some View) -> some View {
+        if activatedTabs.contains(tab) || selection == tab {
+            content()
+                .onAppear { activatedTabs.insert(tab) }
+        } else {
+            Color.clear
+        }
+    }
+
+    private func activateTab(_ tab: AppTab) {
+        activatedTabs.insert(tab)
+    }
 
     // MARK: - Deep links
 
@@ -202,17 +209,13 @@ struct MainTabView: View {
         switch link {
         case let .movie(tmdbId):
             guard let movie = resolveMovie(tmdbId: tmdbId) else { return }
-            #if os(tvOS)
-                activateTab(.movies)
-            #endif
+            activateTab(.movies)
             router.selectedTab = .movies
             router.moviesPath = NavigationPath()
             router.moviesPath.append(movie)
         case let .series(tmdbId):
             guard let series = resolveSeries(tmdbId: tmdbId) else { return }
-            #if os(tvOS)
-                activateTab(.series)
-            #endif
+            activateTab(.series)
             router.selectedTab = .series
             router.seriesPath = NavigationPath()
             router.seriesPath.append(series)
