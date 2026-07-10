@@ -54,8 +54,17 @@ final nonisolated class ImageMemoryCache: @unchecked Sendable {
     private let cache = NSCache<NSString, PlatformImage>()
 
     private init() {
-        // ~256 MB of decoded pixels; NSCache also purges on memory warnings.
-        cache.totalCostLimit = 256 * 1024 * 1024
+        // NSCache also purges on memory warnings, but the ceiling matters: a
+        // decoded-image cache sized for the whole process is a prime jetsam
+        // target. Apple TV has a far tighter per-app memory budget than
+        // iPhone/iPad, so keep its ceiling small and lean on the disk cache for
+        // cheap re-decodes. iOS/iPadOS/macOS keep the generous ceiling for
+        // smooth poster scrolling.
+        #if os(tvOS)
+            cache.totalCostLimit = 64 * 1024 * 1024
+        #else
+            cache.totalCostLimit = 256 * 1024 * 1024
+        #endif
         #if canImport(UIKit)
             // NSCache evicts under pressure on its own, but silently and only
             // reactively. Observe the explicit warning too so we drop *all* decoded
@@ -112,6 +121,31 @@ final nonisolated class ImageMemoryCache: @unchecked Sendable {
     func purge(reason: String) {
         cache.removeAllObjects()
         Logger.memory.notice("Image memory cache purged (\(reason, privacy: .public))")
+    }
+
+    // MARK: - Deferred purge
+
+    /// A background purge fires after a delay so brief app switches (e.g.
+    /// checking a notification, switching to Messages for 3 seconds) don't wipe
+    /// the image cache and flash spinners on every cover when the user returns.
+    private var deferredPurgeWork: DispatchWorkItem?
+    private static let deferredPurgeDelay: TimeInterval = 8
+
+    /// Schedules a cache purge after a delay. If the user returns to the app
+    /// before the delay fires, `cancelDeferredPurge()` prevents it.
+    func scheduleDeferredPurge() {
+        cancelDeferredPurge()
+        let work = DispatchWorkItem { [weak self] in
+            self?.purge(reason: "app backgrounded (extended)")
+        }
+        deferredPurgeWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.deferredPurgeDelay, execute: work)
+    }
+
+    /// Cancels a pending deferred purge (user returned to foreground quickly).
+    func cancelDeferredPurge() {
+        deferredPurgeWork?.cancel()
+        deferredPurgeWork = nil
     }
 }
 

@@ -37,7 +37,7 @@ final class CloudSyncCoordinator {
     /// would fire its own full reconcile pass. Collapsing a burst into one pass
     /// matters most now that every pass scans the user-data store.
     private var reconcileDebounceTask: Task<Void, Never>?
-    private static let reconcileDebounceDelay: Duration = .milliseconds(600)
+    private static let reconcileDebounceDelay: Duration = .seconds(2)
 
     /// Set once the launch-time sync is judged settled; the initial-sync gate
     /// (`status.hasCompletedInitialSync`) then opens after the next reconcile
@@ -97,6 +97,12 @@ final class CloudSyncCoordinator {
         // Account is usable: pull anything CloudKit already imported, and arm a
         // safety-net timeout so an offline launch (or a brand-new empty account
         // that never reports an import) can't spin forever.
+        //
+        // Defer the reconcile briefly so the UI can paint its first frame from
+        // cached local store data. On TestFlight (production CloudKit), the
+        // reconcile's save triggers main-context merges that freeze all @Query
+        // views — deferring means that freeze doesn't overlap with first paint.
+        try? await Task.sleep(for: .seconds(2))
         reconcile(reason: .launch)
         scheduleInitialSyncTimeout()
     }
@@ -106,12 +112,17 @@ final class CloudSyncCoordinator {
         switch phase {
         case .active:
             Task { await refreshAccountStatus() }
-            // Don't scan on a bare foreground. CloudKit's reconnect posts its own
-            // import event when remote data actually arrives, and that drives the
-            // pull; a foreground with nothing imported has nothing to merge, and
-            // that empty pass — plus the `@Query` refresh it triggers over the
-            // whole catalog — is what froze the app on tvOS.
-            reconcile(reason: .foreground)
+            // Defer foreground reconcile briefly: on TestFlight (production APS),
+            // CloudKit imports data while the app is backgrounded, setting
+            // cloudImportPending. Without a delay, reconcile fires immediately on
+            // foreground return and its save triggers main-context merges that
+            // freeze all @Query views (the "freeze on return" bug). A short delay
+            // lets SwiftUI finish the foreground transition and paint the cached
+            // UI first — then the reconcile runs in the background.
+            Task {
+                try? await Task.sleep(for: .seconds(1.5))
+                reconcile(reason: .foreground)
+            }
         case .background, .inactive:
             // Flush local edits now, not debounced: the system may suspend the app
             // before a delayed pass could run. Always runs — this is how a toggled

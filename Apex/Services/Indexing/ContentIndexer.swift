@@ -23,12 +23,16 @@ actor ContentIndexer {
     private let tmdbClient: TMDBClient
 
     /// Items per chunk; the context is saved and progress published once per
-    /// chunk so main-context merges stay infrequent. Kept small (20) so a save
-    /// never balloons memory on devices with large catalogs (20k+ items).
-    private let chunkSize = 20
+    /// chunk so main-context merges stay infrequent. 50 balances throughput
+    /// against memory (TMDB responses are held until save) — fewer, larger
+    /// chunks mean fewer main-context merges on 20k+ catalogs.
+    private let chunkSize = 50
     /// Pause between items — keeps TMDB traffic to a couple of requests per
     /// second at most.
     private let itemPause: Duration = .milliseconds(100)
+    /// Pause after each chunk save — gives the UI a breathing window where no
+    /// main-context merge will fire, preventing stutter during scrolling.
+    private let chunkPause: Duration = .milliseconds(500)
     /// Pause before re-checking when a sync or playback blocks indexing.
     private let busyPause: Duration = .seconds(20)
     /// First wait before retrying a failed embedding-asset download; doubles
@@ -57,9 +61,16 @@ actor ContentIndexer {
             return
         }
 
-        await status.setPreparing()
         let embedder: TextEmbedder?
         let embeddingReady: Bool
+        #if os(tvOS)
+            // NLContextualEmbedding is unavailable on tvOS — skip the model download
+            // and retry loop (15s+ wasted at every indexing pass).
+            embedder = nil
+            embeddingReady = false
+            Logger.indexing.info("Skipping TextEmbedder on tvOS — proceeding with TMDB id indexing only")
+        #else
+        await status.setPreparing()
         do {
             let model = try TextEmbedder()
             embedder = model
@@ -80,26 +91,35 @@ actor ContentIndexer {
             embedder = nil
             embeddingReady = false
         }
+        #endif
 
         Logger.indexing.info("Content index pass starting: \(counts.total - counts.indexed) of \(counts.total) titles remaining")
+        var chunksSinceTotalRefresh = 0
         while !Task.isCancelled {
-            if try await hasActiveSync() || status.isPlaybackActive || status.isCloudSyncActive {
-                Logger.indexing.debug("Indexer pausing: blocked by active sync, playback, or cloud sync")
+            if try await hasActiveSync()
+                || status.isPlaybackActive
+                || status.isCloudSyncActive
+                || status.isBrowsePaused
+                || EPGSyncGate.isActive
+            {
+                Logger.indexing.debug("Indexer pausing: blocked by active sync, playback, cloud sync, browse, or EPG import")
                 await status.setWaiting()
                 try await Task.sleep(for: busyPause)
                 continue
             }
 
-            counts = try currentCounts()
-            await status.update(indexed: counts.indexed, total: counts.total)
-
             let processed = try await indexNextChunk(embedder: embeddingReady ? embedder : nil)
             if processed == 0 { break }
-            // Each chunk save forces a main-context merge; purge the image cache
-            // to keep the resident footprint from growing unboundedly during long
-            // indexing runs (e.g. 28k-item catalogs on 4 GB devices).
-            ImageMemoryCache.shared.purge(reason: "index chunk")
-            try await Task.sleep(for: itemPause)
+            counts.indexed += processed
+            chunksSinceTotalRefresh += 1
+            // Re-count the catalog total occasionally (sync may add rows mid-pass);
+            // indexed count is incremented locally so we skip four fetchCounts per chunk.
+            if chunksSinceTotalRefresh >= 10 {
+                counts.total = try currentCounts().total
+                chunksSinceTotalRefresh = 0
+            }
+            await status.update(indexed: counts.indexed, total: counts.total)
+            try await Task.sleep(for: chunkPause)
         }
 
         try Task.checkCancellation()
@@ -286,20 +306,12 @@ actor ContentIndexer {
             }
         }
 
-        var details: TMDBTitleDetails?
-        if item.needsEnrichment, let tmdbId {
-            details = try await skippingPermanentFailures {
-                switch item.kind {
-                case .movie: try await self.tmdbClient.movieDetails(tmdbId)
-                case .series: try await self.tmdbClient.tvDetails(tmdbId)
-                }
-            }
-            if details == nil {
-                Logger.indexing.debug("[Details] No TMDB enrichment for \(item.kind) \(item.id) (tmdbId \(tmdbId))")
-            }
-        }
-
-        return IndexResult(item: item, resolvedTMDBId: tmdbId, details: details)
+        // Background indexing resolves TMDB ids for search/matching only.
+        // Full metadata (plot, cast, backdrops, OMDb ratings) loads on-demand
+        // when the user opens a detail screen — fetching details for every title
+        // in a 28K catalog hammers TMDB, saturates cellular, and each chunk save
+        // re-runs every browse @Query via main-context merge.
+        return IndexResult(item: item, resolvedTMDBId: tmdbId, details: nil)
     }
 
     /// Re-fetches the title on the write context and applies the resolved TMDB

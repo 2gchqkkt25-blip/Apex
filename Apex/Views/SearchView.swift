@@ -35,6 +35,8 @@ struct SearchView: View {
     #if os(tvOS)
         @State private var categoryArtwork: [String: URL] = [:]
     #endif
+    @State private var movieGenres: [String] = []
+    @State private var seriesGenres: [String] = []
 
     /// Max matches fetched per content type. Keeps the result set bounded so the
     /// list stays responsive even when a playlist holds tens of thousands of items.
@@ -44,53 +46,59 @@ struct SearchView: View {
         searchText.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    private var movieCategorySort: CategorySortOption {
+        CategorySortOption(rawValue: movieCategorySortRaw) ?? .playlist
+    }
+
+    private var seriesCategorySort: CategorySortOption {
+        CategorySortOption(rawValue: seriesCategorySortRaw) ?? .playlist
+    }
+
+    private var playlistPrefix: String {
+        activePlaylist.map { "\($0.id.uuidString)-" } ?? ""
+    }
+
+    /// Genre browse only runs when the search field is empty — typing a query
+    /// shouldn't kick a 5K-row genre sample fetch on every keystroke's cancel.
+    private var genreBrowseTaskKey: String {
+        "\(playlistPrefix)|empty-\(trimmedQuery.isEmpty)"
+    }
+
+    private var sortedMovieCategories: [Category] {
+        guard let playlistId = activePlaylist?.id else { return [] }
+        let prefix = "\(playlistId.uuidString)-"
+        return movieCategorySort.sort(
+            movieCategoriesQuery.filter { $0.id.hasPrefix(prefix) && !restriction.hides(categoryID: $0.id) }
+        )
+    }
+
+    private var sortedSeriesCategories: [Category] {
+        guard let playlistId = activePlaylist?.id else { return [] }
+        let prefix = "\(playlistId.uuidString)-"
+        return seriesCategorySort.sort(
+            seriesCategoriesQuery.filter { $0.id.hasPrefix(prefix) && !restriction.hides(categoryID: $0.id) }
+        )
+    }
+
     #if os(tvOS)
-        private var movieCategorySort: CategorySortOption {
-            CategorySortOption(rawValue: movieCategorySortRaw) ?? .playlist
-        }
-
-        private var seriesCategorySort: CategorySortOption {
-            CategorySortOption(rawValue: seriesCategorySortRaw) ?? .playlist
-        }
-
-        private var playlistPrefix: String {
-            activePlaylist.map { "\($0.id.uuidString)-" } ?? ""
-        }
-
-        private var sortedMovieCategories: [Category] {
-            guard let playlistId = activePlaylist?.id else { return [] }
-            let prefix = "\(playlistId.uuidString)-"
-            return movieCategorySort.sort(
-                movieCategoriesQuery.filter { $0.id.hasPrefix(prefix) && !restriction.hides(categoryID: $0.id) }
-            )
-        }
-
-        private var sortedSeriesCategories: [Category] {
-            guard let playlistId = activePlaylist?.id else { return [] }
-            let prefix = "\(playlistId.uuidString)-"
-            return seriesCategorySort.sort(
-                seriesCategoriesQuery.filter { $0.id.hasPrefix(prefix) && !restriction.hides(categoryID: $0.id) }
-            )
-        }
-
-        private var categoryArtworkTaskKey: String {
-            let ids = (sortedMovieCategories + sortedSeriesCategories).map(\.id).joined(separator: ",")
-            return "\(playlistPrefix)|\(movieCategorySortRaw)|\(seriesCategorySortRaw)|\(ids)"
-        }
+    private var categoryArtworkTaskKey: String {
+        let ids = (sortedMovieCategories + sortedSeriesCategories).map(\.id).joined(separator: ",")
+        return "\(playlistPrefix)|\(movieCategorySortRaw)|\(seriesCategorySortRaw)|\(ids)"
+    }
     #endif
 
     var body: some View {
         NavigationStack {
             Group {
-                #if os(tvOS)
-                    if trimmedQuery.isEmpty {
-                        tvOSCategoryBrowse
-                    } else {
-                        searchResultsList
-                    }
-                #else
+                if trimmedQuery.isEmpty {
+                    #if os(tvOS)
+                    tvOSCategoryBrowse
+                    #else
+                    categoryBrowse
+                    #endif
+                } else {
                     searchResultsList
-                #endif
+                }
             }
             .platformNavigationTitle("Search")
             #if !os(tvOS)
@@ -119,6 +127,16 @@ struct SearchView: View {
                         MovieCategoryView(category: category, animationNamespace: animationNamespace)
                     case .series:
                         SeriesCategoryView(category: category, animationNamespace: animationNamespace)
+                    case .live:
+                        EmptyView()
+                    }
+                }
+                .navigationDestination(for: GenreSelection.self) { selection in
+                    switch selection.type {
+                    case .vod:
+                        MovieGenreView(genre: selection.genre, playlistPrefix: playlistPrefix, animationNamespace: animationNamespace)
+                    case .series:
+                        SeriesGenreView(genre: selection.genre, playlistPrefix: playlistPrefix, animationNamespace: animationNamespace)
                     case .live:
                         EmptyView()
                     }
@@ -154,6 +172,17 @@ struct SearchView: View {
                         )
                     }
                 #endif
+                .task(id: genreBrowseTaskKey) {
+                    guard trimmedQuery.isEmpty else {
+                        movieGenres = []
+                        seriesGenres = []
+                        return
+                    }
+                    async let movies = GenreDerivation.movieGenres(in: modelContext.container, playlistPrefix: playlistPrefix, restriction: restriction)
+                    async let series = GenreDerivation.seriesGenres(in: modelContext.container, playlistPrefix: playlistPrefix, restriction: restriction)
+                    movieGenres = await movies
+                    seriesGenres = await series
+                }
         }
         #if os(iOS)
         .fullScreenCover(item: $playingMedia) { media in
@@ -200,6 +229,46 @@ struct SearchView: View {
                 }
             }
         }
+    #endif
+
+    #if !os(tvOS)
+    @ViewBuilder
+    private var categoryBrowse: some View {
+        if playlists.isEmpty {
+            ContentUnavailableView(
+                "No Playlists",
+                systemImage: "magnifyingglass",
+                description: Text("Add a playlist to browse categories and genres")
+            )
+        } else if sortedMovieCategories.isEmpty, sortedSeriesCategories.isEmpty, movieGenres.isEmpty, seriesGenres.isEmpty {
+            ContentUnavailableView(
+                "Search",
+                systemImage: "magnifyingglass",
+                description: Text("Search for movies, series, or live TV channels")
+            )
+        } else {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 24) {
+                    if !movieGenres.isEmpty {
+                        GenreGridSection(genres: movieGenres, type: .vod)
+                    }
+
+                    if !sortedMovieCategories.isEmpty {
+                        CategoryGridSection(title: "Movie Categories", categories: sortedMovieCategories)
+                    }
+
+                    if !seriesGenres.isEmpty {
+                        GenreGridSection(genres: seriesGenres, type: .series)
+                    }
+
+                    if !sortedSeriesCategories.isEmpty {
+                        CategoryGridSection(title: "Series Categories", categories: sortedSeriesCategories)
+                    }
+                }
+                .padding(.vertical)
+            }
+        }
+    }
     #endif
 
     @ViewBuilder

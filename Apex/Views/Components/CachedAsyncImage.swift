@@ -99,7 +99,20 @@ private struct CachedAsyncImageLoader<Content: View>: View {
             return
         }
 
-        phase = .empty
+        // Only show the empty/loading state if we have never successfully loaded
+        // this image before in this view's lifetime. When a `@Query` re-evaluation
+        // recreates us and the memory cache was evicted (e.g. after a brief
+        // background), keep showing the previous phase (which is `.empty` for a
+        // truly new load, or `.success` if `.id(taskID)` matched — though `.id`
+        // reset means we'd start fresh anyway). The key insight: don't set
+        // `.empty` here if we already have a success — let the disk load finish
+        // without flashing a spinner.
+        if case .success = phase {
+            // Already showing an image from a previous load — keep it visible while
+            // we confirm or refresh from disk/network below.
+        } else {
+            phase = .empty
+        }
 
         do {
             let image = try await ImagePipeline.shared.image(for: url, maxPixelSize: pixelSize)

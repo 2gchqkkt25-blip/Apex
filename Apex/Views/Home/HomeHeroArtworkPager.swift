@@ -44,9 +44,12 @@ struct HomeHeroArtworkPager: View {
 struct HeroBackdropImage: View {
     let url: URL?
 
+    @Environment(\.displayScale) private var displayScale
+
     var body: some View {
         GeometryReader { geo in
-            CachedAsyncImage(url: url) { phase in
+            let maxPixel = max(geo.size.width, geo.size.height) * displayScale
+            CachedAsyncImage(url: url, maxPixelSize: maxPixel) { phase in
                 switch phase {
                 case .empty:
                     Rectangle()

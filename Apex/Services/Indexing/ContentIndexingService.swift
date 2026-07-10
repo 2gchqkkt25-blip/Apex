@@ -48,6 +48,22 @@ final class ContentIndexingService {
     /// `no such table` `NSException`.
     var isCloudSyncActive = false
 
+    /// Brief pause while the user is switching tabs so chunk saves don't
+    /// re-run every mounted tab's `@Query` mid-transition.
+    private var browsePauseUntil: Date?
+
+    var isBrowsePaused: Bool {
+        guard let until = browsePauseUntil else { return false }
+        if until > Date() { return true }
+        browsePauseUntil = nil
+        return false
+    }
+
+    /// Holds indexing back while browse surfaces mount and paint.
+    func pauseForBrowse(duration: Duration = .seconds(10)) {
+        browsePauseUntil = Date().addingTimeInterval(TimeInterval(duration.components.seconds))
+    }
+
     private var container: ModelContainer?
     private var task: Task<Void, Never>?
 
@@ -68,6 +84,10 @@ final class ContentIndexingService {
     /// claimed immediately, so a second kick during the delay coalesces to a no-op.
     func kick(after delay: Duration = .zero) {
         guard let container, task == nil else { return }
+        guard !EPGSyncGate.isActive else { return }
+        // Skip on offline, cellular, or Low Data Mode — TMDB indexing is
+        // hundreds of requests that can crash a large-library device on cell.
+        guard NetworkMonitor.shared.shouldProceedWithHeavyNetworkWork() else { return }
         // Older builds could leave `.unavailable` after an embedding-model error even
         // though TMDB enrichment no longer depends on it — don't block forever.
         if state == .unavailable { state = .idle }
@@ -80,8 +100,14 @@ final class ContentIndexingService {
             }
             do {
                 try await indexer.run(status: self)
+            } catch is CancellationError where EPGSyncGate.isActive {
+                Logger.indexing.debug("Indexing paused for EPG sync")
+                state = .waiting
             } catch is CancellationError {
                 state = .interrupted
+            } catch let error as URLError where error.code == .cancelled && EPGSyncGate.isActive {
+                Logger.indexing.debug("Indexing paused for EPG sync")
+                state = .waiting
             } catch is TextEmbedder.EmbedderError {
                 state = .interrupted
                 Logger.indexing.warning("Embedding model error — TMDB indexing will retry on next kick")
@@ -90,6 +116,22 @@ final class ContentIndexingService {
                 Logger.indexing.error("Indexing pass interrupted: \(error)")
             }
         }
+    }
+
+    /// Cancels any in-flight pass so a full XMLTV refresh owns the catalog store.
+    func prepareForEPGSync() {
+        EPGSyncGate.isActive = true
+        task?.cancel()
+        task = nil
+        if state == .indexing || state == .preparing {
+            state = .waiting
+        }
+    }
+
+    /// Resumes background indexing after guide import finishes.
+    func epgSyncFinished() {
+        EPGSyncGate.isActive = false
+        kick(after: .seconds(45))
     }
 
     #if DEBUG

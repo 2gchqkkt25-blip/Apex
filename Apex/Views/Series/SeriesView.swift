@@ -24,7 +24,6 @@ struct SeriesView: View {
     @AppStorage(PlaylistSelectionStore.key) private var selectedPlaylistID: String = ""
     @State private var showingSync = false
     @State private var showingSettings = false
-    @State private var genres: [String] = []
 
     @AppStorage(SortStorageKey.seriesCategories) private var categorySortRaw: String = CategorySortOption.playlist.rawValue
     @AppStorage(SortStorageKey.seriesContent) private var contentSortRaw: String = ContentSortOption.playlist.rawValue
@@ -70,7 +69,6 @@ struct SeriesView: View {
                         )
                     }
                 } else {
-                    let remaining = Array(sorted.dropFirst(previewCategoryLimit))
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 24, pinnedViews: []) {
                             SeriesCollectionRow(kind: .recentlyWatched, playlistPrefix: playlistPrefix, animationNamespace: animationNamespace)
@@ -81,22 +79,8 @@ struct SeriesView: View {
                                 SeriesCategoryPreview(category: category, limit: previewLimit, sort: contentSort, animationNamespace: animationNamespace)
                                     .id("\(category.id)-\(contentSort.rawValue)")
                             }
-
-                            if !genres.isEmpty {
-                                GenreGridSection(genres: genres, type: .series)
-                            }
-
-                            #if !os(tvOS)
-                            if !remaining.isEmpty {
-                                CategoryGridSection(title: "All Categories", categories: remaining)
-                                    .padding(.top, 12)
-                            }
-                            #endif
                         }
                         .padding(.vertical)
-                    }
-                    .task(id: playlistPrefix) {
-                        genres = await GenreDerivation.seriesGenres(in: modelContext.container, playlistPrefix: playlistPrefix, restriction: restriction)
                     }
                 }
             }
@@ -120,9 +104,6 @@ struct SeriesView: View {
             }
             .navigationDestination(for: LibraryCollection.self) { collection in
                 SeriesCollectionView(kind: collection.kind, playlistPrefix: playlistPrefix, animationNamespace: animationNamespace)
-            }
-            .navigationDestination(for: GenreSelection.self) { selection in
-                SeriesGenreView(genre: selection.genre, playlistPrefix: playlistPrefix, animationNamespace: animationNamespace)
             }
             .navigationDestination(for: Series.self) { series in
                 SeriesDetailView(series: series, animationNamespace: animationNamespace)

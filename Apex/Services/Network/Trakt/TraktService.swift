@@ -64,15 +64,28 @@ final class TraktService {
 
     /// Restores a previously connected session at launch: loads the stored
     /// tokens, refreshes them if stale, and fetches the username. Best-effort.
+    /// Capped at 5 seconds so a slow/unreachable Trakt server doesn't stall app
+    /// launch (restore runs on the main launch .task path).
     func restore() async {
         guard isConfigured, let stored = TraktTokenStore.load() else { return }
         tokens = stored
-        guard let accessToken = await validAccessToken() else {
-            // Refresh failed (revoked/expired) — drop the dead session quietly.
-            await disconnect()
-            return
+        // Time-box the network portion — the token is already loaded from the
+        // keychain so the session is usable even if refresh/user-fetch times out.
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask { @MainActor [self] in
+                guard let accessToken = await validAccessToken() else {
+                    await disconnect()
+                    return
+                }
+                username = try? await client.currentUser(accessToken: accessToken).username
+            }
+            group.addTask {
+                try? await Task.sleep(for: .seconds(5))
+            }
+            // Return as soon as either finishes — the network call or the timeout.
+            _ = await group.next()
+            group.cancelAll()
         }
-        username = try? await client.currentUser(accessToken: accessToken).username
     }
 
     // MARK: - Connect (device flow)

@@ -59,6 +59,9 @@ private let collectionPreviewLimit = 20
 /// the active playlist, like the rest of the app).
 private let recentlyAddedFetchLimit = 200
 
+/// Page size for collection "Show All" grids — matches category grids.
+private let collectionPageSize = 100
+
 // MARK: - Shared preview row
 
 /// A titled horizontal rail with a trailing "Show All" link into the full
@@ -171,19 +174,13 @@ struct MovieCollectionView: View {
     let kind: LibraryCollection.Kind
     let playlistPrefix: String
     var animationNamespace: Namespace.ID?
+    @Environment(\.modelContext) private var modelContext
     @Environment(\.contentRestriction) private var restriction
-    @Query private var movies: [Movie]
 
-    init(kind: LibraryCollection.Kind, playlistPrefix: String, animationNamespace: Namespace.ID? = nil) {
-        self.kind = kind
-        self.playlistPrefix = playlistPrefix
-        self.animationNamespace = animationNamespace
-        _movies = Query(MovieCollectionQuery.descriptor(for: kind))
-    }
-
-    private var scoped: [Movie] {
-        movies.filter { $0.id.hasPrefix(playlistPrefix) }.excludingRestricted(restriction)
-    }
+    @State private var movies: [Movie] = []
+    @State private var canLoadMore = true
+    @State private var isLoadingPage = false
+    @State private var fetchedFromStore = 0
 
     var body: some View {
         let emptyDescription: LocalizedStringKey = switch kind {
@@ -193,15 +190,39 @@ struct MovieCollectionView: View {
         }
         CategoryContentGrid(
             title: kind.localizedTitleString,
-            items: scoped,
+            items: movies,
             animationNamespace: animationNamespace,
             emptyTitle: kind.title,
             emptyIcon: kind.emptyIcon,
             emptyDescription: emptyDescription,
             sortRaw: .constant(""),
             showsSortMenu: false,
+            onLoadMore: { loadNextPage() },
             card: { MovieCardView(movie: $0) }
         )
+        .task(id: "\(kind.rawValue)-\(playlistPrefix)") {
+            movies = []
+            fetchedFromStore = 0
+            canLoadMore = true
+            loadNextPage()
+        }
+    }
+
+    private func loadNextPage() {
+        guard canLoadMore, !isLoadingPage, !playlistPrefix.isEmpty else { return }
+        isLoadingPage = true
+        defer { isLoadingPage = false }
+        let prefix = playlistPrefix
+        let descriptor = MovieCollectionQuery.pagedDescriptor(
+            for: kind,
+            playlistPrefix: prefix,
+            offset: fetchedFromStore,
+            limit: collectionPageSize
+        )
+        let page = (try? modelContext.fetch(descriptor)) ?? []
+        fetchedFromStore += page.count
+        movies.append(contentsOf: page.excludingRestricted(restriction))
+        if page.count < collectionPageSize { canLoadMore = false }
     }
 }
 
@@ -224,7 +245,41 @@ private enum MovieCollectionQuery {
                 sortBy: [SortDescriptor(\.added, order: .reverse), SortDescriptor(\.num)]
             )
         }
-        if kind == .recentlyAdded { descriptor.fetchLimit = recentlyAddedFetchLimit }
+        switch kind {
+        case .recentlyWatched: descriptor.fetchLimit = 30
+        case .favorites: descriptor.fetchLimit = 50
+        case .recentlyAdded: descriptor.fetchLimit = recentlyAddedFetchLimit
+        }
+        return descriptor
+    }
+
+    /// Playlist-scoped page for "Show All" collection grids.
+    static func pagedDescriptor(
+        for kind: LibraryCollection.Kind,
+        playlistPrefix: String,
+        offset: Int,
+        limit: Int
+    ) -> FetchDescriptor<Movie> {
+        let prefix = playlistPrefix
+        var descriptor = switch kind {
+        case .recentlyWatched:
+            FetchDescriptor<Movie>(
+                predicate: #Predicate { $0.lastWatchedDate != nil && $0.id.starts(with: prefix) },
+                sortBy: [SortDescriptor(\.lastWatchedDate, order: .reverse)]
+            )
+        case .favorites:
+            FetchDescriptor<Movie>(
+                predicate: #Predicate { $0.isFavorite && $0.id.starts(with: prefix) },
+                sortBy: [SortDescriptor(\.name)]
+            )
+        case .recentlyAdded:
+            FetchDescriptor<Movie>(
+                predicate: #Predicate { $0.added != nil && $0.id.starts(with: prefix) },
+                sortBy: [SortDescriptor(\.added, order: .reverse), SortDescriptor(\.num)]
+            )
+        }
+        descriptor.fetchOffset = offset
+        descriptor.fetchLimit = limit
         return descriptor
     }
 }
@@ -277,19 +332,13 @@ struct SeriesCollectionView: View {
     let kind: LibraryCollection.Kind
     let playlistPrefix: String
     var animationNamespace: Namespace.ID?
+    @Environment(\.modelContext) private var modelContext
     @Environment(\.contentRestriction) private var restriction
-    @Query private var series: [Series]
 
-    init(kind: LibraryCollection.Kind, playlistPrefix: String, animationNamespace: Namespace.ID? = nil) {
-        self.kind = kind
-        self.playlistPrefix = playlistPrefix
-        self.animationNamespace = animationNamespace
-        _series = Query(SeriesCollectionQuery.descriptor(for: kind))
-    }
-
-    private var scoped: [Series] {
-        series.filter { $0.id.hasPrefix(playlistPrefix) }.excludingRestricted(restriction)
-    }
+    @State private var series: [Series] = []
+    @State private var canLoadMore = true
+    @State private var isLoadingPage = false
+    @State private var fetchedFromStore = 0
 
     var body: some View {
         let emptyDescription: LocalizedStringKey = switch kind {
@@ -299,15 +348,39 @@ struct SeriesCollectionView: View {
         }
         CategoryContentGrid(
             title: kind.localizedTitleString,
-            items: scoped,
+            items: series,
             animationNamespace: animationNamespace,
             emptyTitle: kind.title,
             emptyIcon: kind.emptyIcon,
             emptyDescription: emptyDescription,
             sortRaw: .constant(""),
             showsSortMenu: false,
+            onLoadMore: { loadNextPage() },
             card: { SeriesCardView(series: $0) }
         )
+        .task(id: "\(kind.rawValue)-\(playlistPrefix)") {
+            series = []
+            fetchedFromStore = 0
+            canLoadMore = true
+            loadNextPage()
+        }
+    }
+
+    private func loadNextPage() {
+        guard canLoadMore, !isLoadingPage, !playlistPrefix.isEmpty else { return }
+        isLoadingPage = true
+        defer { isLoadingPage = false }
+        let prefix = playlistPrefix
+        let descriptor = SeriesCollectionQuery.pagedDescriptor(
+            for: kind,
+            playlistPrefix: prefix,
+            offset: fetchedFromStore,
+            limit: collectionPageSize
+        )
+        let page = (try? modelContext.fetch(descriptor)) ?? []
+        fetchedFromStore += page.count
+        series.append(contentsOf: page.excludingRestricted(restriction))
+        if page.count < collectionPageSize { canLoadMore = false }
     }
 }
 
@@ -330,7 +403,41 @@ private enum SeriesCollectionQuery {
                 sortBy: [SortDescriptor(\.lastModified, order: .reverse), SortDescriptor(\.num)]
             )
         }
-        if kind == .recentlyAdded { descriptor.fetchLimit = recentlyAddedFetchLimit }
+        switch kind {
+        case .recentlyWatched: descriptor.fetchLimit = 30
+        case .favorites: descriptor.fetchLimit = 50
+        case .recentlyAdded: descriptor.fetchLimit = recentlyAddedFetchLimit
+        }
+        return descriptor
+    }
+
+    /// Playlist-scoped page for "Show All" collection grids.
+    static func pagedDescriptor(
+        for kind: LibraryCollection.Kind,
+        playlistPrefix: String,
+        offset: Int,
+        limit: Int
+    ) -> FetchDescriptor<Series> {
+        let prefix = playlistPrefix
+        var descriptor = switch kind {
+        case .recentlyWatched:
+            FetchDescriptor<Series>(
+                predicate: #Predicate { $0.lastWatchedDate != nil && $0.id.starts(with: prefix) },
+                sortBy: [SortDescriptor(\.lastWatchedDate, order: .reverse)]
+            )
+        case .favorites:
+            FetchDescriptor<Series>(
+                predicate: #Predicate { $0.isFavorite && $0.id.starts(with: prefix) },
+                sortBy: [SortDescriptor(\.name)]
+            )
+        case .recentlyAdded:
+            FetchDescriptor<Series>(
+                predicate: #Predicate { $0.lastModified != nil && $0.id.starts(with: prefix) },
+                sortBy: [SortDescriptor(\.lastModified, order: .reverse), SortDescriptor(\.num)]
+            )
+        }
+        descriptor.fetchOffset = offset
+        descriptor.fetchLimit = limit
         return descriptor
     }
 }

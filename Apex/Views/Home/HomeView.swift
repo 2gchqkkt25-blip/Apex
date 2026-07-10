@@ -25,7 +25,7 @@ struct HomeView: View {
         @Environment(\.openWindow) private var openWindow
     #endif
 
-    @Query private var playlists: [Playlist]
+    @Query var playlists: [Playlist]
     @AppStorage(PlaylistSelectionStore.key) private var selectedPlaylistID: String = ""
     @AppStorage(SortStorageKey.movieCategories) private var categorySortRaw: String = CategorySortOption.playlist.rawValue
     @AppStorage(SortStorageKey.movieContent) private var contentSortRaw: String = ContentSortOption.playlist.rawValue
@@ -59,24 +59,30 @@ struct HomeView: View {
     @State private var recommendationsLoaded = false
     @State var heroItems: [HeroItem] = []
     @State var trendingState: HomeLoadState = .idle
+    /// Prevents re-running heavy trending work when returning to the Home tab.
+    @State var lastTrendingPlaylistStamp: TimeInterval = 0
     @State var trakt = TraktService.shared
     /// "For You" is a Apex Pro feature; observed so the row appears/disappears
     /// when entitlement changes.
     @State private var premium = PremiumManager.shared
-    // Observed so the For You row defers its (potentially heavy) recompute while
-    // the device is busy syncing — and retries automatically once it isn't.
-    @State private var indexing = ContentIndexingService.shared
-    @State private var epgSync = EPGSyncService.shared
+    // Cloud sync status read for recommendations deferral only — not observed
+    // via ContentIndexingService, which re-renders Home on every indexer chunk.
+    @Environment(CloudSyncCoordinator.self) private var cloudSync: CloudSyncCoordinator?
     @State private var playingMedia: PlayableMedia?
     @State private var showingSync = false
     @State private var showingSettings = false
 
-    /// True while a playlist sync, iCloud sync or EPG import is running. Shared
-    /// with `HomeView+Trending.swift` so hero/trending work waits until sync settles.
-    var isSyncBusy: Bool {
+    /// True while a playlist content sync is running. CloudKit reconcile is
+    /// excluded — the local catalog is usable during iCloud import.
+    var isPlaylistSyncBusy: Bool {
         playlists.contains { $0.syncStatus == .syncing }
-            || indexing.isCloudSyncActive
-            || epgSync.isSyncing
+    }
+
+    /// True while a playlist sync or iCloud reconcile is running. EPG refresh is
+    /// excluded — it doesn't gate trending and observing it re-rendered Home on
+    /// every guide save.
+    var isSyncBusy: Bool {
+        isPlaylistSyncBusy || (cloudSync?.status.isSyncing ?? false)
     }
 
     #if os(tvOS)
@@ -237,10 +243,17 @@ struct HomeView: View {
                     await loadTrending()
                 }
                 .task(id: watchlistTaskKey) {
+                    try? await Task.sleep(for: .seconds(3))
                     await loadWatchlist()
                 }
                 .task(id: recommendationsKey) {
+                    try? await Task.sleep(for: .seconds(8))
                     await loadRecommendations()
+                }
+                .onChange(of: isPlaylistSyncBusy) { _, busy in
+                    guard !busy else { return }
+                    lastTrendingPlaylistStamp = 0
+                    Task { await loadTrending() }
                 }
             #if os(iOS) || os(tvOS)
                 .fullScreenCover(item: $playingMedia) { media in
@@ -311,7 +324,7 @@ struct HomeView: View {
 
     /// The playlist whose content is currently shown, resolved from the global
     /// selection. Falls back to the first playlist until the user picks one.
-    private var activePlaylist: Playlist? {
+    var activePlaylist: Playlist? {
         playlists.active(for: selectedPlaylistID)
     }
 
@@ -395,15 +408,15 @@ private extension HomeView {
     /// its recalculation interval.
     var recommendationsKey: String {
         let counts = "\(watchedMovies.count)-\(watchedSeries.count)-\(favoriteMovies.count)-\(favoriteSeries.count)"
-        return "rec-\(recommendationsEnabled)-\(premium.isPremium)-\(isSyncBusy)-\(recommendationsRecalcToken)-\(counts)-\(selectedPlaylistID)"
+        return "rec-\(recommendationsEnabled)-\(premium.isPremium)-\(recommendationsRecalcToken)-\(counts)-\(selectedPlaylistID)"
     }
 
     var trendingTaskKey: String {
-        "trending-\(playlists.count)-\(selectedPlaylistID)-\(activePlaylist?.lastSyncDate?.timeIntervalSince1970 ?? 0)-\(isSyncBusy)"
+        "trending-\(selectedPlaylistID)-\(activePlaylist?.lastSyncDate?.timeIntervalSince1970 ?? 0)"
     }
 
     var watchlistTaskKey: String {
-        "watchlist-\(trakt.isConnected)-\(selectedPlaylistID)-\(isSyncBusy)"
+        "watchlist-\(trakt.isConnected)-\(selectedPlaylistID)"
     }
 
     /// Resolves the engine's (throttled, possibly cached) list to local models,
@@ -415,19 +428,27 @@ private extension HomeView {
             recommendations = []
             return
         }
-        // Don't calculate while syncing — leave whatever is already shown (or the
-        // loading placeholder) in place; the task re-fires once `isSyncBusy` clears.
-        guard !isSyncBusy else { return }
+        await waitUntilPlaylistSyncIdle()
+        guard !Task.isCancelled else { return }
 
         let engine = RecommendationEngine(modelContainer: modelContext.container)
         let scored = await engine.recommendations()
+        let movieIDs = scored.filter { $0.kind == .movie }.prefix(10).map(\.id)
+        let seriesIDs = scored.filter { $0.kind == .series }.prefix(10).map(\.id)
+        let moviesByID = fetchMoviesByCatalogID(Set(movieIDs))
+        let seriesByID = fetchSeriesByCatalogID(Set(seriesIDs))
+
         var items: [HomeMediaItem] = []
         for recommendation in scored {
             switch recommendation.kind {
             case .movie:
-                if let movie = fetchMovie(id: recommendation.id), isRecommendable(movie) { items.append(.movie(movie)) }
+                if let movie = moviesByID[recommendation.id], isRecommendable(movie) {
+                    items.append(.movie(movie))
+                }
             case .series:
-                if let series = fetchSeries(id: recommendation.id), isRecommendable(series) { items.append(.series(series)) }
+                if let series = seriesByID[recommendation.id], isRecommendable(series) {
+                    items.append(.series(series))
+                }
             }
             if items.count >= 10 { break }
         }

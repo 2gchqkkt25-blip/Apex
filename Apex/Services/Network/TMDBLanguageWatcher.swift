@@ -23,7 +23,9 @@ enum TMDBLanguageWatcher {
     /// Clears `tmdbEnrichedAt` on every movie and series when the preferred
     /// TMDB language differs from the one previous enrichment ran with, so the
     /// content re-enriches lazily in the new language. A no-op on first launch
-    /// and whenever the language is unchanged.
+    /// and whenever the language is unchanged. Uses a background context so the
+    /// invalidation save doesn't block the main thread (a large catalog can have
+    /// thousands of enriched rows).
     static func invalidateEnrichmentIfLanguageChanged(in context: ModelContext) {
         let current = TMDBClient.preferredLanguageCode()
         let previous = UserDefaults.standard.string(forKey: storedLanguageKey)
@@ -36,13 +38,20 @@ enum TMDBLanguageWatcher {
         guard previous != nil else { return }
 
         logger.info("Preferred language changed (\(previous ?? "nil") → \(current)); invalidating TMDB enrichment")
-        resetEnrichment(in: context)
+        // Run on a background context so the potentially heavy save (thousands
+        // of rows) doesn't freeze the UI at launch.
+        let container = context.container
+        Task.detached(priority: .utility) {
+            await Self.resetEnrichment(in: container)
+        }
     }
 
-    private static func resetEnrichment(in context: ModelContext) {
+    private static func resetEnrichment(in container: ModelContainer) {
+        let context = ModelContext(container)
+        context.autosaveEnabled = false
         do {
             // Filter in SQLite so only already-enriched rows are hydrated, instead
-            // of loading the entire catalog onto the main thread to clear a field.
+            // of loading the entire catalog to clear a field.
             let movies = try context.fetch(FetchDescriptor<Movie>(
                 predicate: #Predicate { $0.tmdbEnrichedAt != nil }
             ))

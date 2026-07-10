@@ -209,25 +209,31 @@ struct ApexApp: App {
 
                     // Kick off iCloud sync: check account reachability, then run
                     // a first reconcile between the local catalog and the cloud
-                    // mirrors. Runs after progress reconciliation so a fresh
-                    // device's user state lands on a settled local store.
-                    await cloudSync.start()
+                    // mirrors. Fire-and-forget: the reconcile runs on its own
+                    // actor and posts results via @Observable status. We must NOT
+                    // await this — production CloudKit (TestFlight) can take 2-10s
+                    // for accountStatus + reconcile, and awaiting blocks every
+                    // subsequent launch step (indexer, EPG, etc.), freezing the UI.
+                    Task { await cloudSync.start() }
 
                     // Resume background content indexing for anything still
                     // unindexed (the pass waits on its own while a playlist
                     // sync is running).
                     ContentIndexingService.shared.configure(container: catalogContainer)
                     #if os(tvOS)
-                    // Let the home screen settle before indexing a large catalog —
-                    // tvOS has less RAM and six browse tabs would otherwise all
-                    // fight the indexer for main-context merges at once.
                     ContentIndexingService.shared.kick(after: .seconds(30))
                     #else
-                    ContentIndexingService.shared.kick()
+                    // Defer so the first Home paint (hero + rows) isn't fighting
+                    // TMDB enrichment saves that merge into every @Query.
+                    ContentIndexingService.shared.kick(after: .seconds(20))
                     #endif
 
+                    // Prune expired EPG listings left over from previous sessions.
+                    EPGSyncManager.pruneExpiredListings(in: catalogContainer)
+
                     // Refresh the TV guide on its own schedule, independent of
-                    // the content sync. No-ops when no guide is due yet.
+                    // the content sync. Deferred on launch — 14 external EPG
+                    // feeds are heavy and must not compete with Home's first paint.
                     EPGSyncService.shared.configure(container: catalogContainer)
                     #if os(tvOS)
                     Task {
@@ -235,7 +241,10 @@ struct ApexApp: App {
                         EPGSyncService.shared.syncIfDue()
                     }
                     #else
-                    EPGSyncService.shared.syncIfDue()
+                    Task {
+                        try? await Task.sleep(for: .seconds(90))
+                        EPGSyncService.shared.syncIfDue()
+                    }
                     #endif
                 }
                 .onChange(of: scenePhase) { _, phase in
@@ -243,12 +252,19 @@ struct ApexApp: App {
                     #if !os(macOS)
                         // Shrink the resident footprint before the system suspends
                         // the app: a 256 MB decoded-image cache makes it a prime
-                        // jetsam target after a long background (the symptom that
-                        // reads as "slow after a while in the background"). The disk
-                        // cache keeps the bytes, so re-decoding on return is cheap.
+                        // jetsam target after a long background. The disk cache
+                        // keeps the bytes, so re-decoding on return is cheap.
                         // macOS has ample RAM and no jetsam, so it keeps its cache.
+                        //
+                        // Delay the purge: a brief app switch (e.g. checking a
+                        // notification) shouldn't wipe images and flash spinners
+                        // when the user returns seconds later. If the user returns
+                        // within the window the task is cancelled by the next
+                        // `.active` phase change.
                         if phase == .background {
-                            ImageMemoryCache.shared.purge(reason: "app backgrounded")
+                            ImageMemoryCache.shared.scheduleDeferredPurge()
+                        } else if phase == .active {
+                            ImageMemoryCache.shared.cancelDeferredPurge()
                         }
                     #endif
                 }

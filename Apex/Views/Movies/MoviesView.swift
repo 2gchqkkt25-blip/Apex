@@ -24,7 +24,6 @@ struct MoviesView: View {
     @AppStorage(PlaylistSelectionStore.key) private var selectedPlaylistID: String = ""
     @State private var showingSync = false
     @State private var showingSettings = false
-    @State private var genres: [String] = []
 
     @AppStorage(SortStorageKey.movieCategories) private var categorySortRaw: String = CategorySortOption.playlist.rawValue
     @AppStorage(SortStorageKey.movieContent) private var contentSortRaw: String = ContentSortOption.playlist.rawValue
@@ -72,7 +71,6 @@ struct MoviesView: View {
                         )
                     }
                 } else {
-                    let remaining = Array(sorted.dropFirst(previewCategoryLimit))
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 24, pinnedViews: []) {
                             MovieCollectionRow(kind: .recentlyWatched, playlistPrefix: playlistPrefix, animationNamespace: animationNamespace)
@@ -83,22 +81,8 @@ struct MoviesView: View {
                                 MovieCategoryPreview(category: category, limit: previewLimit, sort: contentSort, animationNamespace: animationNamespace)
                                     .id("\(category.id)-\(contentSort.rawValue)")
                             }
-
-                            if !genres.isEmpty {
-                                GenreGridSection(genres: genres, type: .vod)
-                            }
-
-                            #if !os(tvOS)
-                            if !remaining.isEmpty {
-                                CategoryGridSection(title: "All Categories", categories: remaining)
-                                    .padding(.top, 12)
-                            }
-                            #endif
                         }
                         .padding(.vertical)
-                    }
-                    .task(id: playlistPrefix) {
-                        genres = await GenreDerivation.movieGenres(in: modelContext.container, playlistPrefix: playlistPrefix, restriction: restriction)
                     }
                 }
             }
@@ -122,9 +106,6 @@ struct MoviesView: View {
             }
             .navigationDestination(for: LibraryCollection.self) { collection in
                 MovieCollectionView(kind: collection.kind, playlistPrefix: playlistPrefix, animationNamespace: animationNamespace)
-            }
-            .navigationDestination(for: GenreSelection.self) { selection in
-                MovieGenreView(genre: selection.genre, playlistPrefix: playlistPrefix, animationNamespace: animationNamespace)
             }
             .navigationDestination(for: Movie.self) { movie in
                 MovieDetailView(movie: movie, animationNamespace: animationNamespace)
