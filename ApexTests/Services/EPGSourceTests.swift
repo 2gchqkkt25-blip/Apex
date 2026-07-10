@@ -24,6 +24,18 @@ struct EPGSourceTests {
         #expect(url.contains("password=pass"))
     }
 
+    @Test func `xtream guide url normalizes get.php portal paths`() throws {
+        let playlist = Playlist(
+            name: "P",
+            serverURL: "http://host:8080/get.php?username=u&password=p",
+            username: "user",
+            password: "pass"
+        )
+        let url = try #require(EPGSourceReconciler.guideURL(for: playlist))
+        #expect(url.hasPrefix("http://host:8080/xmltv.php"))
+        #expect(!url.contains("get.php"))
+    }
+
     @Test func `m3u guide url uses the playlist epg url`() {
         let playlist = Playlist(name: "P", m3uURL: "http://host/list.m3u", epgURL: "http://host/guide.xml")
         #expect(EPGSourceReconciler.guideURL(for: playlist) == "http://host/guide.xml")

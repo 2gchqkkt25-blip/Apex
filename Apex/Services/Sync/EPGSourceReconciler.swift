@@ -60,6 +60,12 @@ nonisolated enum EPGSourceReconciler {
     static func guideURL(for playlist: Playlist) -> String? {
         switch playlist.sourceType {
         case .xtream:
+            // Prefer an explicitly-set or discovered external EPG URL (from the
+            // M3U `url-tvg` header) over the built-in `xmltv.php`. Many panels
+            // have a stale `xmltv.php` but link to a current external guide.
+            if let epgURL = playlist.epgURL, !epgURL.isEmpty {
+                return epgURL
+            }
             return XtreamClient.xmltvURL(for: playlist)?.absoluteString
         case .m3u, .stalker, .stremio:
             // m3u carries its guide URL; Stalker portals expose no standard XMLTV

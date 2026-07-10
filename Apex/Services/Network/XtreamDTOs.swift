@@ -98,7 +98,13 @@ struct XtreamLiveStream: Decodable {
         streamType = try? container.decodeIfPresent(String.self, forKey: .streamType)
         streamId = try? container.decodeIfPresent(Int.self, forKey: .streamId)
         streamIcon = try? container.decodeIfPresent(String.self, forKey: .streamIcon)
-        epgChannelId = try? container.decodeIfPresent(String.self, forKey: .epgChannelId)
+        if let epgStr = try? container.decodeIfPresent(String.self, forKey: .epgChannelId) {
+            epgChannelId = epgStr
+        } else if let epgInt = try? container.decodeIfPresent(Int.self, forKey: .epgChannelId) {
+            epgChannelId = String(epgInt)
+        } else {
+            epgChannelId = nil
+        }
         added = try? container.decodeIfPresent(String.self, forKey: .added)
 
         if let isAdultInt = try? container.decodeIfPresent(Int.self, forKey: .isAdult) {
@@ -495,13 +501,294 @@ struct XtreamEpisodeInfo: Decodable {
     }
 }
 
+// MARK: - EPG text helpers
+
+/// Xtream panels often base64-encode programme titles and use unix timestamps.
+enum XtreamEPGText {
+    nonisolated static func decode(_ value: String?) -> String {
+        guard let value else { return "" }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+        if let data = Data(base64Encoded: trimmed),
+           let decoded = String(data: data, encoding: .utf8),
+           !decoded.isEmpty
+        {
+            return decoded
+        }
+        return trimmed
+    }
+
+    /// Parses Xtream EPG time fields. Panels emit any of:
+    /// - unix seconds (`"1751569200"` / `1751569200`)
+    /// - unix milliseconds (`"1751569200000"`)
+    /// - SQL wall clock (`"2026-07-03 15:00:00"`)
+    /// - XMLTV compact (`"20260703150000"`) — must NOT be treated as unix
+    nonisolated static func parseTimestamp(_ value: String?, timezoneIdentifier: String? = nil) -> Date? {
+        guard let value else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        let zone = wallClockZone(timezoneIdentifier)
+
+        // Digits-only: distinguish unix seconds / millis from XMLTV `YYYYMMDDHHMMSS`.
+        if trimmed.unicodeScalars.allSatisfy({ $0.value >= 0x30 && $0.value <= 0x39 }) {
+            if trimmed.count == 14 {
+                return XMLTVDate.parseEPG(trimmed, timezone: zone)
+            }
+            if let interval = TimeInterval(trimmed) {
+                // Milliseconds (13 digits around now).
+                if trimmed.count >= 12 {
+                    return Date(timeIntervalSince1970: interval / 1000)
+                }
+                // Seconds since ~2001 (9–11 digits). Reject tiny numbers.
+                if interval > 1_000_000_000 {
+                    return Date(timeIntervalSince1970: interval)
+                }
+            }
+        }
+
+        if let sql = parseWallClock(trimmed, timezone: zone) {
+            return sql
+        }
+
+        // ISO-8601 fallback (`2026-07-03T15:00:00Z`, `2026-07-03T15:00:00+00:00`).
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = iso.date(from: trimmed) { return date }
+        iso.formatOptions = [.withInternetDateTime]
+        if let date = iso.date(from: trimmed) { return date }
+
+        // Last resort: XMLTV with optional ` +0000` suffix.
+        return XMLTVDate.parseEPG(trimmed, timezone: zone)
+    }
+
+    /// Wall-clock zone for SQL / XMLTV digits. Xtream often reports `GMT` while
+    /// stamping local wall-clock times — prefer the device zone in that case.
+    nonisolated private static func wallClockZone(_ timezoneIdentifier: String?) -> TimeZone {
+        let server = timezoneIdentifier.flatMap { TimeZone(identifier: $0) }
+            ?? timezoneIdentifier.flatMap { XMLTVDate.timezone(from: $0) }
+        return XMLTVDate.resolveWallClockTimezone(server: server, detected: nil)
+    }
+
+    /// Picks the `(start, end)` pair that best matches "now"
+    /// conflicting `start`/`end` wall clock and `start_timestamp`/`stop_timestamp`
+    /// unix fields (common when the bulk EPG DB is stale but short EPG is live).
+    nonisolated static func pickBestProgrammeInterval(
+        _ candidates: [(start: Date, end: Date)],
+        now: Date,
+        nowPlaying: Bool = false
+    ) -> (start: Date, end: Date)? {
+        guard !candidates.isEmpty else { return nil }
+
+        var unique: [(start: Date, end: Date)] = []
+        unique.reserveCapacity(candidates.count)
+        for candidate in candidates where candidate.end > candidate.start {
+            if unique.contains(where: {
+                abs($0.start.timeIntervalSince(candidate.start)) < 1
+                    && abs($0.end.timeIntervalSince(candidate.end)) < 1
+            }) { continue }
+            unique.append(candidate)
+        }
+        guard !unique.isEmpty else { return nil }
+
+        if nowPlaying {
+            let basis = unique.min(by: {
+                abs($0.start.timeIntervalSince(now)) < abs($1.start.timeIntervalSince(now))
+            })!
+            var start = basis.start
+            var end = basis.end
+            if start > now { start = now }
+            if end <= now { end = max(now.addingTimeInterval(60), start.addingTimeInterval(30 * 60)) }
+            return (start, end)
+        }
+
+        if let airing = unique.first(where: { $0.start <= now && now < $0.end }) {
+            return airing
+        }
+        let relevant = unique.filter { $0.end > now.addingTimeInterval(-EPGRetention.pastGrace) }
+        if !relevant.isEmpty {
+            if let upcoming = relevant.filter({ $0.start >= now }).min(by: { $0.start < $1.start }) {
+                return upcoming
+            }
+            return relevant.max(by: { $0.end < $1.end })
+        }
+        return unique.min(by: {
+            abs($0.start.timeIntervalSince(now)) < abs($1.start.timeIntervalSince(now))
+        })
+    }
+
+    private nonisolated static func parseWallClock(_ value: String, timezone: TimeZone) -> Date? {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = timezone
+        if let date = formatter.date(from: value) { return date }
+        formatter.dateFormat = "yyyy/MM/dd HH:mm:ss"
+        return formatter.date(from: value)
+    }
+}
+
 // MARK: - EPG
 
 struct XtreamShortEPG: Decodable {
     let start: String?
     let end: String?
+    let stop: String?
+    let startTimestamp: String?
+    let endTimestamp: String?
+    let stopTimestamp: String?
     let title: String?
     let description: String?
+    /// `1` when the panel marks this row as the live slot (`now_playing`).
+    let nowPlaying: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case start, end, stop, title, description
+        case startTimestamp = "start_timestamp"
+        case endTimestamp = "end_timestamp"
+        case stopTimestamp = "stop_timestamp"
+        case nowPlaying = "now_playing"
+    }
+
+    init(
+        start: String? = nil,
+        end: String? = nil,
+        stop: String? = nil,
+        startTimestamp: String? = nil,
+        endTimestamp: String? = nil,
+        stopTimestamp: String? = nil,
+        title: String? = nil,
+        description: String? = nil,
+        nowPlaying: Bool? = nil
+    ) {
+        self.start = start
+        self.end = end
+        self.stop = stop
+        self.startTimestamp = startTimestamp
+        self.endTimestamp = endTimestamp
+        self.stopTimestamp = stopTimestamp
+        self.title = title
+        self.description = description
+        self.nowPlaying = nowPlaying
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        start = Self.flexString(container, key: .start)
+        end = Self.flexString(container, key: .end)
+        stop = Self.flexString(container, key: .stop)
+        startTimestamp = Self.flexString(container, key: .startTimestamp)
+        endTimestamp = Self.flexString(container, key: .endTimestamp)
+        stopTimestamp = Self.flexString(container, key: .stopTimestamp)
+        title = Self.flexString(container, key: .title)
+        description = Self.flexString(container, key: .description)
+        if let flag = try? container.decodeIfPresent(Bool.self, forKey: .nowPlaying) {
+            nowPlaying = flag
+        } else if let intFlag = try? container.decodeIfPresent(Int.self, forKey: .nowPlaying) {
+            nowPlaying = intFlag != 0
+        } else {
+            nowPlaying = nil
+        }
+    }
+
+    private static func flexString(
+        _ container: KeyedDecodingContainer<CodingKeys>,
+        key: CodingKeys
+    ) -> String? {
+        if let value = try? container.decodeIfPresent(String.self, forKey: key) { return value }
+        if let value = try? container.decodeIfPresent(Int.self, forKey: key) { return String(value) }
+        if let value = try? container.decodeIfPresent(Double.self, forKey: key) { return String(Int(value)) }
+        return nil
+    }
+
+    nonisolated var decodedTitle: String {
+        XtreamEPGText.decode(title)
+    }
+
+    nonisolated var decodedDescription: String {
+        XtreamEPGText.decode(description)
+    }
+
+    nonisolated func startDate(timezoneIdentifier: String?) -> Date? {
+        programmeTimes(timezoneIdentifier: timezoneIdentifier)?.start
+    }
+
+    nonisolated func endDate(timezoneIdentifier: String?) -> Date? {
+        programmeTimes(timezoneIdentifier: timezoneIdentifier)?.end
+    }
+
+    /// Resolves start/end from the available timestamp fields.
+    ///
+    /// Priority order (same as Chilli, SwipTV, TiviMate):
+    /// 1. Unix `start_timestamp`/`stop_timestamp` — if within 48h of now (current data)
+    /// 2. SQL wall-clock `start`/`end`/`stop` — interpreted in the server timezone
+    /// 3. Unix timestamps even if stale — still better than nothing
+    ///
+    /// When `now_playing` is true, the programme is on air regardless of timestamps.
+    nonisolated func programmeTimes(
+        timezoneIdentifier: String?,
+        now: Date = Date()
+    ) -> (start: Date, end: Date)? {
+        // Parse unix pair.
+        let endTimestampRaw = endTimestamp ?? stopTimestamp
+        let unixStart = XtreamEPGText.parseTimestamp(startTimestamp)
+        let unixEnd = XtreamEPGText.parseTimestamp(endTimestampRaw)
+        let unixPair: (start: Date, end: Date)? = {
+            guard let s = unixStart, let e = unixEnd, e > s else { return nil }
+            return (s, e)
+        }()
+
+        // Parse wall-clock pair.
+        let endRaw = end ?? stop
+        let wallStart = XtreamEPGText.parseTimestamp(start, timezoneIdentifier: timezoneIdentifier)
+        let wallEnd = XtreamEPGText.parseTimestamp(endRaw, timezoneIdentifier: timezoneIdentifier)
+        let wallPair: (start: Date, end: Date)? = {
+            guard let s = wallStart, let e = wallEnd, e > s else { return nil }
+            return (s, e)
+        }()
+
+        // now_playing: trust whatever we have, prefer the one overlapping now.
+        if nowPlaying == true {
+            if let wall = wallPair, wall.start <= now && now < wall.end {
+                return wall
+            }
+            if let unix = unixPair, unix.start <= now && now < unix.end {
+                return unix
+            }
+            // Neither overlaps now — stretch the closest one to cover now.
+            let basis = wallPair ?? unixPair
+            if let basis {
+                let adjustedStart = min(basis.start, now)
+                let adjustedEnd = max(basis.end, now.addingTimeInterval(60))
+                return (adjustedStart, adjustedEnd)
+            }
+            return nil
+        }
+
+        // Both available — pick the one closer to now (handles stale unix + live wall-clock).
+        if let unix = unixPair, let wall = wallPair {
+            let unixDistToNow = min(abs(unix.start.timeIntervalSince(now)), abs(unix.end.timeIntervalSince(now)))
+            let wallDistToNow = min(abs(wall.start.timeIntervalSince(now)), abs(wall.end.timeIntervalSince(now)))
+
+            // If one overlaps now and the other doesn't, prefer the live one.
+            let unixLive = unix.start <= now && now < unix.end
+            let wallLive = wall.start <= now && now < wall.end
+            if unixLive && !wallLive { return unix }
+            if wallLive && !unixLive { return wall }
+
+            // Both or neither live — prefer the one closest to now.
+            return wallDistToNow < unixDistToNow ? wall : unix
+        }
+
+        // Only one available — use it.
+        if let unix = unixPair { return unix }
+        if let wall = wallPair { return wall }
+
+        // Mixed: unix start + wall-clock end (rare but seen on some panels).
+        if let s = unixStart, let e = wallEnd, e > s { return (s, e) }
+
+        return nil
+    }
 }
 
 // MARK: - Bulk EPG (get_simple_data_table)
@@ -527,5 +814,28 @@ struct XtreamDataTableEPG: Decodable {
         case channelId = "channel_id"
         case streamId = "stream_id"
         case id
+    }
+
+    var decodedTitle: String { XtreamEPGText.decode(title) }
+    var decodedDescription: String { XtreamEPGText.decode(description) }
+
+    var startDate: Date? {
+        XtreamEPGText.parseTimestamp(startTimestamp)
+            ?? XtreamEPGText.parseTimestamp(start)
+    }
+
+    var endDate: Date? {
+        XtreamEPGText.parseTimestamp(endTimestamp)
+            ?? XtreamEPGText.parseTimestamp(end)
+    }
+
+    func startDate(timezoneIdentifier: String?) -> Date? {
+        XtreamEPGText.parseTimestamp(startTimestamp)
+            ?? XtreamEPGText.parseTimestamp(start, timezoneIdentifier: timezoneIdentifier)
+    }
+
+    func endDate(timezoneIdentifier: String?) -> Date? {
+        XtreamEPGText.parseTimestamp(endTimestamp)
+            ?? XtreamEPGText.parseTimestamp(end, timezoneIdentifier: timezoneIdentifier)
     }
 }

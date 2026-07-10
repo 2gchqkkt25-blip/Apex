@@ -16,6 +16,7 @@ struct EPGSettingsView: View {
     @Query(sort: \EPGSource.addedAt) private var sources: [EPGSource]
     @State private var epgSync = EPGSyncService.shared
     @AppStorage(SyncFrequency.epgStorageKey) private var freqRaw = SyncFrequency.epgDefaultValue.rawValue
+    @AppStorage(LiveTVLayoutMode.storageKey) private var defaultViewRaw = LiveTVLayoutMode.list.rawValue
 
     @State private var showingAdd = false
     #if os(tvOS)
@@ -65,6 +66,7 @@ struct EPGSettingsView: View {
     private extension EPGSettingsView {
         var formBody: some View {
             Form {
+                defaultViewSection
                 sourcesSection
                 refreshSection
             }
@@ -78,6 +80,24 @@ struct EPGSettingsView: View {
                 .sheet(isPresented: $showingAdd) {
                     AddEPGSourceView { name, url in addSource(name: name, url: url) }
                 }
+        }
+
+        var defaultViewSection: some View {
+            Section {
+                Picker("Default View", selection: Binding(
+                    get: { LiveTVLayoutMode(rawValue: defaultViewRaw) ?? .list },
+                    set: { defaultViewRaw = $0.rawValue }
+                )) {
+                    ForEach(LiveTVLayoutMode.allCases) { mode in
+                        Label(mode.label, systemImage: mode.systemImage).tag(mode)
+                    }
+                }
+                .pickerStyle(.menu)
+            } header: {
+                Text("Live TV")
+            } footer: {
+                Text("Choose whether Live TV opens in the channel list or the programme guide by default.")
+            }
         }
 
         var sourcesSection: some View {
@@ -125,16 +145,34 @@ struct EPGSettingsView: View {
                         Label("Sync Now", systemImage: "arrow.triangle.2.circlepath")
                         if epgSync.isSyncing {
                             Spacer()
+                            if let progress = epgSync.syncProgress {
+                                Text(progress, format: .percent.precision(.fractionLength(0)))
+                                    .foregroundStyle(.secondary)
+                                    .monospacedDigit()
+                            }
                             ProgressView()
                                 .controlSize(.small)
                         }
                     }
                 }
                 .disabled(epgSync.isSyncing || sources.isEmpty)
+
+                if epgSync.isSyncing, let progress = epgSync.syncProgress {
+                    ProgressView(value: progress)
+                        .tint(ThemeManager.shared.colors.accent)
+                }
             } header: {
                 Text("Automatic Refresh")
             } footer: {
-                Text("The TV guide refreshes automatically in the background at this interval.")
+                if epgSync.isSyncing {
+                    if let label = epgSync.syncProgressLabel {
+                        Text("Downloading programme data — \(label). This can take a few minutes on large playlists — keep the app open.")
+                    } else {
+                        Text("Downloading programme data for your channels. This can take a few minutes on large playlists — keep the app open.")
+                    }
+                } else {
+                    Text("Sync Now loads programme data for all live channels (same idea as Lume, using the provider API). The guide also fills in as you browse.")
+                }
             }
         }
     }
@@ -156,7 +194,13 @@ struct EPGSettingsView: View {
         }
 
         private var subtitle: String {
+            if source.syncStatus == .syncing {
+                return String(localized: "Refreshing…")
+            }
             if source.syncStatus == .error {
+                if source.lastSyncDate != nil {
+                    return String(localized: "Last refresh failed — showing previous guide if available")
+                }
                 return String(localized: "Last refresh failed")
             }
             if let last = source.lastSyncDate {
@@ -222,11 +266,44 @@ struct EPGSettingsView: View {
         /// supplies the ScrollView, background and width framing).
         var tvBody: some View {
             VStack(alignment: .leading, spacing: 36) {
+                tvDefaultViewSection
                 tvSourcesSection
                 tvAddSection
                 tvRefreshSection
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+        }
+
+        var tvDefaultViewSection: some View {
+            VStack(alignment: .leading, spacing: 8) {
+                TVSettingsSectionLabel("Default View")
+
+                VStack(spacing: 2) {
+                    ForEach(LiveTVLayoutMode.allCases) { mode in
+                        Button {
+                            defaultViewRaw = mode.rawValue
+                        } label: {
+                            HStack(spacing: 16) {
+                                Image(systemName: mode.systemImage)
+                                    .font(.system(size: 22))
+                                Text(mode.label)
+                                Spacer(minLength: 0)
+                                if (LiveTVLayoutMode(rawValue: defaultViewRaw) ?? .list) == mode {
+                                    Image(systemName: "checkmark")
+                                        .font(.system(size: 24, weight: .semibold))
+                                }
+                            }
+                        }
+                        .buttonStyle(TVSettingsRowButtonStyle())
+                    }
+                }
+
+                Text("Choose whether Live TV opens in the channel list or the programme guide.")
+                    .font(.system(size: 20))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, TVSettingsMetrics.rowHPadding)
+                    .padding(.top, 6)
+            }
         }
 
         var tvSourcesSection: some View {
@@ -283,6 +360,9 @@ struct EPGSettingsView: View {
         }
 
         func tvSubtitle(_ source: EPGSource) -> String {
+            if source.syncStatus == .syncing {
+                return String(localized: "Refreshing…")
+            }
             if source.syncStatus == .error {
                 return String(localized: "Last refresh failed")
             }
@@ -330,6 +410,13 @@ struct EPGSettingsView: View {
             }
         }
 
+        var tvRefreshFooterText: String {
+            if epgSync.isSyncing, let label = epgSync.syncProgressLabel {
+                return String(localized: "Downloading programme data — \(label).")
+            }
+            return String(localized: "The TV guide refreshes automatically in the background at this interval.")
+        }
+
         var tvRefreshSection: some View {
             VStack(alignment: .leading, spacing: 8) {
                 TVSettingsSectionLabel("Automatic Refresh")
@@ -358,6 +445,11 @@ struct EPGSettingsView: View {
                             Text("Sync Now")
                             Spacer(minLength: 0)
                             if epgSync.isSyncing {
+                                if let progress = epgSync.syncProgress {
+                                    Text(progress, format: .percent.precision(.fractionLength(0)))
+                                        .foregroundStyle(.secondary)
+                                        .monospacedDigit()
+                                }
                                 ProgressView()
                             }
                         }
@@ -366,7 +458,13 @@ struct EPGSettingsView: View {
                     .disabled(epgSync.isSyncing || sources.isEmpty)
                 }
 
-                Text("The TV guide refreshes automatically in the background at this interval.")
+                if epgSync.isSyncing, let progress = epgSync.syncProgress {
+                    ProgressView(value: progress)
+                        .tint(ThemeManager.shared.colors.accent)
+                        .padding(.horizontal, TVSettingsMetrics.rowHPadding)
+                }
+
+                Text(tvRefreshFooterText)
                     .font(.system(size: 20))
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, TVSettingsMetrics.rowHPadding)
