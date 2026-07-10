@@ -25,6 +25,7 @@ extension SettingsView {
     /// Short status line describing how Premium is unlocked.
     var premiumStatusDetail: String {
         #if !SIDE_LOAD
+            if premium.isTestFlightBeta { return String(localized: "TestFlight beta access") }
             if premium.owns(.lifetime) { return String(localized: "Lifetime access") }
             if premium.owns(.monthly) { return String(localized: "Monthly subscription") }
         #endif

@@ -68,7 +68,8 @@ final class Playlist {
     /// Creates a Stremio addon playlist. The manifest URL goes in `serverURL`.
     /// Stremio addons are typically open and need no credentials.
     convenience init(name: String, stremioURL: String) {
-        self.init(name: name, serverURL: stremioURL, username: "", password: "")
+        let normalized = StremioURL.normalize(stremioURL)?.absoluteString ?? stremioURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.init(name: name, serverURL: normalized, username: "", password: "")
         sourceTypeRaw = PlaylistSourceType.stremio.rawValue
     }
 }

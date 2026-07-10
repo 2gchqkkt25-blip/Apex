@@ -7,9 +7,9 @@
 //
 //  Business model: Apex is free, open-source software. Builds the user compiles
 //  and sideloads themselves are fully unlocked (the `SIDE_LOAD` compilation
-//  condition, set only in the "Sideload" build configuration). The App Store
-//  build gates a handful of convenience features behind Apex Pro — see
-//  `PremiumFeature`.
+//  condition, set only in the "Sideload" build configuration). TestFlight betas
+//  unlock Pro for all testers. The public App Store build gates convenience
+//  features behind Apex Pro — see `PremiumFeature`.
 //
 
 import Foundation
@@ -38,6 +38,22 @@ final class PremiumManager {
     /// True while a purchase or restore is in flight, for button spinners.
     private(set) var isWorking = false
 
+    #if !SIDE_LOAD && !DEBUG
+        /// Cached at launch — see `BetaBuildDetection`.
+        static let testFlightGrantsPremium = BetaBuildDetection.isTestFlight
+    #endif
+
+    /// Whether this install is a TestFlight beta (Pro unlocked without purchase).
+    var isTestFlightBeta: Bool {
+        #if SIDE_LOAD
+            return false
+        #elseif DEBUG
+            return false
+        #else
+            return Self.testFlightGrantsPremium
+        #endif
+    }
+
     #if SIDE_LOAD
         /// Sideloaded / self-compiled builds unlock everything. No StoreKit, no
         /// paywall — this is the open-source promise.
@@ -62,10 +78,10 @@ final class PremiumManager {
             debugForcePremium || !purchasedProductIDs.isEmpty
         }
     #else
-        /// App Store build: Premium iff the user owns the lifetime unlock or has an
-        /// active subscription.
+        /// Release build: Premium for TestFlight beta testers, or when the user
+        /// owns the lifetime unlock / an active subscription on the App Store.
         var isPremium: Bool {
-            !purchasedProductIDs.isEmpty
+            Self.testFlightGrantsPremium || !purchasedProductIDs.isEmpty
         }
     #endif
 

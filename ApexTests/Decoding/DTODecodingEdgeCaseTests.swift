@@ -105,6 +105,17 @@ struct DTODecodingEdgeCaseTests {
         #expect(epg.end == "1700003600")
     }
 
+    @Test func `short EPG decodes unix timestamps from panel fields`() throws {
+        let json = Data("""
+        {"start_timestamp": 1700000000, "stop_timestamp": 1700003600, "title": "TGVlbiBWZXpo", "description": ""}
+        """.utf8)
+        let epg = try JSONDecoder().decode(XtreamShortEPG.self, from: json)
+        #expect(epg.startTimestamp == "1700000000")
+        #expect(epg.stopTimestamp == "1700003600")
+        let start = try #require(epg.startDate(timezoneIdentifier: nil))
+        #expect(start == Date(timeIntervalSince1970: 1_700_000_000))
+    }
+
     @Test func `short EPG with nil fields`() throws {
         let json = Data("""
         {"start": null, "end": null, "title": null, "description": null}
@@ -130,6 +141,22 @@ struct DTODecodingEdgeCaseTests {
         """.utf8)
         let stream = try JSONDecoder().decode(XtreamLiveStream.self, from: json)
         #expect(stream.categoryId == "42")
+    }
+
+    @Test func `live stream epg channel ID as int`() throws {
+        let json = Data("""
+        {"stream_id": 1, "epg_channel_id": 8821}
+        """.utf8)
+        let stream = try JSONDecoder().decode(XtreamLiveStream.self, from: json)
+        #expect(stream.epgChannelId == "8821")
+    }
+
+    @Test func `live stream epg channel ID as string`() throws {
+        let json = Data("""
+        {"stream_id": 1, "epg_channel_id": "CNN.us"}
+        """.utf8)
+        let stream = try JSONDecoder().decode(XtreamLiveStream.self, from: json)
+        #expect(stream.epgChannelId == "CNN.us")
     }
 
     @Test func `live stream is adult coercion`() throws {

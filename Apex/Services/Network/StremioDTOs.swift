@@ -10,6 +10,35 @@ import Foundation
 
 // MARK: - Manifest
 
+/// A manifest `resources` entry — either a plain string (`"stream"`) or an object
+/// with per-resource type/idPrefix filters (Torrentio, Cinemeta stream, etc.).
+enum StremioResource: Decodable, Sendable {
+    case simple(String)
+    case defined(StremioResourceDef)
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let name = try? container.decode(String.self) {
+            self = .simple(name)
+            return
+        }
+        self = .defined(try StremioResourceDef(from: decoder))
+    }
+
+    var name: String {
+        switch self {
+        case .simple(let name): name
+        case .defined(let def): def.name
+        }
+    }
+}
+
+struct StremioResourceDef: Decodable, Sendable {
+    let name: String
+    let types: [String]?
+    let idPrefixes: [String]?
+}
+
 /// Top-level manifest returned by `GET /manifest.json`.
 struct StremioManifest: Decodable {
     let id: String
@@ -18,16 +47,33 @@ struct StremioManifest: Decodable {
     let description: String?
     let types: [String]
     let catalogs: [StremioCatalogDef]
-    let resources: [String]
+    let resources: [StremioResource]
     let idPrefixes: [String]?
     let behaviorHints: StremioBehaviorHints?
 
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        version = try container.decode(String.self, forKey: .version)
+        description = try container.decodeIfPresent(String.self, forKey: .description)
+        types = try container.decodeIfPresent([String].self, forKey: .types) ?? []
+        catalogs = try container.decodeIfPresent([StremioCatalogDef].self, forKey: .catalogs) ?? []
+        resources = try container.decodeIfPresent([StremioResource].self, forKey: .resources) ?? []
+        idPrefixes = try container.decodeIfPresent([String].self, forKey: .idPrefixes)
+        behaviorHints = try container.decodeIfPresent(StremioBehaviorHints.self, forKey: .behaviorHints)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, version, description, types, catalogs, resources, idPrefixes, behaviorHints
+    }
+
     /// Whether this addon supports the catalog resource.
-    var hasCatalogs: Bool { resources.contains("catalog") }
+    var hasCatalogs: Bool { resources.contains { $0.name == "catalog" } }
     /// Whether this addon supports on-demand stream resolution.
-    var hasStreams: Bool { resources.contains("stream") }
+    var hasStreams: Bool { resources.contains { $0.name == "stream" } }
     /// Whether this addon supports metadata enrichment.
-    var hasMeta: Bool { resources.contains("meta") }
+    var hasMeta: Bool { resources.contains { $0.name == "meta" } }
 }
 
 struct StremioCatalogDef: Decodable {
@@ -35,6 +81,18 @@ struct StremioCatalogDef: Decodable {
     let id: String
     let name: String
     let extra: [StremioExtraProp]?
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        type = try container.decode(String.self, forKey: .type)
+        id = try container.decode(String.self, forKey: .id)
+        name = try container.decodeIfPresent(String.self, forKey: .name) ?? id
+        extra = try container.decodeIfPresent([StremioExtraProp].self, forKey: .extra)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case type, id, name, extra
+    }
 }
 
 struct StremioExtraProp: Decodable {

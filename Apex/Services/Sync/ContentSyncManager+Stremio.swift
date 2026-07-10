@@ -15,7 +15,7 @@ extension ContentSyncManager {
 
     func performStremioSync(playlist: Playlist, playlistId: UUID, progress: SyncProgress?) async throws {
         let client = StremioClient()
-        guard let base = URL(string: playlist.serverURL) else {
+        guard let base = StremioURL.normalize(playlist.serverURL) else {
             throw StremioError.invalidURL
         }
 

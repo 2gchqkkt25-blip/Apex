@@ -8,6 +8,58 @@
 
 import Foundation
 
+// MARK: - URL normalization
+
+/// Normalizes user-pasted Stremio addon URLs to a canonical base for API requests.
+enum StremioURL {
+    /// Converts pasted install links (`…/manifest.json`, `stremio+https://…`) to the
+    /// addon base URL stored on the playlist and used for catalog/stream requests.
+    static func normalize(_ raw: String) -> URL? {
+        var trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        if trimmed.hasPrefix("stremio+") {
+            trimmed = String(trimmed.dropFirst("stremio+".count))
+        } else if trimmed.hasPrefix("stremio://") {
+            if let hash = trimmed.firstIndex(of: "#") {
+                trimmed = String(trimmed[trimmed.index(after: hash)...])
+            } else {
+                trimmed = String(trimmed.dropFirst("stremio://".count))
+            }
+        }
+
+        guard var url = URL(string: trimmed) else { return nil }
+
+        if url.lastPathComponent == "manifest.json" {
+            url.deleteLastPathComponent()
+        }
+
+        if var components = URLComponents(url: url, resolvingAgainstBaseURL: false) {
+            var path = components.path
+            if path == "/" {
+                components.path = ""
+            } else if path.hasSuffix("/") {
+                components.path = String(path.dropLast())
+            }
+            url = components.url ?? url
+        }
+
+        return url
+    }
+
+    /// Resolves the manifest fetch URL for a normalized addon base.
+    static func manifestURL(base: URL) -> URL {
+        let path = base.path
+        if path.hasSuffix("/stremio/v1") || path.hasSuffix("stremio/v1") {
+            return base
+        }
+        if base.lastPathComponent == "manifest.json" {
+            return base
+        }
+        return base.appendingPathComponent("manifest.json")
+    }
+}
+
 // MARK: - Error
 
 enum StremioError: Error, LocalizedError {
@@ -44,9 +96,10 @@ final class StremioClient {
     // MARK: - Manifest
 
     /// Fetches the addon manifest. The URL should be the addon's base URL;
-    /// `manifest.json` is appended automatically.
+    /// `manifest.json` is appended automatically (legacy `/stremio/v1` URLs are
+    /// fetched as-is).
     func fetchManifest(baseURL: URL) async throws -> StremioManifest {
-        let manifestURL = baseURL.appendingPathComponent("manifest.json")
+        let manifestURL = StremioURL.manifestURL(base: baseURL)
         let data = try await get(manifestURL)
         do {
             return try decoder.decode(StremioManifest.self, from: data)
@@ -57,10 +110,7 @@ final class StremioClient {
 
     /// Convenience: fetch manifest from a string URL (what the user enters).
     func fetchManifest(from urlString: String) async throws -> StremioManifest {
-        guard let url = URL(string: urlString.hasSuffix("/manifest.json")
-            ? urlString.replacingOccurrences(of: "/manifest.json", with: "")
-            : urlString)
-        else { throw StremioError.invalidURL }
+        guard let url = StremioURL.normalize(urlString) else { throw StremioError.invalidURL }
         return try await fetchManifest(baseURL: url)
     }
 
@@ -142,7 +192,9 @@ final class StremioClient {
     // MARK: - Helpers
 
     private func get(_ url: URL) async throws -> Data {
-        let (data, response) = try await session.data(from: url)
+        var request = URLRequest(url: url)
+        request.setValue(apexCatalogUserAgent, forHTTPHeaderField: "User-Agent")
+        let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else {
             throw StremioError.invalidURL
         }

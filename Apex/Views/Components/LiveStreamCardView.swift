@@ -58,7 +58,20 @@ struct LiveStreamCardView: View {
                                 .foregroundStyle(.tertiary)
                         }
                     }
-                } else if stream.epgChannelId != nil {
+                } else if let next = nextEPG {
+                    HStack(spacing: 4) {
+                        Text("Up next:")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Text(next.title)
+                            .font(.subheadline)
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                    }
+                    Text(next.start, style: .time)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                } else if stream.epgChannelId != nil || epg != nil {
                     Text("No EPG data")
                         .font(.caption)
                         .foregroundStyle(.tertiary)

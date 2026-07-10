@@ -21,6 +21,14 @@ struct M3USyncTests {
         return url
     }
 
+    private static func xmltvTimestamp(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyyMMddHHmmss Z"
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        return formatter.string(from: date)
+    }
+
     private let mixedPlaylist = """
     #EXTM3U url-tvg="http://example.com/embedded-guide.xml"
     #EXTINF:-1 tvg-id="news.1" tvg-logo="http://example.com/news1.png" group-title="News",News One
@@ -212,14 +220,18 @@ struct M3USyncTests {
     }
 
     @Test func `dedicated EPG sync imports listings for a playlist's source`() async throws {
+        let start = Date().addingTimeInterval(3600)
+        let end = start.addingTimeInterval(3600)
+        let startStamp = Self.xmltvTimestamp(start)
+        let endStamp = Self.xmltvTimestamp(end)
         let xmltv = """
         <?xml version="1.0" encoding="UTF-8"?>
         <tv>
-          <programme start="20260611120000 +0000" stop="20260611130000 +0000" channel="news.1">
+          <programme start="\(startStamp)" stop="\(endStamp)" channel="news.1">
             <title>Midday News</title>
             <desc>Headlines at noon.</desc>
           </programme>
-          <programme start="20260611120000 +0000" stop="20260611140000 +0000" channel="unknown.channel">
+          <programme start="\(startStamp)" stop="\(endStamp)" channel="unknown.channel">
             <title>Should be filtered</title>
           </programme>
         </tv>

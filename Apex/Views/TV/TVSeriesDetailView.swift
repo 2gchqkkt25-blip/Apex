@@ -76,16 +76,16 @@
             }
             .task(id: series.id) {
                 await loadEpisodesIfNeeded()
+                // Show content now — episodes are loaded. TMDB metadata (backdrop,
+                // cast, ratings, similar titles) fills in progressively afterward
+                // instead of hiding the view behind a spinner the whole time.
+                withAnimation(.easeInOut(duration: 0.3)) {
+                    isLoadingTMDB = false
+                }
                 await enrichIfNeeded()
                 await enrichSeriesRatingsIfNeeded(series, context: modelContext)
                 resolveSimilar()
                 resolveOtherSources()
-                withAnimation(.easeInOut(duration: 0.3)) {
-                    isLoadingTMDB = false
-                }
-                // Episodes are now loaded, so the Play button is enabled and can
-                // accept focus (an assignment made before this point is ignored
-                // by the focus engine while the button is disabled).
                 focus = .play
             }
             .onChange(of: series.similarTMDBIds) { resolveSimilar() }
@@ -483,11 +483,10 @@
                 seriesElementId: series.id,
                 playlist: playlist
             )) ?? []
-            // Insert through the view's own context, attaching to `series`, so its
-            // episodes relationship — and this view — update synchronously. Writing
-            // through a background context left the relationship stale until a later
-            // cross-context merge, so episodes only appeared after navigating back.
-            await MainActor.run { series.insertEpisodes(parsed, into: modelContext) }
+            // Insert through the view's own context so the episodes relationship
+            // updates reactively. Batched saves + yields keep the main thread
+            // responsive even for series with hundreds of episodes (tvOS watchdog).
+            await series.insertEpisodes(parsed, into: modelContext)
             selectedSeason = determineDefaultSeason()
         }
 

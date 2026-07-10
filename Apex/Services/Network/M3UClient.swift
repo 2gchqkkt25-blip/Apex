@@ -54,6 +54,19 @@ nonisolated class M3UClient {
         )
     }
 
+    /// Shorter timeout for XMLTV guide downloads — a hung guide must not block
+    /// the UI spinner for ten minutes.
+    /// Uses the default iOS User-Agent (not VLC) — some panels serve different
+    /// XMLTV content based on UA, and the VLC UA can trigger stale cached responses.
+    nonisolated static func makeEPGDownloadSession() -> URLSession {
+        ProviderURLSession.make(
+            timeout: 30,
+            resourceTimeout: 300,
+            maxConnectionsPerHost: 1,
+            additionalHeaders: [:]
+        )
+    }
+
     // MARK: - Download
 
     /// Fetches the playlist behind `urlString` and returns a local file URL to
@@ -90,13 +103,7 @@ nonisolated class M3UClient {
     }
 
     private func gunzipIfNeeded(_ fileURL: URL, deleteOriginal: Bool) throws -> URL {
-        guard GzipFile.isGzip(fileURL) else { return fileURL }
-        Logger.network.info("EPG file is gzipped, decompressing")
-        let decompressed = try GzipFile.decompress(fileURL)
-        if deleteOriginal {
-            try? FileManager.default.removeItem(at: fileURL)
-        }
-        return decompressed
+        try EPGDownload.preparedXMLTV(at: fileURL, deleteOriginalIfGzip: deleteOriginal)
     }
 
     private func download(_ url: URL, suffix: String) async throws -> URL {

@@ -45,7 +45,7 @@ struct MovieDetailView: View {
     init(movie: Movie, animationNamespace: Namespace.ID? = nil) {
         self.movie = movie
         self.animationNamespace = animationNamespace
-        let needsFetch = if movie.tmdbId != nil, TMDBClient.shared.isConfigured {
+        let needsFetch: Bool = if TMDBClient.shared.isConfigured {
             if let enrichedAt = movie.tmdbEnrichedAt,
                Date().timeIntervalSince(enrichedAt) < 14 * 24 * 3600
             {
@@ -291,8 +291,29 @@ struct MovieDetailView: View {
 
     // MARK: - Enrichment
 
+    /// Resolves a TMDB id by title when the provider didn't supply one.
+    private func resolveTMDBIdIfNeeded() async -> Int? {
+        if let tmdbId = movie.tmdbId { return tmdbId }
+        guard TMDBClient.shared.isConfigured else { return nil }
+        let query = ContentIndexText.searchQuery(for: movie.name)
+        let year = ContentIndexText.year(fromReleaseDate: movie.releaseDate) ?? query.year
+        let client = TMDBClient.shared
+        if let id = try? await client.searchMovieID(query: query.title, year: year) {
+            movie.tmdbId = id
+            try? modelContext.save()
+            return id
+        }
+        guard year != nil else { return nil }
+        if let id = try? await client.searchMovieID(query: query.title, year: nil) {
+            movie.tmdbId = id
+            try? modelContext.save()
+            return id
+        }
+        return nil
+    }
+
     private func enrichIfNeeded() async {
-        guard let tmdbId = movie.tmdbId else { return }
+        guard let tmdbId = await resolveTMDBIdIfNeeded() else { return }
         if let enrichedAt = movie.tmdbEnrichedAt,
            Date().timeIntervalSince(enrichedAt) < 14 * 24 * 3600
         {

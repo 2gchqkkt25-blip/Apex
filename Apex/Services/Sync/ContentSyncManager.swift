@@ -35,29 +35,53 @@ extension Series {
     /// de-duping against any already present (Episode.id is unique). Mutating the
     /// `episodes` relationship directly updates any observing SwiftUI view, so the
     /// caller must run this on the same context the view renders from.
-    func insertEpisodes(_ parsed: [ParsedEpisode], into context: ModelContext) {
+    ///
+    /// Inserts are batched with a save + MainActor yield after each batch so the
+    /// UI updates incrementally and the main thread never blocks long enough to
+    /// trigger the tvOS watchdog. On tvOS batches are smaller (25) because the
+    /// watchdog is stricter; on iOS/macOS 100-episode batches keep overhead low
+    /// while still yielding regularly.
+    @MainActor
+    func insertEpisodes(_ parsed: [ParsedEpisode], into context: ModelContext) async {
         let existingIds = Set(episodes.map(\.id))
-        for parsed in parsed where !existingIds.contains(parsed.id) {
-            let episode = Episode(
-                id: parsed.id,
-                episodeId: parsed.episodeId,
-                title: parsed.title,
-                containerExtension: parsed.containerExtension,
-                seasonNum: parsed.seasonNum,
-                episodeNum: parsed.episodeNum,
-                added: parsed.added,
-                directSource: parsed.directSource
-            )
-            episode.durationSecs = parsed.durationSecs
-            episode.movieImage = parsed.movieImage
-            episode.rating = parsed.rating
-            episode.airDate = parsed.airDate
-            episode.plot = parsed.plot
-            episode.series = self
-            context.insert(episode)
-            episodes.append(episode)
+        let newEpisodes = parsed.filter { !existingIds.contains($0.id) }
+        guard !newEpisodes.isEmpty else { return }
+
+        #if os(tvOS)
+        let batchSize = 25
+        #else
+        let batchSize = 100
+        #endif
+
+        var index = newEpisodes.startIndex
+        while index < newEpisodes.endIndex {
+            let end = Swift.min(index + batchSize, newEpisodes.endIndex)
+            for parsed in newEpisodes[index ..< end] {
+                let episode = Episode(
+                    id: parsed.id,
+                    episodeId: parsed.episodeId,
+                    title: parsed.title,
+                    containerExtension: parsed.containerExtension,
+                    seasonNum: parsed.seasonNum,
+                    episodeNum: parsed.episodeNum,
+                    added: parsed.added,
+                    directSource: parsed.directSource
+                )
+                episode.durationSecs = parsed.durationSecs
+                episode.movieImage = parsed.movieImage
+                episode.rating = parsed.rating
+                episode.airDate = parsed.airDate
+                episode.plot = parsed.plot
+                episode.series = self
+                context.insert(episode)
+                episodes.append(episode)
+            }
+            try? context.save()
+            // Yield the main actor so SwiftUI can process the new batch and the
+            // OS watchdog sees the main thread is still responsive.
+            await Task.yield()
+            index = end
         }
-        try? context.save()
     }
 }
 
@@ -149,6 +173,10 @@ actor ContentSyncManager {
         ).first {
             dpl.syncStatus = .idle
             dpl.lastSyncDate = Date()
+            // Ensure the linked EPG source exists before post-sync guide refresh.
+            // Xtream/Stalker sync paths never called reconcile — without this the
+            // guide stays empty even though channels carry epgChannelId values.
+            EPGSourceReconciler.reconcile(dpl, in: doneContext)
             try doneContext.save()
         }
     }

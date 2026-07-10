@@ -47,7 +47,7 @@ struct SeriesDetailView: View {
     init(series: Series, animationNamespace: Namespace.ID? = nil) {
         self.series = series
         self.animationNamespace = animationNamespace
-        let needsFetch = if series.tmdbId != nil, TMDBClient.shared.isConfigured {
+        let needsFetch: Bool = if TMDBClient.shared.isConfigured {
             if let enrichedAt = series.tmdbEnrichedAt,
                Date().timeIntervalSince(enrichedAt) < 14 * 24 * 3600
             {
@@ -495,13 +495,14 @@ struct SeriesDetailView: View {
             seriesElementId: series.id,
             playlist: playlist
         )) ?? []
-        // Insert through the view's own context, attaching to `series`, so its
-        // episodes relationship — and this view — update synchronously.
-        await MainActor.run { series.insertEpisodes(parsed, into: modelContext) }
+        // Insert through the view's own context so the episodes relationship
+        // updates reactively. Batched saves + yields keep the main thread
+        // responsive even for series with hundreds of episodes.
+        await series.insertEpisodes(parsed, into: modelContext)
     }
 
     private func enrichIfNeeded() async {
-        guard let tmdbId = series.tmdbId else { return }
+        guard let tmdbId = await resolveTMDBIdIfNeeded() else { return }
         if let enrichedAt = series.tmdbEnrichedAt,
            Date().timeIntervalSince(enrichedAt) < 14 * 24 * 3600
         {
@@ -517,6 +518,27 @@ struct SeriesDetailView: View {
         applySeriesDetails(details, to: series, context: modelContext)
         try? modelContext.save()
         refreshToken = UUID()
+    }
+
+    /// Resolves a TMDB id by title when the provider didn't supply one.
+    private func resolveTMDBIdIfNeeded() async -> Int? {
+        if let tmdbId = series.tmdbId { return tmdbId }
+        guard TMDBClient.shared.isConfigured else { return nil }
+        let query = ContentIndexText.searchQuery(for: series.name)
+        let year = ContentIndexText.year(fromReleaseDate: series.releaseDate) ?? query.year
+        let client = TMDBClient.shared
+        if let id = try? await client.searchTVID(query: query.title, year: year) {
+            series.tmdbId = id
+            try? modelContext.save()
+            return id
+        }
+        guard year != nil else { return nil }
+        if let id = try? await client.searchTVID(query: query.title, year: nil) {
+            series.tmdbId = id
+            try? modelContext.save()
+            return id
+        }
+        return nil
     }
 }
 
