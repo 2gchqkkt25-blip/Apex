@@ -1,0 +1,170 @@
+name: CI
+
+# Runs on every push/PR so a regression is caught here instead of on a
+# TestFlight tester's device days later (see PROJECT_REFERENCE.md's Build
+# 20-24 regression history — none of those would have shipped if this had
+# existed). sideload-release.yml only archives on a published release tag;
+# it never builds a PR or runs the test suite.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch: {}
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-ios:
+    name: iOS Build + Test
+    runs-on: macos-26
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      # Xcode 26 no longer bundles the Metal toolchain; KSPlayer's Shaders.metal
+      # fails to compile without it (same fix as sideload-release.yml).
+      - name: Download Metal Toolchain
+        run: xcodebuild -downloadComponent MetalToolchain
+
+      # Optional — features degrade gracefully when absent (Scripts/inject-env.sh).
+      # Add these as repo secrets if you want CI to exercise TMDB/OMDb-dependent code.
+      - name: Write .env
+        env:
+          TMDB_ACCESS_TOKEN: ${{ secrets.TMDB_ACCESS_TOKEN }}
+          OMDB_API_KEY: ${{ secrets.OMDB_API_KEY }}
+        run: |
+          {
+            [ -n "$TMDB_ACCESS_TOKEN" ] && echo "TMDB_ACCESS_TOKEN=$TMDB_ACCESS_TOKEN"
+            [ -n "$OMDB_API_KEY" ]      && echo "OMDB_API_KEY=$OMDB_API_KEY"
+          } > .env || true
+
+      # CLAUDE.md: tests require iOS 26.4+ Simulator on an iPhone 17-class
+      # device — older sims fail with a deployment-target mismatch (exit 65).
+      # Resolved dynamically instead of hardcoding a name/UDID, since the
+      # exact simulator set on GitHub's macos-26 image can shift between
+      # Xcode releases.
+      - name: Resolve iPhone 17-class simulator
+        run: |
+          SIM_NAME=$(xcrun simctl list devices available \
+            | grep -oE "iPhone (1[7-9]|[2-9][0-9])[^(]*" \
+            | sed -E 's/[[:space:]]+$//' \
+            | head -1)
+          if [ -z "$SIM_NAME" ]; then
+            echo "::error::No iPhone 17-class simulator found on this runner image. Update the CLAUDE.md-documented device requirement or this workflow." >&2
+            xcrun simctl list devices available
+            exit 1
+          fi
+          echo "Using simulator: $SIM_NAME"
+          echo "SIM_NAME=$SIM_NAME" >> "$GITHUB_ENV"
+
+      - name: Run test suite
+        run: |
+          xcodebuild test \
+            -project Apex.xcodeproj -scheme Apex \
+            -destination "platform=iOS Simulator,name=${{ env.SIM_NAME }}" \
+            -resultBundlePath TestResults.xcresult
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-test-results
+          path: TestResults.xcresult
+
+  build-tvos:
+    name: "tvOS Build (compile-only — CLAUDE.md: tests never deploy to tvOS)"
+    runs-on: macos-26
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Download Metal Toolchain
+        run: xcodebuild -downloadComponent MetalToolchain
+
+      - name: Write .env
+        env:
+          TMDB_ACCESS_TOKEN: ${{ secrets.TMDB_ACCESS_TOKEN }}
+          OMDB_API_KEY: ${{ secrets.OMDB_API_KEY }}
+        run: |
+          {
+            [ -n "$TMDB_ACCESS_TOKEN" ] && echo "TMDB_ACCESS_TOKEN=$TMDB_ACCESS_TOKEN"
+            [ -n "$OMDB_API_KEY" ]      && echo "OMDB_API_KEY=$OMDB_API_KEY"
+          } > .env || true
+
+      - name: Build for tvOS Simulator
+        run: |
+          xcodebuild build \
+            -project Apex.xcodeproj -scheme Apex \
+            -destination 'generic/platform=tvOS Simulator'
+
+  build-macos:
+    name: macOS Build (unsigned compile-only — see PROJECT_REFERENCE.md macOS signing note)
+    runs-on: macos-26
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Download Metal Toolchain
+        run: xcodebuild -downloadComponent MetalToolchain
+
+      - name: Write .env
+        env:
+          TMDB_ACCESS_TOKEN: ${{ secrets.TMDB_ACCESS_TOKEN }}
+          OMDB_API_KEY: ${{ secrets.OMDB_API_KEY }}
+        run: |
+          {
+            [ -n "$TMDB_ACCESS_TOKEN" ] && echo "TMDB_ACCESS_TOKEN=$TMDB_ACCESS_TOKEN"
+            [ -n "$OMDB_API_KEY" ]      && echo "OMDB_API_KEY=$OMDB_API_KEY"
+          } > .env || true
+
+      # No Developer ID cert is provisioned yet (see PROJECT_REFERENCE.md), so
+      # this only proves the macOS target still compiles — it does not
+      # produce a distributable artifact. Remove this job once real macOS
+      # signing is set up and fold it into a signed archive step instead.
+      - name: Build for macOS (ad-hoc, unsigned)
+        run: |
+          xcodebuild build \
+            -project Apex.xcodeproj -scheme Apex \
+            -destination 'platform=macOS' \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO
+
+  lint:
+    name: SwiftLint (--strict)
+    runs-on: macos-26
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      # Vendored as an SPM plugin (Package.swift) — same tool + version
+      # contributors get from Scripts/setup.sh, so CI can't drift from local.
+      - name: Run SwiftLint
+        run: |
+          swift package --build-path .build/tools plugin \
+            --allow-writing-to-package-directory swiftlint lint --strict \
+            Apex ApexTests ApexUITests
