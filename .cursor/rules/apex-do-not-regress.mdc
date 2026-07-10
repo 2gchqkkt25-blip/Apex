@@ -1,0 +1,21 @@
+---
+description: Apex regression guard — read before any Live TV, EPG, indexer, or Home change
+alwaysApply: true
+---
+
+# Apex — Do Not Regress
+
+Before editing performance or Live TV code, read `PROJECT_REFERENCE.md` § **Do Not Regress — Pre-Change Checklists** and `EPG.md` § **Stability rules**.
+
+## Hard stops
+
+1. **EPG sync layer** (`EPGSyncService`, `EPGSyncManager`, `EPGAPISync`, `EPGLiveLoader`, `ExternalEPGSources`) — change only for a proven bug with logs; never as part of a performance pass.
+2. **Live TV UI** — never add `.id()` that includes section/category/layout (sort-only `.id(contentSort)` is OK). Never `if/else` list vs guide — use `ZStack` + opacity so both stay mounted.
+3. **EPG browse** — list and guide must call the same `EPGBrowseLoader.load` (no custom `windowStart`/`windowEnd` on guide). Merge into `LiveTVSectionEPGCache`; never `replace: true` full wipe. Never eager `programsByChannel = [:]` on category switch.
+4. **Performance** — never re-add per-chunk `ImageMemoryCache.purge` in `ContentIndexer`. Never block launch on `await cloudSync.start()`. Never observe `ContentIndexingService` in `HomeView`.
+
+## After Live TV / EPG UI edits
+
+Run: `xcodebuild test -only-testing:ApexTests/EPGSyncTests -only-testing:ApexTests/EPGSourceTests -only-testing:ApexTests/XMLTVDateTests`
+
+Verify manually: list shows EPG → switch to guide (instant) → switch categories → return (data persists).

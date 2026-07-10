@@ -1,0 +1,27 @@
+---
+description: Apex performance invariants (Builds 21–24) — indexer, launch, tabs, images
+globs: Apex/Services/Indexing/**,Apex/Views/Home/**,Apex/Views/MainTabView.swift,Apex/ApexApp.swift,Apex/Services/Images/**,Apex/Views/Components/CachedAsyncImage.swift
+alwaysApply: false
+---
+
+# Performance — Do Not Regress
+
+Performance work must **not** modify EPG sync files or Live TV UI patterns (see `apex-epg-live-tv-ui.mdc`).
+
+## Invariants
+
+| Area | Rule |
+|------|------|
+| **Indexer** | Chunk 50, 500ms pause; TMDB id-only in background (`details: nil`); no `ImageMemoryCache.purge` per chunk; tvOS skips `TextEmbedder` |
+| **Indexer** | Pauses when: EPG sync gate, browse (`pauseForBrowse`), cloud sync, playback |
+| **Launch** | `Task { await cloudSync.start() }` — never block launch `.task` on CloudKit |
+| **Home** | Do not `@Observe` / bind `ContentIndexingService`; library heroes first; TMDB trending in background |
+| **Tabs** | `lazyTab` mounts when `selection == tab`; call `pauseForBrowse()` on switch |
+| **Cellular** | `NetworkMonitor.shouldProceedWithHeavyNetworkWork()` gates background indexer + EPG `syncIfDue` |
+| **Images** | `CachedAsyncImage` keeps `.success` on re-eval; deferred purge on background only |
+| **Collections** | Paginate Show All grids (100/page); cap favorites `@Query` limits |
+| **TMDB detail** | Full enrichment on detail open (`resolveTMDBIdIfNeeded`); not in background indexer |
+
+## Safe optimization targets
+
+`ContentIndexer`, `HomeView+Trending`, `SearchView`, `LibraryCollectionRows`, `CloudSyncCoordinator` — not `LiveTVView` EPG state unless fixing a logged EPG UI bug.

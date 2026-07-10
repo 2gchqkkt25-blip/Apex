@@ -1,0 +1,40 @@
+---
+description: Live TV + EPG guide UI rules (Build 19/24) — prevents category/list/guide regressions
+globs: Apex/Views/LiveTV/**/*
+alwaysApply: false
+---
+
+# Live TV & EPG Guide UI
+
+Architecture: SwiftData store → `EPGBrowseLoader` → `LiveTVSectionEPGCache` → list + guide. See `EPG.md` and Build 19 in `PROJECT_REFERENCE.md`.
+
+## Required patterns
+
+```swift
+// ✅ List + guide both mounted; shared cache
+ZStack {
+  ChannelsList(..., sectionToken: section.id, epgCache: epgCache)
+    .opacity(layoutMode == .list ? 1 : 0)
+  EPGGuideView(..., sectionToken: section.id, epgCache: epgCache)
+    .opacity(layoutMode == .guide ? 1 : 0)
+}
+.id(contentSort.rawValue)  // sort only — NOT section or layout
+
+// ✅ Same loader as list — no guide-only window
+await EPGBrowseLoader.load(container:channels:playlist:)
+
+// ✅ Merge missing channels only
+epgCache.merge(section: sectionToken, loaded: loaded)
+
+// ✅ Category switch — reset pagination only
+.onChange(of: sectionToken) { visibleCount = LiveChannelQuery.pageSize }
+```
+
+## Forbidden
+
+- `.id("\(section)-\(sort)-\(layout)")` or any `.id()` keyed on category
+- `if layoutMode == .guide { EPGGuideView } else { ChannelsList }` (destroys state)
+- `programsByChannel = [:]` / `epgByChannel = [:]` on `sectionToken` change
+- `playlist(for:)` fetch when `activePlaylist` is available — pass `playlist:` prop
+- `windowStart`/`windowEnd` on guide's `EPGBrowseLoader.load` (narrows store vs list)
+- `replace: true` that replaces entire cache dict instead of merge

@@ -15,7 +15,7 @@
   ],
   "products" : [
     {
-      "displayPrice" : "9.99",
+      "displayPrice" : "19.99",
       "familyShareable" : false,
       "internalID" : "5001",
       "localizations" : [
@@ -38,7 +38,7 @@
     "_failTransactionsEnabled" : false,
     "_locale" : "en_US",
     "_renewalBillingIssuesEnabled" : false,
-    "_storefront" : "DEU",
+    "_storefront" : "USA",
     "_storeKitErrors" : [
       {
         "enabled" : false,
@@ -94,8 +94,8 @@
           "billingPlans" : [
             {
               "billingPlanType" : "BILLED_UPFRONT",
-              "commitmentDisplayPrice" : "0.99",
-              "displayPrice" : "0.99",
+              "commitmentDisplayPrice" : "1.99",
+              "displayPrice" : "1.99",
               "internalID" : "43245CE8",
               "isEnabled" : true
             }
@@ -103,7 +103,7 @@
           "codeOffers" : [
 
           ],
-          "displayPrice" : "0.99",
+          "displayPrice" : "1.99",
           "familyShareable" : false,
           "groupNumber" : 1,
           "internalID" : "5002",

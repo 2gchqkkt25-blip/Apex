@@ -114,7 +114,9 @@ CloudKit is disabled only for **SwiftUI previews** and **automated tests**. Unsi
 | Device Settings → iCloud Sync **On** | ✅ |
 | **Production schema deploy** | ✅ Deployed |
 | **Production sync verified** (playlist + user data) | ✅ TestFlight |
-| External TestFlight Beta App Review | 🔄 Per build (build **17** uploading) |
+| Age rating **17+** + Privacy URL in App Information | ✅ Documented — confirm in Connect |
+| App Privacy questionnaire | ⏳ Complete in Connect (align with `PRIVACY.md`) |
+| External TestFlight Beta App Review | 🔄 Per build (build **17**) |
 
 ---
 

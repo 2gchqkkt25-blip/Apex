@@ -1,0 +1,911 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Apex — App Store Connect Checklist</title>
+<style>
+  :root {
+    --bg: #0D0D1A;
+    --surface: #151530;
+    --card: #1A1A3E;
+    --accent: #6B7AFF;
+    --accent-glow: #8B9AFF;
+    --text: #E8E8F0;
+    --text-dim: #9999BB;
+    --green: #34D399;
+    --amber: #FBBF24;
+    --red: #F87171;
+    --border: #2A2A50;
+    --radius: 10px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    padding: 0;
+  }
+
+  /* ── Header ── */
+  .hero {
+    background: linear-gradient(135deg, #1A1A4E 0%, #0D0D2E 40%, #1A1040 100%);
+    border-bottom: 1px solid var(--border);
+    padding: 48px 24px 40px;
+    text-align: center;
+  }
+  .hero .logo {
+    font-size: 48px;
+    font-weight: 800;
+    letter-spacing: -1px;
+    background: linear-gradient(135deg, #6B7AFF, #A78BFA);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  .hero .subtitle {
+    color: var(--text-dim);
+    font-size: 16px;
+    margin-top: 8px;
+  }
+  .hero .phase-badges {
+    margin-top: 20px;
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+  .hero .badge {
+    padding: 6px 16px;
+    border-radius: 20px;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .badge.now  { background: rgba(107,122,255,0.2); color: var(--accent-glow); border: 1px solid rgba(107,122,255,0.3); }
+  .badge.next  { background: rgba(251,191,36,0.15); color: var(--amber); border: 1px solid rgba(251,191,36,0.25); }
+
+  /* ── Layout ── */
+  .container { max-width: 900px; margin: 0 auto; padding: 32px 24px 80px; }
+
+  /* ── Section ── */
+  .section { margin-bottom: 40px; }
+  .section h2 {
+    font-size: 22px;
+    font-weight: 700;
+    margin-bottom: 16px;
+    padding-bottom: 8px;
+    border-bottom: 2px solid var(--accent);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .section h2 .icon { font-size: 24px; }
+  .section h3 {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--accent-glow);
+    margin: 20px 0 10px;
+  }
+
+  /* ── Card ── */
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px 24px;
+    margin-bottom: 16px;
+  }
+  .card.nest { background: var(--surface); margin-left: 20px; border-left: 3px solid var(--accent); }
+
+  /* ── Checklist item ── */
+  .check-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 12px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+  }
+  .check-item:last-child { border-bottom: none; }
+  .check-item .box {
+    width: 22px; height: 22px;
+    border-radius: 6px;
+    border: 2px solid var(--border);
+    flex-shrink: 0;
+    margin-top: 2px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+  }
+  .check-item .box.done { background: var(--green); border-color: var(--green); color: #000; }
+  .check-item .label { flex: 1; }
+  .check-item .label .title { font-weight: 600; font-size: 15px; }
+  .check-item .label .desc { color: var(--text-dim); font-size: 13px; margin-top: 2px; }
+  .check-item .label .where {
+    display: inline-block;
+    margin-top: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--accent-glow);
+    background: rgba(107,122,255,0.1);
+    padding: 2px 8px;
+    border-radius: 4px;
+  }
+
+  /* ── Copy block ── */
+  .copy-block {
+    position: relative;
+    background: #0A0A20;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    margin: 12px 0;
+    overflow: hidden;
+  }
+  .copy-block .label-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 14px;
+    background: rgba(107,122,255,0.08);
+    border-bottom: 1px solid var(--border);
+  }
+  .copy-block .label-bar span {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--accent-glow);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .copy-block .label-bar button {
+    font-size: 12px;
+    font-weight: 600;
+    padding: 4px 14px;
+    border-radius: 6px;
+    border: 1px solid var(--accent);
+    background: rgba(107,122,255,0.15);
+    color: var(--accent-glow);
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .copy-block .label-bar button:hover { background: rgba(107,122,255,0.3); }
+  .copy-block .label-bar button.copied { background: var(--green); border-color: var(--green); color: #000; }
+  .copy-block pre {
+    padding: 14px;
+    margin: 0;
+    font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--text);
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  /* ── Table ── */
+  table { width: 100%; border-collapse: collapse; margin: 12px 0; }
+  th, td {
+    text-align: left;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    font-size: 14px;
+  }
+  th {
+    color: var(--text-dim);
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  td code {
+    background: rgba(107,122,255,0.1);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 13px;
+    color: var(--accent-glow);
+  }
+
+  /* ── Status dots ── */
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+  .dot.green { background: var(--green); }
+  .dot.amber { background: var(--amber); }
+
+  /* ── Responsive ── */
+  @media (max-width: 600px) {
+    .hero { padding: 32px 16px; }
+    .hero .logo { font-size: 32px; }
+    .container { padding: 20px 16px 60px; }
+    .card { padding: 16px; }
+    .card.nest { margin-left: 8px; }
+  }
+
+  /* ── Print ── */
+  @media print {
+    body { background: #fff; color: #111; }
+    .hero { background: #f5f5ff; border-bottom: 2px solid #6B7AFF; }
+    .card, .copy-block { background: #fafafa; border-color: #ddd; }
+    .copy-block pre { background: #f0f0f0; }
+    button { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════ -->
+<!-- HERO -->
+<!-- ═══════════════════════════════════════════ -->
+<div class="hero">
+  <div class="logo">Apex</div>
+  <div class="subtitle">App Store Connect · TestFlight &amp; App Store Submission Checklist</div>
+  <div class="phase-badges">
+    <span class="badge now">● Phase 1 — External TestFlight</span>
+    <span class="badge next">○ Phase 2 — App Store Public Release</span>
+  </div>
+</div>
+
+<div class="container">
+
+<!-- ═══════════════════════════════════════════ -->
+<!-- QUICK REFERENCE -->
+<!-- ═══════════════════════════════════════════ -->
+<div class="section">
+  <h2><span class="icon">📋</span> Quick Reference</h2>
+  <div class="card">
+    <table>
+      <tr><th>Field</th><th>Value</th></tr>
+      <tr><td>App Name</td><td><strong>Apex Stream Player</strong></td></tr>
+      <tr><td>Bundle ID</td><td><code>com.streaminfinity.apex</code></td></tr>
+      <tr><td>Team ID</td><td><code>VS7D6GB238</code></td></tr>
+      <tr><td>App Store Connect ID</td><td><code>6779551584</code></td></tr>
+      <tr><td>Marketing Version</td><td><strong>1.2.0</strong></td></tr>
+      <tr><td>Current Build</td><td><strong>19</strong> (bump before each upload)</td></tr>
+      <tr><td>Privacy Policy</td><td><code>https://github.com/2gchqkkt25-blip/Apex/blob/main/PRIVACY.md</code></td></tr>
+      <tr><td>Support URL</td><td><code>https://github.com/2gchqkkt25-blip/Apex</code></td></tr>
+      <tr><td>Support Email</td><td><code>support@streaminfinitytv.com</code></td></tr>
+      <tr><td>Age Rating</td><td><strong>17+</strong></td></tr>
+      <tr><td>Demo Playlist (M3U)</td><td><code>https://iptv-org.github.io/iptv/index.m3u</code></td></tr>
+    </table>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════ -->
+<!-- PHASE 1: EXTERNAL TESTFLIGHT -->
+<!-- ═══════════════════════════════════════════ -->
+<div class="section">
+  <h2><span class="icon">🚀</span> Phase 1 — External TestFlight</h2>
+  <p style="color:var(--text-dim);margin-bottom:16px;">Goal: get build 19 into the hands of external beta testers. Apple reviews once per build group (~1–2 days).</p>
+
+  <!-- 1.1 -->
+  <div class="card">
+    <h3 style="margin-top:0;">1.1 &ensp; Archive &amp; Upload Build 19</h3>
+    <div class="check-item">
+      <div class="box"></div>
+      <div class="label">
+        <div class="title">Confirm build number is 19 (or higher)</div>
+        <div class="desc">Xcode → General → Apex target → Build. Increment if it was already used.</div>
+        <span class="where">Xcode</span>
+      </div>
+    </div>
+    <div class="check-item">
+      <div class="box"></div>
+      <div class="label">
+        <div class="title">Verify .env has TMDB + OMDb keys</div>
+        <div class="desc">Keys inject at build time. Missing keys = degraded metadata (app still works).</div>
+        <span class="where">Terminal: cat ".env"</span>
+      </div>
+    </div>
+    <div class="check-item">
+      <div class="box"></div>
+      <div class="label">
+        <div class="title">Archive: Product → Archive (Release scheme)</div>
+        <div class="desc">Select "Any iOS Device" or "Any tvOS Device" as destination. Wait for archive to complete.</div>
+        <span class="where">Xcode</span>
+      </div>
+    </div>
+    <div class="check-item">
+      <div class="box"></div>
+      <div class="label">
+        <div class="title">Distribute App → App Store Connect</div>
+        <div class="desc">Upload. Check "Upload your app's symbols" and "Manage version and build number."</div>
+        <span class="where">Xcode Organizer</span>
+      </div>
+    </div>
+    <div class="check-item">
+      <div class="box"></div>
+      <div class="label">
+        <div class="title">Wait for processing (~15–30 min)</div>
+        <div class="desc">You'll get an email from Apple when the build is ready. Check App Store Connect → TestFlight.</div>
+        <span class="where">Email + App Store Connect</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 1.2 -->
+  <div class="card">
+    <h3 style="margin-top:0;">1.2 &ensp; Export Compliance</h3>
+    <div class="check-item">
+      <div class="box"></div>
+      <div class="label">
+        <div class="title">Answer Export Compliance</div>
+        <div class="desc">TestFlight → iOS Builds → click build 19 → Export Compliance. Select <strong>"No"</strong> — Apex uses standard HTTPS only (no encryption beyond what iOS provides).</div>
+        <span class="where">App Store Connect → TestFlight → iOS</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 1.3 -->
+  <div class="card">
+    <h3 style="margin-top:0;">1.3 &ensp; Create External Tester Group</h3>
+    <div class="check-item">
+      <div class="box"></div>
+      <div class="label">
+        <div class="title">Go to TestFlight → External Testing</div>
+        <div class="desc">If no external group exists, click "+" → "New External Group." Name it something like "Beta Testers" or "Early Access."</div>
+        <span class="where">App Store Connect → TestFlight</span>
+      </div>
+    </div>
+    <div class="check-item">
+      <div class="box"></div>
+      <div class="label">
+        <div class="title">Add build 19 to the external group</div>
+        <div class="desc">Click the group → Builds → "+" → select build 19 (iOS). Repeat for tvOS if uploading that too.</div>
+        <span class="where">App Store Connect → TestFlight → [Group]</span>
+      </div>
+    </div>
+    <div class="check-item">
+      <div class="box"></div>
+      <div class="label">
+        <div class="title">Add testers</div>
+        <div class="desc">Two options: <strong>(a)</strong> Add individual emails under Testers tab, or <strong>(b)</strong> Enable Public Link to share a sign-up URL. Emails give you more control; public link is easier to distribute.</div>
+        <span class="where">App Store Connect → TestFlight → [Group] → Testers</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 1.4 -->
+  <div class="card">
+    <h3 style="margin-top:0;">1.4 &ensp; Test Information (Required for Beta App Review)</h3>
+    <div class="check-item">
+      <div class="box"></div>
+      <div class="label">
+        <div class="title">Fill in "What to Test"</div>
+        <div class="desc">Paste the copy below. Click into the external group → Test Information.</div>
+        <span class="where">App Store Connect → TestFlight → [Group] → Test Information</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- WHAT TO TEST COPY -->
+  <div class="copy-block">
+    <div class="label-bar">
+      <span>📋 What to Test — Copy &amp; Paste</span>
+      <button onclick="copyBlock(this, 'whattotest')">Copy</button>
+    </div>
+    <pre id="whattotest">APP TYPE
+Apex is an IPTV player only. No content is bundled, hosted, or curated
+by the app. Users must supply their own playlists to use it.
+
+DEMO PLAYLIST (no login required)
+This is a free, publicly available M3U playlist from iptv-org on GitHub
+(131k stars, widely used for testing IPTV apps):
+
+  https://iptv-org.github.io/iptv/index.m3u
+
+No username or password is needed — it's a direct M3U URL.
+
+TEST STEPS
+1. Open Apex
+2. Tap "Add Playlist"
+3. Select "M3U URL"
+4. Paste: https://iptv-org.github.io/iptv/index.m3u
+5. Tap "Add Playlist" — sync runs automatically (~30 seconds)
+6. After sync, browse Live TV, Movies, and Series tabs
+7. Tap any channel or video to verify playback
+8. (Optional) Check Settings → iCloud Sync if signed into iCloud
+
+WHAT TO VERIFY
+• Playlist sync completes without errors
+• Content populates across all tabs
+• Stream playback works with audio + video
+• No crashes during browsing or playback
+
+ADDITIONAL INFO
+• Free tier: 1 playlist + core playback
+• Apex Pro (IAP): unlocks unlimited playlists, downloads, profiles, etc.
+• Standard HTTPS only — no non-exempt encryption
+• Age rating: 17+ (user-supplied streams may include unrated media)
+• Privacy policy: https://github.com/2gchqkkt25-blip/Apex/blob/main/PRIVACY.md
+• Open source (AGPL-3.0): https://github.com/2gchqkkt25-blip/Apex
+• Contact: support@streaminfinitytv.com</pre>
+  </div>
+
+  <!-- 1.5 -->
+  <div class="card">
+    <h3 style="margin-top:0;">1.5 &ensp; Beta App Review Contact</h3>
+    <div class="check-item">
+      <div class="box"></div>
+      <div class="label">
+        <div class="title">Set contact info</div>
+        <div class="desc">First name, last name, email. Same Test Information section.</div>
+        <span class="where">App Store Connect → TestFlight → [Group] → Test Information</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 1.6 -->
+  <div class="card">
+    <h3 style="margin-top:0;">1.6 &ensp; Submit for Beta App Review</h3>
+    <div class="check-item">
+      <div class="box"></div>
+      <div class="label">
+        <div class="title">Click "Submit for Beta App Review"</div>
+        <div class="desc">Button appears in the external group once build is added + Test Information is filled.</div>
+        <span class="where">App Store Connect → TestFlight → [Group]</span>
+      </div>
+    </div>
+    <div class="check-item">
+      <div class="box"></div>
+      <div class="label">
+        <div class="title">Wait for approval (~1–2 days)</div>
+        <div class="desc">You'll get an email. Once approved, the build automatically becomes available to your external testers.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- STATUS CARD -->
+  <div class="card" style="border-left: 3px solid var(--amber);">
+    <strong style="color:var(--amber);">⏳ Phase 1 Status</strong>
+    <p style="margin-top:8px;color:var(--text-dim);">
+      After Beta App Review approval, external testers can install Apex via TestFlight.
+      Each new build you upload needs a fresh Beta App Review (unless you use the same version number).
+      Internal testers (your team) can install immediately — no review required.
+    </p>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════ -->
+<!-- PHASE 2: APP STORE -->
+<!-- ═══════════════════════════════════════════ -->
+<div class="section">
+  <h2><span class="icon">🏪</span> Phase 2 — App Store Public Release</h2>
+  <p style="color:var(--text-dim);margin-bottom:16px;">Do this after you're happy with TestFlight feedback. This is a full App Store review — stricter than Beta App Review.</p>
+
+  <!-- 2.1 -->
+  <div class="card">
+    <h3 style="margin-top:0;">2.1 &ensp; App Store Metadata — iOS App</h3>
+    <div class="check-item">
+      <div class="box"></div>
+      <div class="label">
+        <div class="title">Promotional Text</div>
+        <div class="desc">Appears above the description. Can update without a new build.</div>
+        <span class="where">App Store Connect → iOS App → 1.2.0 → App Store</span>
+      </div>
+    </div>
+    <div class="check-item">
+      <div class="box"></div>
+      <div class="label">
+        <div class="title">Description</div>
+        <div class="desc">Full app description. See copy block below.</div>
+        <span class="where">App Store Connect → iOS App → 1.2.0 → App Store</span>
+      </div>
+    </div>
+    <div class="check-item">
+      <div class="box"></div>
+      <div class="label">
+        <div class="title">Keywords</div>
+        <div class="desc">Comma-separated, 100 character limit.</div>
+        <span class="where">App Store Connect → iOS App → 1.2.0 → App Store</span>
+      </div>
+    </div>
+    <div class="check-item">
+      <div class="box"></div>
+      <div class="label">
+        <div class="title">Subtitle</div>
+        <div class="desc">30 characters max. Appears under app name in search results.</div>
+        <span class="where">App Store Connect → iOS App → 1.2.0 → App Store</span>
+      </div>
+    </div>
+    <div class="check-item">
+      <div class="box"></div>
+      <div class="label">
+        <div class="title">What's New in This Version</div>
+        <div class="desc">Shown to existing users updating. See copy block below.</div>
+        <span class="where">App Store Connect → iOS App → 1.2.0 → App Store</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- iOS Description -->
+  <div class="copy-block">
+    <div class="label-bar">
+      <span>📋 iOS Description — Copy &amp; Paste</span>
+      <button onclick="copyBlock(this, 'iosdesc')">Copy</button>
+    </div>
+    <pre id="iosdesc">Apex is a powerful, elegant IPTV player that puts you in control of your streaming experience. Bring your own playlists and enjoy Live TV, Movies, and Series — all in one beautifully designed app.
+
+▶ YOUR CONTENT, YOUR WAY
+Add playlists from Xtream Codes, M3U/M3U8 URLs, or Stremio addons. Apex doesn't bundle any content — you decide what to watch.
+
+▶ THREE PLAYBACK ENGINES
+KSPlayer (default), VLCKit, or AVPlayer — with automatic fallback so your stream always plays, no matter the format.
+
+▶ FULL EPG TV GUIDE
+Browse what's on now and next with a complete electronic program guide. Time-grid view makes channel surfing feel like traditional TV.
+
+▶ RICH METADATA
+Movie and series posters, backdrops, cast, ratings (IMDb, Rotten Tomatoes, Metacritic), and trailers — powered by TMDB and OMDb.
+
+▶ CROSS-DEVICE SYNC
+Your playlists, favorites, and watch progress sync across iPhone, iPad, and Apple TV via iCloud.
+
+▶ APEX PRO
+Unlock unlimited playlists, downloads for offline viewing, user profiles, parental controls, Trakt scrobbling, and personalized For You recommendations.
+
+Apex is open source (AGPL-3.0) — the code is on GitHub. No accounts required. No ads. No tracking.</pre>
+  </div>
+
+  <!-- Subtitle + Keywords -->
+  <div class="copy-block">
+    <div class="label-bar">
+      <span>📋 Subtitle + Keywords — Copy &amp; Paste</span>
+      <button onclick="copyBlock(this, 'subkey')">Copy</button>
+    </div>
+    <pre id="subkey">Subtitle:
+IPTV Player & EPG TV Guide
+
+Keywords:
+iptv,player,m3u,xtream,epg,tv guide,live tv,movies,series,playlist,streaming,vlc,video,channels,stalker,stremio</pre>
+  </div>
+
+  <!-- What's New -->
+  <div class="copy-block">
+    <div class="label-bar">
+      <span>📋 What's New — Copy &amp; Paste</span>
+      <button onclick="copyBlock(this, 'whatsnew')">Copy</button>
+    </div>
+    <pre id="whatsnew">Welcome to Apex 1.2.0! This is our first public release.
+
+• Full EPG TV guide with time-grid view and 14 external guide sources
+• Cross-device iCloud sync for playlists, favorites, and progress
+• Three playback engines with automatic fallback (KSPlayer, VLCKit, AVPlayer)
+• Skip Intro support (where available)
+• 5 beautiful themes including Midnight, Sunset, and Ocean
+• Stremio addon support
+• Rating badges (IMDb, Rotten Tomatoes, Metacritic) on posters
+• Enhanced tvOS experience with immersive hero and category browsing
+• Performance optimized for large playlists (tested with 28,000+ items)</pre>
+  </div>
+
+  <!-- 2.2 -->
+  <div class="card">
+    <h3 style="margin-top:0;">2.2 &ensp; App Store Metadata — tvOS App</h3>
+    <div class="check-item">
+      <div class="box"></div>
+      <div class="label">
+        <div class="title">tvOS Description</div>
+        <div class="desc">Shorter than iOS. No keywords field on tvOS. See copy block below.</div>
+        <span class="where">App Store Connect → Apple TV App → 1.2.0 → App Store</span>
+      </div>
+    </div>
+    <div class="check-item">
+      <div class="box"></div>
+      <div class="label">
+        <div class="title">tvOS What's New</div>
+        <div class="desc">Same as iOS, or write a tvOS-specific version.</div>
+        <span class="where">App Store Connect → Apple TV App → 1.2.0 → App Store</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- tvOS Description -->
+  <div class="copy-block">
+    <div class="label-bar">
+      <span>📋 tvOS Description — Copy &amp; Paste</span>
+      <button onclick="copyBlock(this, 'tvosdesc')">Copy</button>
+    </div>
+    <pre id="tvosdesc">Apex brings your IPTV playlists to the big screen.
+
+Add Xtream Codes, M3U, or Stremio addons and enjoy Live TV, Movies, and Series on your Apple TV. Browse a full EPG time-grid guide, explore categories with poster artwork, and enjoy rich metadata including backdrops, cast, and ratings.
+
+Features:
+• Full EPG TV guide with time-grid view
+• Three playback engines with automatic fallback
+• Rich metadata — posters, ratings, cast, trailers
+• iCloud sync across devices
+• Skip Intro support
+• 5 beautiful themes
+
+Apex Pro unlocks unlimited playlists, downloads, profiles, and personalized recommendations. The app bundles no content — you bring your own playlists.</pre>
+  </div>
+
+  <!-- 2.3 -->
+  <div class="card">
+    <h3 style="margin-top:0;">2.3 &ensp; Screenshots</h3>
+    <div class="check-item">
+      <div class="box"></div>
+      <div class="label">
+        <div class="title">iOS Screenshots (required)</div>
+        <div class="desc">6.9" iPhone 17 Pro Max screenshots required. At least 3, ideally 5–6. Capture via Simulator (Cmd+S). Show Home, Live TV, EPG Guide, Movie Detail, Player, Settings/Theme.</div>
+        <span class="where">App Store Connect → iOS App → 1.2.0 → App Store → Screenshots</span>
+      </div>
+    </div>
+    <div class="check-item">
+      <div class="box"></div>
+      <div class="label">
+        <div class="title">tvOS Screenshots (required)</div>
+        <div class="desc">Apple TV 4K screenshots. Capture via tvOS Simulator. Show Home, EPG Guide, Movie Detail, Player.</div>
+        <span class="where">App Store Connect → Apple TV App → 1.2.0 → App Store → Screenshots</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 2.4 -->
+  <div class="card">
+    <h3 style="margin-top:0;">2.4 &ensp; App Review Information</h3>
+    <div class="check-item">
+      <div class="box"></div>
+      <div class="label">
+        <div class="title">Fill in App Review Notes</div>
+        <div class="desc">Include the demo M3U URL + test steps so the reviewer can verify the app. Same content as What to Test from Phase 1.</div>
+        <span class="where">App Store Connect → iOS App → 1.2.0 → App Review Information</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- App Review Notes -->
+  <div class="copy-block">
+    <div class="label-bar">
+      <span>📋 App Review Notes — Copy &amp; Paste</span>
+      <button onclick="copyBlock(this, 'reviewnotes')">Copy</button>
+    </div>
+    <pre id="reviewnotes">APP TYPE
+Apex is an IPTV player only. No content is bundled, hosted, or curated
+by the app. Users must supply their own playlists to use it.
+
+DEMO PLAYLIST (no login required)
+This is a free, publicly available M3U playlist from iptv-org on GitHub
+(131k stars, widely used for testing IPTV apps):
+
+  https://iptv-org.github.io/iptv/index.m3u
+
+No username or password is needed — it's a direct M3U URL.
+
+TEST STEPS
+1. Open Apex
+2. Tap "Add Playlist"
+3. Select "M3U URL"
+4. Paste: https://iptv-org.github.io/iptv/index.m3u
+5. Tap "Add Playlist" — sync runs automatically (~30 seconds)
+6. After sync, browse Live TV, Movies, and Series tabs
+7. Tap any channel or video to verify playback
+8. (Optional) Check Settings → iCloud Sync if signed into iCloud
+
+WHAT TO VERIFY
+• Playlist sync completes without errors
+• Content populates across all tabs
+• Stream playback works with audio + video
+• No crashes during browsing or playback
+
+ADDITIONAL INFO
+• Free tier: 1 playlist + core playback
+• Apex Pro (IAP): unlocks unlimited playlists, downloads, profiles, etc.
+• Standard HTTPS only — no non-exempt encryption
+• Age rating: 17+ (user-supplied streams may include unrated media)
+• Privacy policy: https://github.com/2gchqkkt25-blip/Apex/blob/main/PRIVACY.md
+• Open source (AGPL-3.0): https://github.com/2gchqkkt25-blip/Apex
+• Contact: support@streaminfinitytv.com
+• GitHub: https://github.com/2gchqkkt25-blip/Apex</pre>
+  </div>
+
+  <!-- 2.5 -->
+  <div class="card">
+    <h3 style="margin-top:0;">2.5 &ensp; Version Release</h3>
+    <div class="check-item">
+      <div class="box"></div>
+      <div class="label">
+        <div class="title">Choose release method</div>
+        <div class="desc"><strong>Manually release</strong> (recommended) — you click Release after approval. <strong>Automatically release</strong> — goes live immediately on approval.</div>
+        <span class="where">App Store Connect → iOS App → 1.2.0 → App Store</span>
+      </div>
+    </div>
+    <div class="check-item">
+      <div class="box"></div>
+      <div class="label">
+        <div class="title">Submit for App Store Review</div>
+        <div class="desc">The big blue button. App Store review is stricter than Beta App Review — expect ~1–3 days. Make sure screenshots, description, and review notes are all filled in first.</div>
+        <span class="where">App Store Connect → iOS App → 1.2.0</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- STATUS CARD -->
+  <div class="card" style="border-left: 3px solid var(--text-dim);">
+    <strong style="color:var(--text-dim);">⏳ Phase 2 Status</strong>
+    <p style="margin-top:8px;color:var(--text-dim);">
+      Don't submit for App Store until you've gathered enough TestFlight feedback and are confident in the build.
+      You can submit iOS and tvOS together (same version) or separately.
+    </p>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════ -->
+<!-- REVIEW POSITIONING -->
+<!-- ═══════════════════════════════════════════ -->
+<div class="section">
+  <h2><span class="icon">🛡️</span> Review Positioning</h2>
+  <div class="card">
+    <p>IPTV apps get extra scrutiny from Apple. Here's how Apex is positioned to pass review:</p>
+    <table style="margin-top:12px;">
+      <tr><th>Concern</th><th>How Apex Handles It</th></tr>
+      <tr>
+        <td>"Does it stream pirated content?"</td>
+        <td><strong>No.</strong> Apex is a player only — zero bundled channels or playlists. Users supply their own authorized credentials. Anti-piracy policy at <code>ANTI_PIRACY.md</code>.</td>
+      </tr>
+      <tr>
+        <td>"Is it just a white-label player?"</td>
+        <td><strong>No.</strong> Custom theme system, EPG guide, Skip Intro, For You recommendations, cross-device sync, Stremio support — substantial original features beyond basic playback.</td>
+      </tr>
+      <tr>
+        <td>"Why 17+ rating?"</td>
+        <td>User-supplied streams may include unfiltered third-party media. Parental controls are included (child profiles, category hiding) but don't lower the store rating.</td>
+      </tr>
+      <tr>
+        <td>"Are IAPs for content?"</td>
+        <td><strong>No.</strong> Apex Pro unlocks <strong>features</strong> (unlimited playlists, downloads, profiles, Trakt, For You). Never content. This is allowed under AGPL.</td>
+      </tr>
+      <tr>
+        <td>"Does it use private APIs?"</td>
+        <td><strong>No.</strong> Standard SwiftUI, SwiftData, AVKit, StoreKit 2, CloudKit. No private frameworks.</td>
+      </tr>
+    </table>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════ -->
+<!-- DEMO TEST FLOW -->
+<!-- ═══════════════════════════════════════════ -->
+<div class="section">
+  <h2><span class="icon">🧪</span> Demo Test Flow (For Reviewers)</h2>
+  <p style="color:var(--text-dim);margin-bottom:16px;">This is what Apple's reviewer will do. Test it yourself first to make sure it works smoothly.</p>
+
+  <div class="card">
+    <div class="check-item">
+      <div class="box"></div>
+      <div class="label">
+        <div class="title">1. Fresh install → "Add Playlist"</div>
+        <div class="desc">First-launch screen has the Add Playlist button prominently.</div>
+      </div>
+    </div>
+    <div class="check-item">
+      <div class="box"></div>
+      <div class="label">
+        <div class="title">2. Select "M3U URL" → paste demo URL</div>
+        <div class="desc"><code>https://iptv-org.github.io/iptv/index.m3u</code></div>
+      </div>
+    </div>
+    <div class="check-item">
+      <div class="box"></div>
+      <div class="label">
+        <div class="title">3. Sync completes (branded Apex sync screen)</div>
+        <div class="desc">Shows "Apex" logo + progress bar. Content sync + TV guide steps.</div>
+      </div>
+    </div>
+    <div class="check-item">
+      <div class="box"></div>
+      <div class="label">
+        <div class="title">4. Home tab shows hero + content rows</div>
+        <div class="desc">TMDB artwork in hero carousel (if .env keys are present). Category preview rows.</div>
+      </div>
+    </div>
+    <div class="check-item">
+      <div class="box"></div>
+      <div class="label">
+        <div class="title">5. Live TV → channels load, tap to play</div>
+        <div class="desc">Channel list populates. Tap any channel → playback starts. EPG guide shows now/next data.</div>
+      </div>
+    </div>
+    <div class="check-item">
+      <div class="box"></div>
+      <div class="label">
+        <div class="title">6. Movies / Series → browse and play</div>
+        <div class="desc">Poster grids with rating badges. Detail screen with metadata. Play button works.</div>
+      </div>
+    </div>
+    <div class="check-item">
+      <div class="box"></div>
+      <div class="label">
+        <div class="title">7. Search → find content</div>
+        <div class="desc">Search across Live TV, Movies, and Series.</div>
+      </div>
+    </div>
+    <div class="check-item">
+      <div class="box"></div>
+      <div class="label">
+        <div class="title">8. Settings → theme picker, iCloud Sync</div>
+        <div class="desc">Switch themes. iCloud sync toggle visible if signed into iCloud.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════ -->
+<!-- FULL CHECKLIST SUMMARY -->
+<!-- ═══════════════════════════════════════════ -->
+<div class="section">
+  <h2><span class="icon">✅</span> Master Checklist</h2>
+
+  <div class="card">
+    <h3 style="margin-top:0;">Phase 1 — External TestFlight</h3>
+    <div class="check-item"><div class="box"></div><div class="label"><div class="title">Build 19 archived + uploaded</div></div></div>
+    <div class="check-item"><div class="box"></div><div class="label"><div class="title">Export Compliance answered (No)</div></div></div>
+    <div class="check-item"><div class="box"></div><div class="label"><div class="title">Age Rating set to 17+</div></div></div>
+    <div class="check-item"><div class="box"></div><div class="label"><div class="title">Privacy Policy URL set</div></div></div>
+    <div class="check-item"><div class="box"></div><div class="label"><div class="title">App Privacy questionnaire completed</div></div></div>
+    <div class="check-item"><div class="box"></div><div class="label"><div class="title">External tester group created</div></div></div>
+    <div class="check-item"><div class="box"></div><div class="label"><div class="title">Build 19 added to external group</div></div></div>
+    <div class="check-item"><div class="box"></div><div class="label"><div class="title">Testers added (emails or public link)</div></div></div>
+    <div class="check-item"><div class="box"></div><div class="label"><div class="title">What to Test filled in</div></div></div>
+    <div class="check-item"><div class="box"></div><div class="label"><div class="title">Beta App Review Contact filled in</div></div></div>
+    <div class="check-item"><div class="box"></div><div class="label"><div class="title"><strong>Submitted for Beta App Review</strong></div></div></div>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0;">Phase 2 — App Store Public Release</h3>
+    <div class="check-item"><div class="box"></div><div class="label"><div class="title">iOS Screenshots uploaded (6.9")</div></div></div>
+    <div class="check-item"><div class="box"></div><div class="label"><div class="title">tvOS Screenshots uploaded</div></div></div>
+    <div class="check-item"><div class="box"></div><div class="label"><div class="title">iOS Description pasted</div></div></div>
+    <div class="check-item"><div class="box"></div><div class="label"><div class="title">tvOS Description pasted</div></div></div>
+    <div class="check-item"><div class="box"></div><div class="label"><div class="title">Subtitle set</div></div></div>
+    <div class="check-item"><div class="box"></div><div class="label"><div class="title">Keywords set</div></div></div>
+    <div class="check-item"><div class="box"></div><div class="label"><div class="title">What's New filled in</div></div></div>
+    <div class="check-item"><div class="box"></div><div class="label"><div class="title">App Review Notes filled in (demo M3U + steps)</div></div></div>
+    <div class="check-item"><div class="box"></div><div class="label"><div class="title">Release method chosen</div></div></div>
+    <div class="check-item"><div class="box"></div><div class="label"><div class="title"><strong>Submitted for App Store Review</strong></div></div></div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════ -->
+<!-- LINKS -->
+<!-- ═══════════════════════════════════════════ -->
+<div class="section">
+  <h2><span class="icon">🔗</span> Quick Links</h2>
+  <div class="card">
+    <table>
+      <tr><td>App Store Connect</td><td><a href="https://appstoreconnect.apple.com" style="color:var(--accent-glow);">appstoreconnect.apple.com</a> → Apex Stream Player</td></tr>
+      <tr><td>CloudKit Console</td><td><a href="https://icloud.developer.apple.com" style="color:var(--accent-glow);">icloud.developer.apple.com</a></td></tr>
+      <tr><td>GitHub Repo</td><td><a href="https://github.com/2gchqkkt25-blip/Apex" style="color:var(--accent-glow);">github.com/2gchqkkt25-blip/Apex</a></td></tr>
+      <tr><td>Demo M3U Playlist</td><td><a href="https://iptv-org.github.io/iptv/index.m3u" style="color:var(--accent-glow);">iptv-org.github.io/iptv/index.m3u</a></td></tr>
+      <tr><td>Alternative Playlist (smaller)</td><td><a href="https://raw.githubusercontent.com/Free-TV/IPTV/master/playlist.m3u8" style="color:var(--accent-glow);">Free-TV/IPTV</a></td></tr>
+      <tr><td>Privacy Policy</td><td><a href="https://github.com/2gchqkkt25-blip/Apex/blob/main/PRIVACY.md" style="color:var(--accent-glow);">github.com/.../PRIVACY.md</a></td></tr>
+      <tr><td>Support Email</td><td><a href="mailto:support@streaminfinitytv.com" style="color:var(--accent-glow);">support@streaminfinitytv.com</a></td></tr>
+    </table>
+  </div>
+</div>
+
+<p style="text-align:center;color:var(--text-dim);font-size:13px;margin-top:40px;">
+  Apex by StreamInfinity · Last updated July 8, 2026 · Build 19
+</p>
+
+</div>
+
+<!-- ═══════════════════════════════════════════ -->
+<!-- COPY SCRIPT -->
+<!-- ═══════════════════════════════════════════ -->
+<script>
+function copyBlock(btn, id) {
+  const pre = document.getElementById(id);
+  const text = pre.textContent;
+  navigator.clipboard.writeText(text).then(() => {
+    btn.textContent = 'Copied!';
+    btn.classList.add('copied');
+    setTimeout(() => {
+      btn.textContent = 'Copy';
+      btn.classList.remove('copied');
+    }, 2000);
+  });
+}
+</script>
+
+</body>
+</html>
