@@ -2,13 +2,9 @@
 //  SyncProgressView.swift
 //  Apex
 //
-//  Step-by-step progress UI for ContentSyncManager. Drives the sync, observes
-//  SyncProgress, and renders each step's status, detail, and per-step progress.
-//
+//  Branded step-by-step progress for ContentSyncManager + inline EPG refresh.
 //  Two presentations share this view: the blocking auto-sync cover (autoStart)
-//  and the manual "Sync Now" flow. iOS/macOS use a NavigationStack sheet; tvOS
-//  uses a dedicated full-screen layout (`tvBody`) that matches the flat dark
-//  settings surfaces — a plain sheet renders as a clipped centered card there.
+//  and the manual "Sync Now" flow.
 //
 
 import SwiftData
@@ -18,9 +14,7 @@ struct SyncProgressView: View {
     let playlist: Playlist
 
     /// When true the sync begins on appear and the sheet dismisses itself once
-    /// it finishes successfully — used for the blocking auto-sync cover. When
-    /// false (the manual "Sync Now" flow) it waits for the user to tap Start and
-    /// shows a Done button when finished.
+    /// it finishes successfully — used for the blocking auto-sync cover.
     let autoStart: Bool
 
     @Environment(\.modelContext) private var modelContext
@@ -36,8 +30,6 @@ struct SyncProgressView: View {
         self.playlist = playlist
         self.autoStart = autoStart
         _progress = State(initialValue: SyncProgress(steps: SyncStep.steps(for: playlist.sourceType)))
-        // Start already in the syncing state for auto-sync so the "Ready" screen
-        // (with its Start button) never flashes before `.task` kicks off.
         _phase = State(initialValue: autoStart ? .syncing : .ready)
     }
 
@@ -48,6 +40,10 @@ struct SyncProgressView: View {
         case failed
     }
 
+    private var includesGuideStep: Bool {
+        SyncStep.includesEPG(for: playlist.sourceType)
+    }
+
     var body: some View {
         #if os(tvOS)
             tvBody
@@ -56,53 +52,64 @@ struct SyncProgressView: View {
         #endif
     }
 
-    // MARK: - Shared header content
-
-    private var headerIcon: String {
-        switch phase {
-        case .ready: "arrow.triangle.2.circlepath"
-        case .syncing: "arrow.triangle.2.circlepath"
-        case .finished: "checkmark.seal.fill"
-        case .failed: "exclamationmark.triangle.fill"
-        }
-    }
-
-    private var headerTint: Color {
-        switch phase {
-        case .ready, .syncing: themeManager.colors.accent
-        case .finished: .green
-        case .failed: .red
-        }
-    }
-
     private var headerTitle: LocalizedStringKey {
         switch phase {
         case .ready: "Ready to sync"
-        case .syncing: "Syncing your playlist"
-        case .finished: "Sync complete"
+        case .syncing:
+            includesGuideStep ? "Updating library & guide" : "Syncing your library"
+        case .finished: "You're all set"
         case .failed: "Sync failed"
+        }
+    }
+
+    private var headerSubtitle: LocalizedStringKey {
+        switch phase {
+        case .ready: "Content and TV guide refresh together."
+        case .syncing: "This may take a few minutes…"
+        case .finished:
+            includesGuideStep ? "Your playlist and TV guide are up to date." : "Your playlist is up to date."
+        case .failed: "Something went wrong. You can try again."
         }
     }
 
     // MARK: - Drive sync
 
     private func startSync() {
-        // Fresh progress for each attempt so a retry starts clean.
         progress = SyncProgress(steps: SyncStep.steps(for: playlist.sourceType))
         syncError = nil
         phase = .syncing
 
         syncTask = Task {
+            // Suppress background EPG triggers (launch `syncIfDue`, Sync Now) for
+            // the whole flow so a second guide refresh can't stack on top of the
+            // content sync and blow the memory limit.
+            await EPGSyncService.shared.beginExclusiveSync()
+            defer { Task { @MainActor in EPGSyncService.shared.endExclusiveSync() } }
             do {
                 let syncManager = ContentSyncManager(modelContainer: modelContext.container)
                 try await syncManager.syncPlaylist(playlist, progress: progress, full: true)
-                await schedulePostSyncBackgroundWork()
+
+                if SyncStep.includesEPG(for: playlist.sourceType) {
+                    try Task.checkCancellation()
+                    #if os(tvOS)
+                    // Run a lightweight inline EPG pass on tvOS using only the 3
+                    // lightest feeds (~30MB total). This is small enough to parse
+                    // without jetsam risk while giving the store data for most
+                    // channels before the user opens Live TV. A background pass
+                    // with remaining feeds fills gaps later.
+                    await runEPGStep(mode: .tvOSQuick)
+                    #else
+                    await runEPGStep()
+                    #endif
+                }
+
+                await schedulePostSyncIndexing()
                 await MainActor.run {
                     phase = .finished
                     if autoStart { dismiss() }
                 }
             } catch is CancellationError {
-                // User aborted — the sheet is being dismissed, nothing to show.
+                // User aborted — sheet is dismissing.
             } catch {
                 if Task.isCancelled { return }
                 await MainActor.run {
@@ -113,32 +120,68 @@ struct SyncProgressView: View {
         }
     }
 
-    /// Kicks indexing and EPG after a successful sync. tvOS waits longer so the
-    /// home screen can become responsive before background catalog work starts.
-    private func schedulePostSyncBackgroundWork() async {
+    @MainActor
+    private func runEPGStep(mode: EPGSyncMode = .withPlaylist) async {
+        progress.start(.epgGuide)
+        let epgPoll = Task {
+            while !Task.isCancelled {
+                if let label = EPGSyncService.shared.syncProgressLabel {
+                    progress.update(
+                        detail: label,
+                        fraction: EPGSyncService.shared.syncProgress ?? 0
+                    )
+                }
+                try? await Task.sleep(for: .milliseconds(250))
+            }
+        }
+        defer { epgPoll.cancel() }
+
+        _ = await EPGSyncService.shared.syncAwaiting(
+            container: modelContext.container,
+            mode: mode
+        ) { fraction, label in
+            let pct = Int(((fraction ?? 0) * 100).rounded())
+            let detail: String
+            if let label, !label.isEmpty {
+                detail = label.contains("%") ? label : "\(pct)% · \(label)"
+            } else {
+                detail = "\(pct)%"
+            }
+            progress.update(detail: detail, fraction: fraction ?? 0)
+        }
+        progress.complete(.epgGuide)
+        EPGSyncService.shared.forceGuideRefresh()
+    }
+
+    /// Indexing (all platforms) plus, on tvOS, the deferred guide refresh.
+    private func schedulePostSyncIndexing() async {
         #if os(tvOS)
         await MainActor.run {
             ContentIndexingService.shared.kick(after: .seconds(20))
         }
-        Task {
-            try? await Task.sleep(for: .seconds(45))
+        // Run the guide import well after the sheet dismisses so the content
+        // sync's memory is fully released first, giving the feed parse the whole
+        // budget. Uses the lighter bundled feed set (US, no US_LOCALS1). The
+        // inline quick pass already populated the store with the 3 lightest
+        // feeds; this background pass fills remaining channels from the rest of
+        // the bundled set. 10s is enough headroom for ARC to reclaim buffers.
+        Task.detached(priority: .utility) {
+            try? await Task.sleep(for: .seconds(10))
             await MainActor.run {
-                EPGSyncService.shared.syncNow()
+                EPGSyncService.shared.syncBundledInBackground()
             }
         }
         #else
         await MainActor.run {
             ContentIndexingService.shared.kick(after: .seconds(3))
-            EPGSyncService.shared.syncNow()
         }
         #endif
     }
 
-    /// Cancels the in-flight sync (if any) and closes the sheet. Cancellation
-    /// propagates into ContentSyncManager, which restores the playlist to idle.
     private func abortSync() {
         syncTask?.cancel()
         syncTask = nil
+        EPGSyncService.shared.cancelActiveSync(reason: "playlist sync cancelled")
         dismiss()
     }
 }
@@ -149,16 +192,19 @@ struct SyncProgressView: View {
 
     private extension SyncProgressView {
         var standardBody: some View {
-            NavigationStack {
-                VStack(spacing: 0) {
-                    header
+            ZStack {
+                ApexSyncBackground()
 
-                    Divider()
+                VStack(spacing: 0) {
+                    brandedHeader
+                        .padding(.horizontal, 24)
+                        .padding(.top, 28)
+                        .padding(.bottom, 20)
 
                     ScrollView {
-                        VStack(alignment: .leading, spacing: 8) {
+                        VStack(alignment: .leading, spacing: 4) {
                             ForEach(progress.steps) { step in
-                                StepRowView(
+                                ApexSyncStepRow(
                                     step: step,
                                     state: progress.state(for: step),
                                     detail: progress.currentStep == step ? progress.stepDetail : "",
@@ -166,32 +212,15 @@ struct SyncProgressView: View {
                                 )
                             }
                         }
-                        .padding()
+                        .padding(.horizontal, 24)
+                        .padding(.vertical, 8)
                     }
-
-                    Divider()
 
                     footer
-                        .padding()
+                        .padding(24)
                 }
-                .navigationTitle("Sync Playlist")
-                #if os(iOS)
-                    .navigationBarTitleDisplayMode(.inline)
-                #endif
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button("Cancel") {
-                                // While syncing, Cancel aborts the in-flight work;
-                                // otherwise it just closes the sheet.
-                                if phase == .syncing {
-                                    abortSync()
-                                } else {
-                                    dismiss()
-                                }
-                            }
-                        }
-                    }
             }
+            .preferredColorScheme(.dark)
             .interactiveDismissDisabled(phase == .syncing)
             .task {
                 if autoStart, phase != .finished {
@@ -200,68 +229,65 @@ struct SyncProgressView: View {
             }
         }
 
-        // MARK: Header
+        var brandedHeader: some View {
+            VStack(spacing: 20) {
+                ApexSyncHero(
+                    progress: progress.overallFraction,
+                    isAnimating: phase == .syncing
+                )
 
-        var header: some View {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Image(systemName: headerIcon)
-                        .font(.title2)
-                        .foregroundStyle(headerTint)
-                        .symbolEffect(.pulse, options: .repeating, isActive: phase == .syncing)
+                VStack(spacing: 6) {
+                    Text("Apex")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(ApexBrandColors.logoGradient)
+                        .textCase(.uppercase)
+                        .tracking(2)
 
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(headerTitle)
-                            .font(.headline)
-                        Text(playlist.name)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                }
+                    Text(headerTitle)
+                        .font(.title2.weight(.bold))
+                        .foregroundStyle(.white)
+                        .multilineTextAlignment(.center)
 
-                if phase == .syncing || phase == .finished {
-                    ProgressView(value: progress.overallFraction)
-                        .progressViewStyle(.linear)
-                        .tint(themeManager.colors.accent)
+                    Text(headerSubtitle)
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.45))
+                        .multilineTextAlignment(.center)
+                        .padding(.top, 2)
                 }
             }
-            .padding()
+            .frame(maxWidth: .infinity)
         }
-
-        // MARK: Footer
 
         @ViewBuilder
         var footer: some View {
             switch phase {
             case .ready:
-                Button {
-                    startSync()
-                } label: {
+                Button(action: startSync) {
                     Label("Start Sync", systemImage: "arrow.triangle.2.circlepath")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
+                .tint(ApexBrandColors.blue)
                 .controlSize(.large)
 
+                Button("Cancel") { dismiss() }
+                    .foregroundStyle(.white.opacity(0.6))
+
             case .syncing:
-                HStack(spacing: 8) {
-                    ProgressView()
-                        .controlSize(.small)
-                    Text("This may take a few minutes…")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                VStack(spacing: 12) {
+                    Button("Cancel") { abortSync() }
+                        .buttonStyle(.bordered)
+                        .tint(.white.opacity(0.35))
                 }
                 .frame(maxWidth: .infinity)
 
             case .finished:
-                Button {
-                    dismiss()
-                } label: {
+                Button { dismiss() } label: {
                     Text("Done")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
+                .tint(ApexBrandColors.blue)
                 .controlSize(.large)
 
             case .failed:
@@ -269,96 +295,20 @@ struct SyncProgressView: View {
                     if let syncError {
                         Text(syncError)
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.white.opacity(0.55))
                             .multilineTextAlignment(.center)
                     }
-                    Button {
-                        startSync()
-                    } label: {
+                    Button(action: startSync) {
                         Label("Try Again", systemImage: "arrow.clockwise")
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
+                    .tint(ApexBrandColors.blue)
                     .controlSize(.large)
 
-                    // Let the user leave a failed auto-sync without retrying — they
-                    // can sync later from the playlist's settings.
-                    Button("Continue Without Syncing") {
-                        dismiss()
-                    }
-                    .controlSize(.large)
+                    Button("Continue Without Syncing") { dismiss() }
+                        .foregroundStyle(.white.opacity(0.6))
                 }
-            }
-        }
-    }
-
-    // MARK: - Step Row
-
-    private struct StepRowView: View {
-        let step: SyncStep
-        let state: SyncStepState
-        let detail: String
-        let fraction: Double
-
-        var body: some View {
-            HStack(alignment: .top, spacing: 14) {
-                statusIcon
-                    .frame(width: 28, height: 28)
-
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        Text(step.title)
-                            .font(.subheadline)
-                            .fontWeight(state == .active ? .semibold : .regular)
-                            .foregroundStyle(titleColor)
-
-                        Spacer()
-
-                        if state == .active, !detail.isEmpty {
-                            Text(detail)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .monospacedDigit()
-                        }
-                    }
-
-                    if state == .active, fraction > 0 {
-                        ProgressView(value: fraction)
-                            .progressViewStyle(.linear)
-                            .tint(Color.accentColor)
-                    }
-                }
-            }
-            .padding(.vertical, 6)
-        }
-
-        @ViewBuilder
-        private var statusIcon: some View {
-            switch state {
-            case .pending:
-                Image(systemName: "circle")
-                    .font(.title3)
-                    .foregroundStyle(.tertiary)
-            case .active:
-                ZStack {
-                    Circle()
-                        .stroke(Color.accentColor.opacity(0.25), lineWidth: 2)
-                    ProgressView()
-                        .controlSize(.small)
-                }
-            case .completed:
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.title3)
-                    .foregroundStyle(.green)
-                    .symbolRenderingMode(.hierarchical)
-            }
-        }
-
-        private var titleColor: Color {
-            switch state {
-            case .pending: .secondary
-            case .active: .primary
-            case .completed: .primary
             }
         }
     }
@@ -370,25 +320,36 @@ struct SyncProgressView: View {
 #if os(tvOS)
 
     private extension SyncProgressView {
-        /// Full-screen, focusable layout sharing the flat dark fill used by the
-        /// rest of the tvOS settings surfaces. Vertically centered — the eight
-        /// steps plus header and footer comfortably fit a 1080p screen.
         var tvBody: some View {
-            VStack(spacing: 0) {
-                Spacer(minLength: 0)
+            ZStack {
+                ApexSyncBackground()
 
-                VStack(alignment: .leading, spacing: 48) {
-                    tvHeader
-                    tvSteps
-                    tvFooter
+                VStack(spacing: 0) {
+                    Spacer(minLength: 0)
+
+                    VStack(alignment: .leading, spacing: 48) {
+                        tvBrandedHeader
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            ForEach(progress.steps) { step in
+                                ApexSyncStepRow(
+                                    step: step,
+                                    state: progress.state(for: step),
+                                    detail: progress.currentStep == step ? progress.stepDetail : "",
+                                    fraction: progress.currentStep == step ? progress.stepFraction : 0
+                                )
+                            }
+                        }
+
+                        tvFooter
+                    }
+                    .frame(maxWidth: TVSettingsMetrics.contentMaxWidth, alignment: .leading)
+                    .padding(.horizontal, 80)
+
+                    Spacer(minLength: 0)
                 }
-                .frame(maxWidth: TVSettingsMetrics.contentMaxWidth, alignment: .leading)
-                .padding(.horizontal, 80)
-
-                Spacer(minLength: 0)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .tvSettingsBackground()
+            .preferredColorScheme(.dark)
             .interactiveDismissDisabled(phase == .syncing)
             .task {
                 if autoStart, phase != .finished {
@@ -397,61 +358,39 @@ struct SyncProgressView: View {
             }
         }
 
-        // MARK: Header
+        var tvBrandedHeader: some View {
+            HStack(alignment: .center, spacing: 48) {
+                ApexSyncHeroTV(
+                    progress: progress.overallFraction,
+                    isAnimating: phase == .syncing
+                )
 
-        var tvHeader: some View {
-            VStack(alignment: .leading, spacing: 28) {
-                HStack(spacing: 28) {
-                    Image(systemName: headerIcon)
-                        .font(.system(size: 56))
-                        .foregroundStyle(headerTint)
-                        .symbolEffect(.pulse, options: .repeating, isActive: phase == .syncing)
-                        .frame(width: 72)
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Apex")
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(ApexBrandColors.logoGradient)
+                        .textCase(.uppercase)
+                        .tracking(3)
 
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(headerTitle)
-                            .font(.system(size: 44, weight: .bold))
-                        Text(verbatim: playlist.name)
-                            .font(.system(size: 26))
-                            .foregroundStyle(.secondary)
-                    }
+                    Text(headerTitle)
+                        .font(.system(size: 44, weight: .bold))
+                        .foregroundStyle(.white)
 
-                    Spacer(minLength: 0)
+                    Text(headerSubtitle)
+                        .font(.system(size: 22))
+                        .foregroundStyle(.white.opacity(0.45))
                 }
 
-                if phase == .syncing || phase == .finished {
-                    ProgressView(value: progress.overallFraction)
-                        .progressViewStyle(.linear)
-                        .tint(.white)
-                }
+                Spacer(minLength: 0)
             }
         }
-
-        // MARK: Steps
-
-        var tvSteps: some View {
-            VStack(alignment: .leading, spacing: 6) {
-                ForEach(progress.steps) { step in
-                    TVStepRow(
-                        step: step,
-                        state: progress.state(for: step),
-                        detail: progress.currentStep == step ? progress.stepDetail : "",
-                        fraction: progress.currentStep == step ? progress.stepFraction : 0
-                    )
-                }
-            }
-        }
-
-        // MARK: Footer
 
         @ViewBuilder
         var tvFooter: some View {
             switch phase {
             case .ready:
                 HStack(spacing: 24) {
-                    Button {
-                        startSync()
-                    } label: {
+                    Button(action: startSync) {
                         Label("Start Sync", systemImage: "arrow.triangle.2.circlepath")
                     }
                     .buttonStyle(TVSettingsActionButtonStyle(prominent: true))
@@ -463,13 +402,6 @@ struct SyncProgressView: View {
 
             case .syncing:
                 VStack(spacing: 32) {
-                    HStack(spacing: 16) {
-                        ProgressView()
-                        Text("This may take a few minutes…")
-                            .font(.system(size: 24))
-                            .foregroundStyle(.secondary)
-                    }
-
                     Button("Cancel") { abortSync() }
                         .buttonStyle(TVSettingsActionButtonStyle())
                 }
@@ -485,15 +417,13 @@ struct SyncProgressView: View {
                     if let syncError {
                         Text(verbatim: syncError)
                             .font(.system(size: 22))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.white.opacity(0.55))
                             .multilineTextAlignment(.center)
                             .frame(maxWidth: 640)
                     }
 
                     HStack(spacing: 24) {
-                        Button {
-                            startSync()
-                        } label: {
+                        Button(action: startSync) {
                             Label("Try Again", systemImage: "arrow.clockwise")
                         }
                         .buttonStyle(TVSettingsActionButtonStyle(prominent: true))
@@ -507,62 +437,6 @@ struct SyncProgressView: View {
         }
     }
 
-    // MARK: - tvOS Step Row
-
-    private struct TVStepRow: View {
-        let step: SyncStep
-        let state: SyncStepState
-        let detail: String
-        let fraction: Double
-
-        var body: some View {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 22) {
-                    statusIcon
-                        .frame(width: 40, height: 40)
-
-                    Text(step.title)
-                        .font(.system(size: 28, weight: state == .active ? .semibold : .regular))
-                        .foregroundStyle(state == .pending ? .secondary : .primary)
-
-                    Spacer(minLength: 16)
-
-                    if state == .active, !detail.isEmpty {
-                        Text(verbatim: detail)
-                            .font(.system(size: 22))
-                            .foregroundStyle(.secondary)
-                            .monospacedDigit()
-                    }
-                }
-
-                if state == .active, fraction > 0 {
-                    ProgressView(value: fraction)
-                        .progressViewStyle(.linear)
-                        .tint(.white)
-                        .padding(.leading, 62)
-                }
-            }
-            .padding(.vertical, 6)
-        }
-
-        @ViewBuilder
-        private var statusIcon: some View {
-            switch state {
-            case .pending:
-                Image(systemName: "circle")
-                    .font(.system(size: 30))
-                    .foregroundStyle(.tertiary)
-            case .active:
-                ProgressView()
-            case .completed:
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 34))
-                    .foregroundStyle(.green)
-                    .symbolRenderingMode(.hierarchical)
-            }
-        }
-    }
-
 #endif
 
 #Preview("Ready") {
@@ -570,4 +444,5 @@ struct SyncProgressView: View {
     let playlist = PreviewData.samplePlaylist
     return SyncProgressView(playlist: playlist)
         .modelContainer(container)
+        .environment(ThemeManager.shared)
 }

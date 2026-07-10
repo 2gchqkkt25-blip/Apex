@@ -57,8 +57,7 @@ struct LoginView: View {
         case .stalker:
             !portalURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         case .stremio:
-            !stremioURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                && StalkerMAC.isValid(macAddress.trimmingCharacters(in: .whitespacesAndNewlines))
+            StremioURL.normalize(stremioURL) != nil
         }
     }
 
@@ -384,8 +383,8 @@ struct LoginView: View {
             case .stremio:
                 if stremioURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     errorMessage = "Enter the manifest URL to continue."
-                } else {
-                    errorMessage = "Enter a valid MAC address to continue."
+                } else if StremioURL.normalize(stremioURL) == nil {
+                    errorMessage = "Enter a valid manifest URL to continue."
                 }
             }
             return
@@ -505,11 +504,15 @@ struct LoginView: View {
         let url = stremioURL.trimmingCharacters(in: .whitespacesAndNewlines)
 
         Task {
-            let playlist = Playlist(name: playlistName, stremioURL: url)
-
-            let client = StremioClient()
             do {
+                let client = StremioClient()
                 let manifest = try await client.fetchManifest(from: url)
+                guard let normalized = StremioURL.normalize(url) else {
+                    errorMessage = StremioError.invalidURL.localizedDescription
+                    isLoading = false
+                    return
+                }
+                let playlist = Playlist(name: playlistName, stremioURL: normalized.absoluteString)
                 playlist.name = manifest.name
                 insertAndFinish(playlist)
             } catch {

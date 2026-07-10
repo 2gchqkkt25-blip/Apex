@@ -105,10 +105,17 @@ struct SyncProgressTests {
         let ordered = SyncStep.allCases
         #expect(ordered[0] == .authenticating)
         #expect(ordered[1] == .movieCategories)
-        #expect(ordered[2] == .seriesCategories)
-        #expect(ordered[3] == .liveCategories)
-        #expect(ordered[4] == .movies)
-        #expect(ordered[5] == .series)
         #expect(ordered[6] == .liveStreams)
+        #expect(ordered.last == .epgGuide)
+    }
+
+    @Test func `xtream steps include epg guide`() {
+        let steps = SyncStep.steps(for: .xtream)
+        #expect(steps.last == .epgGuide)
+    }
+
+    @Test func `stremio steps omit epg guide`() {
+        let steps = SyncStep.steps(for: .stremio)
+        #expect(!steps.contains(.epgGuide))
     }
 }

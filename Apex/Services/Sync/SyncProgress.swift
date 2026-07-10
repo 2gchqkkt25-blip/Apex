@@ -24,6 +24,7 @@ enum SyncStep: Int, CaseIterable, Identifiable {
     // m3u-only steps
     case playlistDownload
     case playlistImport
+    case epgGuide
 
     var id: Int {
         rawValue
@@ -40,11 +41,9 @@ enum SyncStep: Int, CaseIterable, Identifiable {
 
     static func steps(for sourceType: PlaylistSourceType) -> [SyncStep] {
         switch sourceType {
-        case .xtream: xtreamSteps
-        case .m3u: m3uSteps
-        // Stalker maps onto the same catalog kinds as Xtream (auth, categories,
-        // movies, series, live), so it walks the same progress steps.
-        case .stalker: xtreamSteps
+        case .xtream: xtreamSteps + [.epgGuide]
+        case .m3u: m3uSteps + [.epgGuide]
+        case .stalker: xtreamSteps + [.epgGuide]
         case .stremio: [.playlistDownload, .playlistImport]
         }
     }
@@ -60,6 +59,7 @@ enum SyncStep: Int, CaseIterable, Identifiable {
         case .liveStreams: "Live TV channels"
         case .playlistDownload: "Downloading playlist"
         case .playlistImport: "Importing content"
+        case .epgGuide: "TV guide"
         }
     }
 
@@ -74,7 +74,13 @@ enum SyncStep: Int, CaseIterable, Identifiable {
         case .liveStreams: "antenna.radiowaves.left.and.right"
         case .playlistDownload: "arrow.down.circle"
         case .playlistImport: "square.and.arrow.down.on.square"
+        case .epgGuide: "calendar.badge.clock"
         }
+    }
+
+    /// Whether this playlist type carries live channels that use the EPG store.
+    static func includesEPG(for sourceType: PlaylistSourceType) -> Bool {
+        steps(for: sourceType).contains(.epgGuide)
     }
 }
 
