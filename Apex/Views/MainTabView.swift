@@ -39,8 +39,17 @@ struct MainTabView: View {
     /// that's already been handled.
     @State private var autoSyncAttempted: Set<UUID> = []
 
-    /// Browse tabs mount on first selection only. Mounting every tab at launch
-    /// pins the main thread with parallel `@Query`s on large libraries.
+    /// Browse tabs mount on first selection and **unmount when not selected**.
+    /// Other IPTV apps handle 17K+ channels without crashing because they only
+    /// keep the current screen's data in memory. SwiftData's `@Query` keeps all
+    /// results resident for the lifetime of the view — with 44K+ objects across
+    /// multiple tabs, the combined memory exceeds jetsam limits. Deactivating
+    /// inactive tabs releases their query subscriptions and backing objects.
+    ///
+    /// The Home tab stays mounted (lightweight hero + small collection queries).
+    /// Every other tab unmounts when the user navigates away — its view (and all
+    /// `@Query` results) are deallocated. Re-mounting on return is fast because
+    /// SwiftData's SQLite backing reads from disk cache.
     @State private var activatedTabs: Set<AppTab> = [.home]
 
     private var syncFrequency: SyncFrequency {
@@ -181,14 +190,14 @@ struct MainTabView: View {
     /// deep link targets it). Home is always mounted so the launch screen is
     /// usable immediately after sync.
     ///
-    /// Mounts synchronously when `selection == tab` so the first switch never
-    /// shows a blank frame — `onChange` alone ran one render too late and left
-    /// tabs empty until the user switched away and back.
+    /// Mounts the tab's content only when it is the active selection. Inactive
+    /// tabs unmount so their `@Query` subscriptions release memory. Home stays
+    /// mounted (its queries are all capped and lightweight). The re-mount on
+    /// selection is instant — SwiftData reads from SQLite's page cache.
     @ViewBuilder
     private func lazyTab(_ tab: AppTab, selection: AppTab, @ViewBuilder content: () -> some View) -> some View {
-        if activatedTabs.contains(tab) || selection == tab {
+        if selection == tab || tab == .home {
             content()
-                .onAppear { activatedTabs.insert(tab) }
         } else {
             Color.clear
         }
