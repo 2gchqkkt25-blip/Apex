@@ -169,32 +169,6 @@ actor EPGSyncManager {
         mode: EPGSyncMode,
         onProgress: ProgressHandler?
     ) async -> Bool {
-        // Try external EPG sources first (they have current data)
-        let externalMatchedChannels = await syncExternalEPG(
-            identities: identities,
-            sourceID: source.id,
-            mode: mode,
-            onProgress: { matched, total, feedIndex, feedCount, feedLabel in
-                onProgress?(matched, total)
-                Task { @MainActor in
-                    let pct = total > 0 ? Int((Double(matched) / Double(total) * 100).rounded()) : 0
-                    EPGSyncService.shared.updateSyncProgress(
-                        fraction: total > 0 ? Double(matched) / Double(total) : nil,
-                        label: "\(pct)% · \(feedLabel) (\(feedIndex)/\(feedCount))"
-                    )
-                }
-            }
-        )
-        if !externalMatchedChannels.isEmpty {
-            onProgress?(identities.count, identities.count)
-            Logger.database.warning("EPG external matched \(externalMatchedChannels.count) channels — \(identities.count - externalMatchedChannels.count) remaining load on-demand via live API")
-            // Unmatched channels (like regional variants) get their data from
-            // the live per-stream API when the user browses to them. That API
-            // returns the correct current programme for each specific stream.
-            markSynced(source.id)
-            return true
-        }
-
         let credentials = EPGPlaylistCredentials(
             id: playlist.id,
             sourceType: .xtream,
@@ -228,11 +202,24 @@ actor EPGSyncManager {
         let effectiveExternalURL = externalEPGURL ?? discoveredURL
         let xmltvPhpURL = buildXMLTVPhpURL(credentials: credentials)
 
+        // -------------------------------------------------------------------
+        // PROVIDER-FIRST STRATEGY (matches Chilli, SwipTV, TiviMate behavior)
+        // -------------------------------------------------------------------
+        // Other IPTV apps load EPG in seconds because they use the provider's
+        // own xmltv.php directly — one download, one parse, done. They do NOT
+        // second-guess the data with "stale" checks. We now do the same:
+        //
+        // 1. Try provider's xmltv.php (or configured external URL) FIRST
+        // 2. Accept the data if it has ANY matched programmes (no stale rejection)
+        // 3. Only fall back to multi-feed external sources if provider data fails
+        //    to download or matches zero channels
+        // -------------------------------------------------------------------
+
         // If an external EPG URL exists and differs from xmltv.php, try it first
         if let externalURL = effectiveExternalURL,
            !externalURL.isEmpty,
            externalURL != xmltvPhpURL {
-            Logger.database.warning("EPG trying external URL first: \(externalURL, privacy: .public)")
+            Logger.database.warning("EPG trying configured external URL: \(externalURL, privacy: .public)")
             let outcome = await syncXMLTV(
                 source: source,
                 playlist: playlist,
@@ -241,67 +228,82 @@ actor EPGSyncManager {
                 overrideURL: externalURL
             )
             switch outcome {
-            case .succeeded:
+            case .succeeded, .staleBulkFeed:
+                // Accept even "stale" data — other apps show whatever the
+                // provider gives. The user sees the provider's schedule.
+                EPGStaleXMLTVCache.clearXMLTVBulkStale(playlistID: playlist.id)
                 return true
-            case .staleBulkFeed:
-                Logger.database.warning("EPG external URL stale, trying xmltv.php")
             case .downloadFailed, .parsedNoUsableData:
-                Logger.database.warning("EPG external URL failed, trying xmltv.php")
+                Logger.database.warning("EPG configured URL failed, trying xmltv.php")
             }
         }
 
-        // Download xmltv.php
-        let skipXMLTV = EPGStaleXMLTVCache.shouldSkipXMLTVDownload(playlistID: playlist.id)
-        if !skipXMLTV {
-            let outcome = await syncXMLTV(
-                source: source,
-                playlist: playlist,
-                scoped: identities,
-                alignToNow: false
-            )
-            switch outcome {
-            case .succeeded:
-                EPGStaleXMLTVCache.clearXMLTVBulkStale(playlistID: playlist.id)
-                return true
-            case .staleBulkFeed:
-                EPGStaleXMLTVCache.markXMLTVBulkStale(playlistID: playlist.id)
-                Logger.database.warning("EPG xmltv.php is stale, falling back to API prime")
-                let strategy = EPGProviderStrategy.apiOnDemand
-                EPGStaleXMLTVCache.logStrategy(strategy, playlistName: source.name, playlistID: playlist.id)
-                await syncAPIPrime(
-                    strategy: strategy,
-                    result: nil,
-                    credentials: credentials,
-                    identities: identities,
-                    sourceID: source.id
-                )
-                return true
-            case .downloadFailed, .parsedNoUsableData:
-                Logger.database.warning("EPG xmltv.php failed/empty, falling back to API prime")
-                let strategy = EPGProviderStrategy.apiFallback
-                EPGStaleXMLTVCache.logStrategy(strategy, playlistName: source.name, playlistID: playlist.id)
-                await syncAPIPrime(
-                    strategy: strategy,
-                    result: nil,
-                    credentials: credentials,
-                    identities: identities,
-                    sourceID: source.id
-                )
-                return true
+        // Try provider's xmltv.php — the primary fast path
+        let xmltvURL = xmltvPhpURL ?? "(no xmltv.php URL)"
+        Logger.database.warning("EPG trying provider xmltv.php: \(xmltvURL, privacy: .public)")
+        let outcome = await syncXMLTV(
+            source: source,
+            playlist: playlist,
+            scoped: identities,
+            alignToNow: false
+        )
+        switch outcome {
+        case .succeeded, .staleBulkFeed:
+            // Accept the data regardless of "stale" detection. Other IPTV apps
+            // (Chilli, SwipTV, TiviMate) use the provider's data as-is without
+            // a freshness check. If the provider's schedule is behind, that's
+            // visible to the user the same way it is in every other app — and
+            // in practice most providers' xmltv.php IS current (the previous
+            // "stale" detection was often a timezone misinterpretation).
+            EPGStaleXMLTVCache.clearXMLTVBulkStale(playlistID: playlist.id)
+            Logger.database.warning("EPG provider xmltv.php accepted (provider-first strategy)")
+            return true
+        case .downloadFailed:
+            Logger.database.warning("EPG xmltv.php download failed, falling back to external feeds")
+        case .parsedNoUsableData:
+            Logger.database.warning("EPG xmltv.php matched 0 channels, falling back to external feeds")
+        }
+
+        // -------------------------------------------------------------------
+        // FALLBACK: External EPG feeds (only when provider data is unavailable)
+        // -------------------------------------------------------------------
+        // Only reached when the provider's xmltv.php either failed to download
+        // or matched zero channels (channel-ID mismatch). This is the slow path
+        // (1-2 min for multiple feeds) and exists for providers with broken/empty
+        // EPG endpoints.
+        let externalMatchedChannels = await syncExternalEPG(
+            identities: identities,
+            sourceID: source.id,
+            mode: mode,
+            onProgress: { matched, total, feedIndex, feedCount, feedLabel in
+                onProgress?(matched, total)
+                Task { @MainActor in
+                    let pct = total > 0 ? Int((Double(matched) / Double(total) * 100).rounded()) : 0
+                    EPGSyncService.shared.updateSyncProgress(
+                        fraction: total > 0 ? Double(matched) / Double(total) : nil,
+                        label: "\(pct)% · \(feedLabel) (\(feedIndex)/\(feedCount))"
+                    )
+                }
             }
-        } else {
-            // Skip XMLTV download (known stale), go straight to API prime
-            let strategy = EPGProviderStrategy.apiOnDemand
-            EPGStaleXMLTVCache.logStrategy(strategy, playlistName: source.name, playlistID: playlist.id)
-            await syncAPIPrime(
-                strategy: strategy,
-                result: nil,
-                credentials: credentials,
-                identities: identities,
-                sourceID: source.id
-            )
+        )
+        if !externalMatchedChannels.isEmpty {
+            onProgress?(identities.count, identities.count)
+            Logger.database.warning("EPG external matched \(externalMatchedChannels.count) channels — \(identities.count - externalMatchedChannels.count) remaining load on-demand via live API")
+            markSynced(source.id)
             return true
         }
+
+        // Last resort: per-channel API (slowest, but handles any provider)
+        let strategy = EPGProviderStrategy.apiFallback
+        EPGStaleXMLTVCache.logStrategy(strategy, playlistName: source.name, playlistID: playlist.id)
+        await syncAPIPrime(
+            strategy: strategy,
+            result: nil,
+            credentials: credentials,
+            identities: identities,
+            sourceID: source.id
+        )
+        return true
     }
 
     // MARK: - External EPG sources
