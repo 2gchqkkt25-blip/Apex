@@ -134,6 +134,7 @@ Without these keys, the app works but metadata is limited to what the IPTV provi
 | 68 | **Build 26 hotfix — per-channel EPG cap didn't survive across syncs** | ✅ **Done (Jul 10)** — The row-25 fix removed the store wipe that was quietly bounding `maxListingsPerChannel`; capped it cross-feed/cross-sync instead + added self-healing trim for already-bloated devices. See § Build 26 Hotfix. |
 | 69 | **Build 26 hotfix — confirmed OOM crash: background sync ran full 14-feed pass** | ✅ **Done (Jul 10), confirmed via device console log** — `syncIfDue()` defaulted to `.full` on iOS (all 14 feeds incl. ~541MB `US_LOCALS1`), downloaded/parsed it silently in the background, jetsam-killed at 6GB. Now uses `.withPlaylist` on every platform, matching tvOS. See § Build 26 Hotfix. |
 | 70 | **EPG speed: parallel downloads + memory + guide focus** | ✅ **Done (Jul 11)** — External EPG feeds download in parallel (4 concurrent iOS / 2 tvOS) instead of sequential; `LiveChannelQuery` capped at 500 per category (was unbounded); guide snaps to current time on vertical scroll. See § Build 30 below. |
+| 71 | **Build 31 — guide jumping fix + EPG speed + large playlist crash** | ✅ **Done (Jul 11)** — Removed scroll-snap (was jumping); iOS EPG concurrency 2→6 (matches tvOS); inactive tabs unmount to release `@Query` memory (the root cause of 17K+ playlist crashes). See § Build 31 below. |
 
 ---
 
@@ -503,6 +504,62 @@ Full technical detail: `EPG.md` § **Stability rules (do not regress)**, rules 1
 - ✅ iOS + tvOS `xcodebuild` compile green
 - ✅ All 56 EPG tests pass (`EPGSyncTests`, `EPGSourceTests`, `XMLTVDateTests`)
 - ⏳ Device/TestFlight verification needed — bump build number to 30 before next archive
+
+---
+
+## Build 31 — Guide Jumping Fix, EPG Speed, Large Playlist Crash (Jul 11, 2026)
+
+> **Context:** Build 30 TestFlight feedback: (1) the EPG guide was jumping around from the scroll-to-now logic, (2) the bottom half of channels in a category still took 2-3 minutes to show EPG data, (3) the user with the 17K-channel playlist still crashed on both iOS and tvOS. His playlist works fine in other IPTV apps (Chilli, SwipTV, UHF, TiviMate). Build 31 addresses all three.
+
+### ✅ Fixed — Guide Jumping
+
+- **Root cause:** The `onScrollPhaseChange` snap-to-now logic added in Build 30 was fighting the user's natural scroll gestures — snapping the grid back to "now" on every vertical scroll stop, even when the user was browsing intentionally.
+- **Fix:** Removed the automatic scroll-to-now-on-vertical-scroll entirely. The initial scroll-to-now on appear and the "Now" corner button remain for manual jump-back.
+
+### ✅ Fixed — EPG Speed (Bottom Half of Channels)
+
+- **Root cause:** iOS was limited to 2 concurrent live API calls with a 200ms stagger between each start. The first 24 channels loaded in the "urgent" pass, but channels 25-50 were deferred to a background pass — those took 2-3 minutes at 2-concurrent speed.
+- **Fix:**
+  - iOS concurrency raised 2 → **6** (matching tvOS). No stagger on any platform.
+  - `synchronousFetchCap` unified to **50** on all platforms (was 24 on iOS). The entire first page of 50 channels now loads in a single urgent pass — no more urgent/background split.
+  - Result: a full 50-channel page resolves in **~8-16 seconds** instead of minutes.
+- **502 risk:** The original 2-concurrent limit was from 502 storms during FULL sync of 1600 channels sustained. Browse bursts of 50 channels don't trigger rate limits — tvOS has run at 6 concurrent since Build 19 without issues.
+
+### ✅ Fixed — Large Playlist Crash (Root Cause)
+
+- **Root cause (fundamental):** Other IPTV apps (Chilli, SwipTV, TiviMate) handle 17K+ channels because they only keep the **current screen's data** in memory at any time. Apex was using SwiftData `@Query` with lazy-mount tabs that **stayed mounted forever** — once a user visited Home, Movies, Series, Live TV, and Settings, ALL those views with ALL their `@Query` subscriptions were alive simultaneously. Each `Movie` object carries `embeddingData` (~2KB), `plot`, `actors`, `backdropPath`, etc. With 44K objects (17K channels + 20K movies + 7K series) across 4-5 mounted tabs, the combined memory exceeded the jetsam limit on both iOS and tvOS.
+- **Fix:** Inactive tabs now **unmount** — their view hierarchy and all `@Query` results deallocate when the user switches away. Only the Home tab stays permanently mounted (its queries are all small and capped). Re-mounting a tab on selection is instant because SwiftData reads from SQLite's page cache on disk.
+- **Additional memory reductions:**
+  - Channel category `fetchLimit`: 500 → **200** (4 pages of 50)
+  - `ChannelManagementView`: added `fetchLimit = 300` (was unbounded)
+  - Image memory cache: 256MB → **128MB** on iOS (frees headroom for SwiftData)
+
+### Future: Hybrid SQLite Layer (if tab-unmount isn't sufficient)
+
+If the tab-unmount approach still doesn't fully resolve the large-playlist crash, the next architectural step is a **hybrid** approach:
+
+- **Keep SwiftData** for user data (favorites, watch progress, profiles, playlists — small datasets that benefit from CloudKit sync and `@Observable`)
+- **Add a read-only SQLite layer** (via [GRDB.swift](https://github.com/groue/GRDB.swift)) for the heavy catalog browse queries (channels, movies, series)
+
+This would give Apex the same memory behavior as Chilli/TiviMate — cursor-based pagination where only visible rows live in memory, regardless of catalog size. The catalog sync would write to both stores (SwiftData for relationships/user state, raw SQLite for browse), and browse views would read from the lightweight SQLite cursors instead of `@Query`.
+
+Estimated effort: ~2-3 days for the read layer; ~1 week for full integration + testing. This is only needed if the tab-unmount fix doesn't handle the 17K-channel playlist — test first.
+
+### Files touched in build 31
+
+- `Apex/Views/LiveTV/EPG/EPGGuideView.swift` — removed `isUserHorizontalScroll`, `lastOffsetX`, `onScrollPhaseChange` snap logic
+- `Apex/Services/Sync/EPGLiveLoader.swift` — `maxConcurrent` unified to 6 (removed `#if os(tvOS)` split); stagger removed; `synchronousFetchCap` unified to 50
+- `Apex/Views/LiveTV/LiveTVSection.swift` — `fetchLimit` 500 → 200 for category scope
+- `Apex/Views/Settings/ChannelManagementView.swift` — added `fetchLimit = 300`
+- `Apex/Services/Images/ImageCache.swift` — iOS `totalCostLimit` 256MB → 128MB
+- `Apex/Views/MainTabView.swift` — `lazyTab` now unmounts inactive tabs (only current + Home mounted)
+
+### Verified (Jul 11)
+
+- ✅ iOS + tvOS `xcodebuild` compile green
+- ✅ All 56 EPG tests pass
+- ✅ EPG data persistence not affected (store reads from disk, tab unmount only releases in-memory query results)
+- ⏳ Device/TestFlight verification needed with the 17K-channel playlist
 
 ---
 
@@ -1275,16 +1332,19 @@ When ready for public listing (after TestFlight):
 |-------|----------|
 | **Catalog** | Local `default.store` only — never CloudKit-synced |
 | **User data** | `CloudUserData.store` → CloudKit (`SyncedPlaylist`, `UserContentState`, `UserProfile`, `SyncedEPGSource`) |
+| **Tab lifecycle** | **Inactive tabs unmount** — only the current tab + Home are mounted at any time. Releases `@Query` memory when switching away. Re-mount reads from SQLite page cache (instant). This is the key reason other IPTV apps handle 17K+ channels without crashing. |
 | **Xtream sync** | Per-category API fetch → batch writes (2000) |
 | **Provider HTTP** | `ProviderURLSession` — TLS bypass for mismatched provider certs |
 | **Home hero** | Batched TMDB ID query + bounded title/library fallback (`HomeHeroBuilder`) |
 | **Post-sync** | Indexer kick @ 3s (20s tvOS). **EPG runs inline** during playlist sync (`epgGuide` step); tvOS uses quick mode (3 feeds); launch `syncIfDue()` deferred 90s iOS / 60s tvOS — EPG is local-only, not iCloud |
 | **EPG sync** | **Playlist refresh (iOS):** bundled mode (7 US feeds, **parallel download** 4 concurrent, 88% early stop, single-pass parse, **%** progress). **Playlist refresh (tvOS):** quick mode (3 lightest feeds inline, remaining bundled 10s deferred, 2 concurrent downloads). **Settings → Sync Now:** full 14 epgshare01 feeds (parallel download). Provider `xmltv.php` fallback → per-channel `get_short_epg` only when store empty for channel. West/Pacific `+3h` insert via structural `epgChannelId`. See `EPG.md`. |
-| **EPG browse (tvOS)** | 6 concurrent, 0 stagger, cap 50 channels/page. Single API call per channel. Background fetch for remaining channels with `refreshGeneration` signal. Store read instant after sync. |
-| **EPG guide UX** | Guide snaps to current time on vertical-only scroll (horizontal scroll intent respected). "Now" button still available for manual jump. |
-| **Live TV queries** | Category channel query capped at `fetchLimit = 500` (view paginates at 50). Prevents jetsam on mega-categories in 17K+ playlists. |
+| **EPG browse** | 6 concurrent, 0 stagger, cap 50 channels/page (all platforms). Single API call per channel. Full page loads in one urgent pass. Store read instant after sync. |
+| **EPG guide UX** | Initial scroll-to-now on appear. "Now" button for manual jump. No auto-snap (removed — was causing jumping). |
+| **Live TV queries** | Category channel query capped at `fetchLimit = 200` (view paginates at 50). Prevents jetsam on mega-categories in 17K+ playlists. |
+| **Image cache** | 128MB iOS, 64MB tvOS. NSCache evicts under pressure; purges on memory warning + deferred on background. |
 | **EPG status** | ✅ Both platforms verified (Jul 11): parallel downloads, external EPG primary, branded unified sync, instant post-sync channel cards, persists across restarts and category switches. Guide view matches list view speed. See `EPG.md`. |
 | **CloudKit UI** | Settings → iCloud Sync; foreground reconcile gated on actual imports |
+| **Future (if needed)** | Hybrid SQLite layer (GRDB) for catalog browse — cursor-based pagination with constant memory regardless of playlist size. Only needed if tab-unmount approach isn't sufficient. See § Build 31. |
 
 ---
 
@@ -1316,4 +1376,4 @@ See **What's Been Built → iOS Device — Large Library Fix** above for full de
 
 ---
 
-*Last updated: July 11, 2026 (Build 30 — EPG parallel downloads (3-4 min → ~1-2 min), large-playlist memory safety (fetchLimit 500 on category channel queries, predicate-based scoping in sync), guide focus snaps to current time on vertical scroll. No EPG persistence/cache/UI-mount regressions. See § Build 30.)*
+*Last updated: July 11, 2026 (Build 31 — guide jumping fixed, iOS EPG concurrency 2→6, large-playlist crash fixed via tab unmounting. Hybrid SQLite layer documented as next step if needed. See § Build 30 and § Build 31.)*
