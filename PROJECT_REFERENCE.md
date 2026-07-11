@@ -133,7 +133,7 @@ Without these keys, the app works but metadata is limited to what the IPTV provi
 | 67 | **Build 25 hotfix — EPG sync crash + iOS/macOS store-wipe** | ⚠️ **Necessary but not sufficient (Jul 10)** — Fixed cross-feed duplicate-id SwiftData crash in `syncExternalEPG`; iOS/macOS no longer wipes the whole `EPGListing` store on routine/background sync. Shipped in Build 26; still crashed (Guide screen) + still slow — see row 68. See § Build 25 Hotfix. |
 | 68 | **Build 26 hotfix — per-channel EPG cap didn't survive across syncs** | ✅ **Done (Jul 10)** — The row-25 fix removed the store wipe that was quietly bounding `maxListingsPerChannel`; capped it cross-feed/cross-sync instead + added self-healing trim for already-bloated devices. See § Build 26 Hotfix. |
 | 69 | **Build 26 hotfix — confirmed OOM crash: background sync ran full 14-feed pass** | ✅ **Done (Jul 10), confirmed via device console log** — `syncIfDue()` defaulted to `.full` on iOS (all 14 feeds incl. ~541MB `US_LOCALS1`), downloaded/parsed it silently in the background, jetsam-killed at 6GB. Now uses `.withPlaylist` on every platform, matching tvOS. See § Build 26 Hotfix. |
-| 70 | **EPG speed: parallel downloads + memory + guide focus** | ✅ **Done (Jul 11)** — External EPG feeds download in parallel (4 concurrent iOS / 2 tvOS) instead of sequential; `LiveChannelQuery` capped at 500 per category (was unbounded); guide snaps to current time on vertical scroll. See § Build 27 below. |
+| 70 | **EPG speed: parallel downloads + memory + guide focus** | ✅ **Done (Jul 11)** — External EPG feeds download in parallel (4 concurrent iOS / 2 tvOS) instead of sequential; `LiveChannelQuery` capped at 500 per category (was unbounded); guide snaps to current time on vertical scroll. See § Build 30 below. |
 
 ---
 
@@ -441,15 +441,15 @@ This is very likely the actual, dominant cause of the crash/slowness you've been
 - ✅ EPG unit tests pass, including `EPGSyncTests/per channel insert cap prevents guide table explosion` (pre-existing test for this exact mechanism — still passes with the cross-feed threading in place)
 - ✅ The `US_LOCALS1` OOM kill is confirmed against a real device console log (see above) — not a code-inspection guess
 - 📌 The cross-feed duplicate-id crash and the per-channel-cap fix are still code-inspection findings, not individually confirmed against a crash log — they're real bugs worth having fixed regardless, but may not be what you were hitting specifically
-- ⏳ Device/TestFlight re-verification still needed — none of today's fixes have been tested on a physical device yet. Bump to Build 27 before the next archive.
+- ⏳ Device/TestFlight re-verification still needed — none of today's fixes have been tested on a physical device yet. Bump to Build 30 before the next archive.
 
 Full technical detail: `EPG.md` § **Stability rules (do not regress)**, rules 1c and 1c-confirmed.
 
 ---
 
-## Build 27 — EPG Speed, Memory Safety, Guide UX (Jul 11, 2026)
+## Build 30 — EPG Speed, Memory Safety, Guide UX (Jul 11, 2026)
 
-> **Context:** TestFlight testing reported three issues: (1) EPG data still takes 3-4 minutes to load when other IPTV apps do it in seconds, (2) app crashes (jetsam) on large playlists (~17K channels, 20K movies/shows) while on the playlist or content management screen, (3) the EPG guide grid drifts away from current time when scrolling vertically through channels. Build 27 fixes all three without touching any of the EPG persistence, cache, or UI-mount patterns established in Builds 19 and 24.
+> **Context:** TestFlight testing reported three issues: (1) EPG data still takes 3-4 minutes to load when other IPTV apps do it in seconds, (2) app crashes (jetsam) on large playlists (~17K channels, 20K movies/shows) while on the playlist or content management screen, (3) the EPG guide grid drifts away from current time when scrolling vertically through channels. Build 30 fixes all three without touching any of the EPG persistence, cache, or UI-mount patterns established in Builds 19 and 24.
 
 ### ✅ Fixed — EPG Download Speed (3-4 min → ~1-2 min)
 
@@ -492,7 +492,7 @@ Full technical detail: `EPG.md` § **Stability rules (do not regress)**, rules 1
 | Lazy tab mount unchanged | ✅ |
 | No new `@Query` invalidations | ✅ |
 
-### Files touched in build 27
+### Files touched in build 30
 
 - `Apex/Services/Sync/EPGSyncManager.swift` — parallel download phase (`withTaskGroup`, 4/2 concurrent); `scopedChannelData` uses predicate instead of in-memory filter
 - `Apex/Views/LiveTV/LiveTVSection.swift` — `LiveChannelQuery.descriptor` adds `fetchLimit = 500` for `.category` scope
@@ -502,7 +502,7 @@ Full technical detail: `EPG.md` § **Stability rules (do not regress)**, rules 1
 
 - ✅ iOS + tvOS `xcodebuild` compile green
 - ✅ All 56 EPG tests pass (`EPGSyncTests`, `EPGSourceTests`, `XMLTVDateTests`)
-- ⏳ Device/TestFlight verification needed — bump build number before next archive
+- ⏳ Device/TestFlight verification needed — bump build number to 30 before next archive
 
 ---
 
@@ -1316,4 +1316,4 @@ See **What's Been Built → iOS Device — Large Library Fix** above for full de
 
 ---
 
-*Last updated: July 11, 2026 (Build 27 — EPG parallel downloads (3-4 min → ~1-2 min), large-playlist memory safety (fetchLimit 500 on category channel queries, predicate-based scoping in sync), guide focus snaps to current time on vertical scroll. No EPG persistence/cache/UI-mount regressions. See § Build 27.)*
+*Last updated: July 11, 2026 (Build 30 — EPG parallel downloads (3-4 min → ~1-2 min), large-playlist memory safety (fetchLimit 500 on category channel queries, predicate-based scoping in sync), guide focus snaps to current time on vertical scroll. No EPG persistence/cache/UI-mount regressions. See § Build 30.)*

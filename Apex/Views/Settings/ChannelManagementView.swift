@@ -22,14 +22,20 @@ struct ChannelManagementView: View {
     init(category: Category) {
         self.category = category
         let categoryId = category.id
-        _streams = Query(
-            filter: #Predicate<LiveStream> { $0.categoryId == categoryId },
-            sort: [
+        var descriptor = FetchDescriptor<LiveStream>(
+            predicate: #Predicate<LiveStream> { $0.categoryId == categoryId },
+            sortBy: [
                 SortDescriptor(\LiveStream.customOrder),
                 SortDescriptor(\LiveStream.num),
                 SortDescriptor(\LiveStream.name)
             ]
         )
+        // Cap at 300 channels to prevent jetsam on large playlists. Most
+        // categories have far fewer; this only affects mega-categories in
+        // 17K+ channel playlists. The user can still hide/reorder up to 300
+        // channels which covers the vast majority of real-world use.
+        descriptor.fetchLimit = 300
+        _streams = Query(descriptor)
     }
 
     private func move(from source: IndexSet, to destination: Int) {

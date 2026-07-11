@@ -83,16 +83,16 @@ actor EPGLiveLoader {
     /// The 502 issue was at 6+ during FULL sync (1600 channels sustained); for
     /// a short browse burst of 50 channels, 6 concurrent finishes in seconds
     /// without tripping panel rate limits.
-    #if os(tvOS)
+    /// iOS now also uses 6 concurrent with no stagger — the previous 2-concurrent
+    /// + 200ms stagger meant 24 channels took ~3 seconds best case, and the
+    /// bottom half of a category (channels 25-50 in the background pass) could
+    /// take 2-3 minutes. With 6 concurrent and no stagger, a full 50-channel
+    /// page resolves in ~8-16 seconds.
     private static let maxConcurrent = 6
-    /// No stagger on tvOS — the concurrency limit already prevents panel
-    /// overload, and the cumulative stagger was adding 7+ seconds of pure delay
-    /// for a full page of 50 channels.
+    /// No stagger — the concurrency limit already prevents panel overload for
+    /// browse-sized bursts (50 channels). The cumulative stagger was adding
+    /// unnecessary delay.
     private static let staggerBetweenStarts: UInt64 = 0
-    #else
-    private static let maxConcurrent = 2
-    private static let staggerBetweenStarts: UInt64 = 200_000_000 // 200ms
-    #endif
     /// Xtream default — current + next few slots. A high `limit` on some panels
     /// returns the oldest rows first (days of history), which is why we were
     /// seeing startDeltaMin ≈ -7000 with `limit=32`.
@@ -583,18 +583,10 @@ actor EPGLiveLoader {
 
 /// Unified entry point for Live TV cards and the guide grid.
 enum EPGBrowseLoader {
-    /// One screen of channel cards — fetch more as the user scrolls.
-    /// Bumped from 12 → 24 so unmatched-by-external-EPG channels (regional
-    /// variants, niche/international) get gap-filled in one pass instead of
-    /// requiring multiple scroll ticks. Safe with `maxConcurrent=2` + 200 ms
-    /// stagger; a full 24-channel page finishes in a couple seconds.
-    /// tvOS uses the full page size since it has 4 concurrent — the first visible
-    /// page should populate without needing the background pass.
-    #if os(tvOS)
+    /// All visible channels in a page load in the urgent pass. With 6 concurrent
+    /// and no stagger, a full 50-channel page resolves in ~8-16 seconds — no need
+    /// to split into urgent + background anymore.
     private static let synchronousFetchCap = 50
-    #else
-    private static let synchronousFetchCap = 24
-    #endif
 
     /// Loads guide data for visible channels.
     /// Xtream: live API first (returns shifted data), store as fallback.

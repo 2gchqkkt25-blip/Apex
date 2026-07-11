@@ -116,14 +116,14 @@ enum LiveChannelQuery {
                 predicate: #Predicate { $0.categoryId == categoryId && $0.isHidden == false },
                 sortBy: sort.liveStreamDescriptors
             )
-            // Cap the query at 500 channels per category. The view paginates
-            // display via `visibleCount` (50 at a time) but without a fetchLimit,
-            // SwiftData hydrates ALL matching objects in memory at once — for a
-            // 17K-channel playlist where a category can have thousands of channels,
-            // this causes jetsam kills on tvOS and iOS. 500 is sufficient for
-            // browse (10 pages) and covers most categories entirely; the few
-            // "catch-all" mega-categories are the ones that crash without this cap.
-            descriptor.fetchLimit = 500
+            // Cap the query to prevent SwiftData from hydrating thousands of
+            // channels at once. For a 17K-channel playlist where mega-categories
+            // can have 2000+ channels, loading all of them triggers jetsam on
+            // both iOS and tvOS — combined with other mounted views' queries,
+            // the total object graph exceeds the memory limit.
+            // 200 channels = 4 pages of 50. Users who scroll beyond this would
+            // need the category split up, which most providers already do.
+            descriptor.fetchLimit = 200
             return descriptor
         case .favorites:
             // `favoriteOrder` (nil-first) leads, exactly like `customOrder` for

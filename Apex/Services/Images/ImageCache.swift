@@ -63,7 +63,11 @@ final nonisolated class ImageMemoryCache: @unchecked Sendable {
         #if os(tvOS)
             cache.totalCostLimit = 64 * 1024 * 1024
         #else
-            cache.totalCostLimit = 256 * 1024 * 1024
+            // Reduced from 256MB to 128MB to leave more headroom for SwiftData
+            // on large playlists (17K+ channels, 20K+ movies). NSCache still
+            // evicts under memory pressure, but a lower ceiling means the system
+            // warning arrives later, giving more room before jetsam kills.
+            cache.totalCostLimit = 128 * 1024 * 1024
         #endif
         #if canImport(UIKit)
             // NSCache evicts under pressure on its own, but silently and only
