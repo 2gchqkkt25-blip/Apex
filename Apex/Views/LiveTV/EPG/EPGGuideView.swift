@@ -413,6 +413,12 @@ private struct EPGGrid: View {
 
     @State private var position = ScrollPosition()
     @State private var didInitialScroll = false
+    /// Tracks the last user-initiated horizontal offset. When the user scrolls
+    /// vertically (through channels), the grid snaps back to the "now" position
+    /// so the current programme stays visible. Horizontal scrolling (to see
+    /// past/future) is still allowed but resets on the next vertical scroll.
+    @State private var isUserHorizontalScroll = false
+    @State private var lastOffsetX: CGFloat = 0
     /// A combined horizontal+vertical ScrollView centers content that is shorter
     /// than the viewport. The frozen channel column pins its cells to the top, so
     /// without this the two panes drift apart when a category has only a few
@@ -441,8 +447,31 @@ private struct EPGGrid: View {
             }
         }
         .scrollPosition($position)
-        .onScrollGeometryChange(for: CGPoint.self) { $0.contentOffset } action: { _, new in
+        .onScrollGeometryChange(for: CGPoint.self) { $0.contentOffset } action: { old, new in
             sync.offset = CGPoint(x: max(0, new.x), y: max(0, new.y))
+            // Track horizontal movement intent. When the user scrolls horizontally
+            // (to see past/future programmes), mark it so vertical scrolling
+            // doesn't fight them. Reset when scrolling stops (see onScrollPhaseChange).
+            let deltaX = abs(new.x - old.x)
+            if deltaX > 2 {
+                isUserHorizontalScroll = true
+            }
+            lastOffsetX = new.x
+        }
+        // When scroll movement stops (finger lifted + deceleration complete),
+        // if the user was only scrolling vertically (not horizontally), snap
+        // the grid back to "now" so the current programme stays visible.
+        // This matches TiviMate and other popular IPTV guides where vertical
+        // channel browsing always shows what's on now.
+        .onScrollPhaseChange { _, newPhase in
+            if newPhase == .idle {
+                if !isUserHorizontalScroll, abs(sync.offset.x - nowTarget) > 20 {
+                    withAnimation(.easeInOut(duration: 0.3)) {
+                        position.scrollTo(x: nowTarget)
+                    }
+                }
+                isUserHorizontalScroll = false
+            }
         }
         #if os(tvOS)
         .focusSection()

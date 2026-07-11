@@ -107,13 +107,24 @@ enum LiveChannelQuery {
     /// Builds the `@Query` descriptor for a scope. The category scope sorts by
     /// the user's content-sort choice; the virtual collections have an intrinsic
     /// order (favorites by their own custom order, recents by most-recent-first).
+    /// Views paginate display via `visibleCount` — the query itself loads results
+    /// lazily through SwiftData's faulting mechanism.
     static func descriptor(for scope: LiveChannelScope, sort: ContentSortOption) -> FetchDescriptor<LiveStream> {
         switch scope {
         case let .category(categoryId):
-            return FetchDescriptor<LiveStream>(
+            var descriptor = FetchDescriptor<LiveStream>(
                 predicate: #Predicate { $0.categoryId == categoryId && $0.isHidden == false },
                 sortBy: sort.liveStreamDescriptors
             )
+            // Cap the query at 500 channels per category. The view paginates
+            // display via `visibleCount` (50 at a time) but without a fetchLimit,
+            // SwiftData hydrates ALL matching objects in memory at once — for a
+            // 17K-channel playlist where a category can have thousands of channels,
+            // this causes jetsam kills on tvOS and iOS. 500 is sufficient for
+            // browse (10 pages) and covers most categories entirely; the few
+            // "catch-all" mega-categories are the ones that crash without this cap.
+            descriptor.fetchLimit = 500
+            return descriptor
         case .favorites:
             // `favoriteOrder` (nil-first) leads, exactly like `customOrder` for
             // categories: an un-reordered favorites list ties on nil and falls

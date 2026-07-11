@@ -220,13 +220,17 @@ final class EPGSyncService {
         let raw = UserDefaults.standard.string(forKey: SyncFrequency.epgStorageKey) ?? ""
         let frequency = SyncFrequency.resolveEPG(raw)
         guard frequency.isDue(lastSyncDate: EPGSyncSchedule.lastSyncDate) else { return }
-        #if os(tvOS)
-        // tvOS headroom is tight; schedule the lighter bundled pass rather than
-        // stacking a full 14-feed guide parse on top of Live TV browsing.
+        // A silent background refresh must never run the full 14-feed pass —
+        // that includes the ~500MB `US_LOCALS1` feed, which `urlsForBundledSync()`
+        // excludes outright (see its doc comment: "drove memory warnings even on
+        // iPhone"). This used to be tvOS-only (tight jetsam headroom); on iOS
+        // the `.full` default here let an unattended `syncIfDue()` download and
+        // parse that feed while the user was actively using the app, ballooning
+        // memory past the entitled hard limit and triggering a fatal jetsam
+        // kill. Only an explicit Settings -> Sync Now (`syncNow()`) should ever
+        // run the full pass — the user has then consciously opted into a longer
+        // sync.
         kick(mode: .withPlaylist, invalidateLiveCache: false)
-        #else
-        kick(invalidateLiveCache: false)
-        #endif
     }
 
     private func kick(mode: EPGSyncMode = .full, invalidateLiveCache: Bool = true) {

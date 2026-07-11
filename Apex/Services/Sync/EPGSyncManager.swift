@@ -104,6 +104,7 @@ actor EPGSyncManager {
 
         if anySucceeded {
             Self.pruneExpiredListings(in: modelContainer)
+            Self.trimExcessListings(in: modelContainer)
         }
 
         return anySucceeded
@@ -331,21 +332,22 @@ actor EPGSyncManager {
 
         let syncNow = Date()
 
-        // On tvOS, the UI often transitions into Live TV while the external
-        // guide is still parsing. Clearing `EPGListing` makes the guide blank,
-        // which then triggers extra on-demand EPG fetching and looks like the
-        // app is "lagging" / "stuck" (and it disappears again when returning).
+        // The UI can transition into Live TV while the external guide is still
+        // parsing — a routine playlist-refresh sync or the periodic background
+        // refresh both run without blocking browse, on every platform. Clearing
+        // `EPGListing` makes the guide blank, which then triggers extra
+        // on-demand EPG fetching and looks like the app is "lagging" / "stuck"
+        // (and it disappears again when returning).
         //
-        // For bundled tvOS passes, preserve existing rows and only insert rows
-        // with listing ids that don't already exist. This avoids SwiftData
-        // unique-upsert conflicts without forcing a full store wipe.
-        #if os(tvOS)
+        // For bundled passes, preserve existing rows and only insert rows with
+        // listing ids that don't already exist. This avoids SwiftData
+        // unique-upsert conflicts without forcing a full store wipe. Only an
+        // explicit full Settings -> Sync Now pass (`mode: .full`) does a hard
+        // replace.
         let preserveExistingStore = bundled
-        #else
-        let preserveExistingStore = false
-        #endif
 
         let existingListingIDs: Set<String>
+        let existingCountByChannel: [String: Int]
         if preserveExistingStore {
             let context = ModelContext(modelContainer)
             context.autosaveEnabled = false
@@ -360,10 +362,12 @@ actor EPGSyncManager {
                 )
             )) ?? []
             existingListingIDs = Set(existing.map(\.id))
+            existingCountByChannel = Dictionary(grouping: existing, by: \.channelId).mapValues(\.count)
         } else {
             // Preserve mode off — we will clear below and can start with an empty
             // "seen" set.
             existingListingIDs = []
+            existingCountByChannel = [:]
         }
 
         if !preserveExistingStore {
@@ -377,9 +381,114 @@ actor EPGSyncManager {
 
         var totalInserted = 0
         var matchedChannelIDs = Set<String>()
+        // Accumulates every listing id inserted by *any* feed processed so far
+        // in this pass. Each feed runs in its own `Task.detached` with its own
+        // `ModelContext`, so without this a later feed has no way to know a
+        // duplicate id (a channel/timeslot two feeds both cover) was already
+        // committed by an earlier feed in the same pass — inserting it again
+        // hits SwiftData's unique-attribute upsert path, which remaps the
+        // persistent identifier and crashes ("fatal logic error in
+        // DefaultStore"). Re-seeded into each feed's local `insertedIDs` below.
+        var insertedIDsSoFar = existingListingIDs
+        // Accumulates each channel's *total* row count — store + everything
+        // inserted by earlier feeds this pass. `maxListingsPerChannel` only
+        // means anything if it bounds a channel's total, but with
+        // `preserveExistingStore` on, the store is never wiped between syncs;
+        // a counter that reset to zero for every feed (and every sync) let a
+        // channel covered by several feeds gain a fresh capful from each one,
+        // every playlist refresh and every background sync, forever — bloating
+        // the guide grid (which renders every row as a cell, unlike the list's
+        // fixed now/next) until it rendered slowly or crashed outright.
+        var listingCountSoFar = existingCountByChannel
         let totalChannels = identities.count
+
+        // --- Parallel download phase ---
+        // Other IPTV apps load EPG in seconds because they download all feeds
+        // concurrently. The previous sequential download+parse loop spent most
+        // of its 3-4 minutes waiting on network. Downloads now run in parallel
+        // (up to 4 concurrent) while parsing stays sequential to preserve the
+        // insertedIDsSoFar/listingCountSoFar threading guarantees.
+        struct DownloadedFeed: Sendable {
+            let index: Int
+            let url: String
+            let label: String
+            let fileURL: URL
+            let fileSize: Int64
+        }
+
+        // Determine which feeds to download (skip heavy ones early if possible)
+        var feedsToDownload: [(index: Int, url: String, label: String)] = []
         for (feedIndex, url) in urls.enumerated() {
             let feedLabel = ExternalEPGSources.sources.first(where: { $0.url == url })?.name ?? "Feed \(feedIndex + 1)"
+            // Skip obviously heavy sources up front (based on URL, not coverage —
+            // coverage-based skipping still happens during the parse phase below)
+            if ExternalEPGSources.isHeavyLowYieldSource(url: url), bundled {
+                Logger.database.warning("EPG skipping heavy source (pre-download): \(feedLabel)")
+                continue
+            }
+            feedsToDownload.append((feedIndex, url, feedLabel))
+        }
+
+        onProgress?(0, totalChannels, 1, feedsToDownload.count, "Downloading feeds…")
+
+        // Download all feeds in parallel (capped at 4 concurrent to avoid
+        // saturating the connection or tripping rate limits). Each download
+        // writes to a temp file on disk so memory stays flat.
+        // tvOS has tighter memory limits, so cap at 2 concurrent there.
+        #if os(tvOS)
+        let maxConcurrentDownloads = 2
+        #else
+        let maxConcurrentDownloads = 4
+        #endif
+        var downloadedFeeds: [DownloadedFeed] = []
+        downloadedFeeds.reserveCapacity(feedsToDownload.count)
+
+        await withTaskGroup(of: DownloadedFeed?.self) { group in
+            var iterator = feedsToDownload.makeIterator()
+            var inFlight = 0
+
+            func scheduleNext() {
+                while inFlight < maxConcurrentDownloads, let feed = iterator.next() {
+                    inFlight += 1
+                    group.addTask {
+                        do {
+                            let fileURL = try await self.downloadXMLTV(from: feed.url)
+                            let fileSize = (try? FileManager.default.attributesOfItem(atPath: fileURL.path)[.size] as? Int64) ?? 0
+                            Logger.database.warning("EPG feed downloaded — \(fileSize) bytes from \(feed.label)")
+                            return DownloadedFeed(index: feed.index, url: feed.url, label: feed.label, fileURL: fileURL, fileSize: fileSize)
+                        } catch {
+                            Logger.database.warning("EPG feed download failed: \(feed.label) — \(error.localizedDescription)")
+                            return nil
+                        }
+                    }
+                }
+            }
+
+            scheduleNext()
+            for await result in group {
+                inFlight -= 1
+                if let feed = result {
+                    downloadedFeeds.append(feed)
+                }
+                scheduleNext()
+            }
+        }
+
+        // Sort by original feed order so higher-priority feeds (national) are
+        // parsed first, giving the coverage-based early-stop logic the best data.
+        downloadedFeeds.sort { $0.index < $1.index }
+
+        Logger.database.warning("EPG parallel download complete: \(downloadedFeeds.count)/\(feedsToDownload.count) feeds ready")
+
+        // --- Sequential parse phase ---
+        // Parse must be sequential because each feed's dedup set and per-channel
+        // counts build on the previous feed's results.
+        for (parseIndex, downloaded) in downloadedFeeds.enumerated() {
+            let feedIndex = downloaded.index
+            let url = downloaded.url
+            let feedLabel = downloaded.label
+            let fileURL = downloaded.fileURL
+            defer { try? FileManager.default.removeItem(at: fileURL) }
 
             if shouldSkipHeavyExternalSource(
                 url: url,
@@ -393,37 +502,48 @@ actor EPGSyncManager {
                 continue
             }
 
-            onProgress?(matchedChannelIDs.count, totalChannels, feedIndex + 1, urls.count, feedLabel)
+            onProgress?(matchedChannelIDs.count, totalChannels, parseIndex + 1, downloadedFeeds.count, feedLabel)
 
             do {
-                let fileURL = try await downloadXMLTV(from: url)
-                defer { try? FileManager.default.removeItem(at: fileURL) }
+                Logger.database.warning("EPG external source parsing — \(downloaded.fileSize) bytes from \(feedLabel)")
 
-                let fileSize = (try? FileManager.default.attributesOfItem(atPath: fileURL.path)[.size] as? Int64) ?? 0
-                Logger.database.warning("EPG external source downloaded — \(fileSize) bytes from \(url)")
+                // File already downloaded in parallel phase above
 
                 let container = modelContainer
                 let channelIdentities = identities
                 let baselineMatched = matchedChannelIDs.count
                 let reportProgress = onProgress
+                let seedIDs = insertedIDsSoFar
+                let countSeed = listingCountSoFar
 
                 struct FeedImportResult: Sendable {
                     let inserted: Int
                     let catalog: EPGChannelCatalog?
                     let westMappings: [String: [String]]
                     let shouldRefreshUI: Bool
+                    let insertedIDs: Set<String>
+                    let listingCounts: [String: Int]
                 }
 
                 let feedResult = await Task.detached(priority: .utility) {
                     var count = 0
+                    // Distinct channels *this feed* has written to, for the
+                    // progress estimate below only — not the cap (see
+                    // `totalCountByChannel`).
                     var listingsPerChannel: [String: Int] = [:]
+                    // Seeded with the store's existing per-channel counts plus
+                    // every earlier feed's contribution this pass, so the cap
+                    // below is a true ceiling on the channel's total row count.
+                    var totalCountByChannel = countSeed
                     var didSignalMidFeedRefresh = false
-                    // De-dupes deterministic listing ids within this feed so the
-                    // same `channelId-start-end` is never inserted twice (source
-                    // duplicates / west-shift collisions), which would otherwise
-                    // trigger a unique-constraint upsert + persistent-identifier
-                    // remap on save.
-                    var insertedIDs = existingListingIDs
+                    // De-dupes deterministic listing ids within this feed AND
+                    // against every earlier feed in this same pass (`seedIDs`)
+                    // so the same `channelId-start-end` is never inserted twice
+                    // (source duplicates / west-shift collisions / a later feed
+                    // re-covering a channel an earlier feed already wrote),
+                    // which would otherwise trigger a unique-constraint upsert +
+                    // persistent-identifier remap on save.
+                    var insertedIDs = seedIDs
                     let context = ModelContext(container)
                     context.autosaveEnabled = false
                     let now = syncNow
@@ -440,7 +560,7 @@ actor EPGSyncManager {
                         end: Date
                     ) {
                         guard end > pastCutoff, start < futureCutoff else { return }
-                        guard (listingsPerChannel[channelId] ?? 0) < maxPerChannel else { return }
+                        guard (totalCountByChannel[channelId] ?? 0) < maxPerChannel else { return }
                         let listingId = "\(channelId)-\(Int(start.timeIntervalSince1970))-\(Int(end.timeIntervalSince1970))"
                         guard insertedIDs.insert(listingId).inserted else { return }
                         context.insert(EPGListing(
@@ -452,6 +572,7 @@ actor EPGSyncManager {
                             end: end
                         ))
                         listingsPerChannel[channelId] = (listingsPerChannel[channelId] ?? 0) + 1
+                        totalCountByChannel[channelId] = (totalCountByChannel[channelId] ?? 0) + 1
                         count += 1
                     }
 
@@ -490,8 +611,8 @@ actor EPGSyncManager {
                                 reportProgress(
                                     min(interim, totalChannels),
                                     totalChannels,
-                                    feedIndex + 1,
-                                    urls.count,
+                                    parseIndex + 1,
+                                    downloadedFeeds.count,
                                     feedLabel
                                 )
                             }
@@ -511,7 +632,7 @@ actor EPGSyncManager {
 
                     guard !stats.catalog.isEmpty else {
                         Logger.database.warning("EPG external source matched 0 channels by display name")
-                        return FeedImportResult(inserted: 0, catalog: nil, westMappings: [:], shouldRefreshUI: false)
+                        return FeedImportResult(inserted: 0, catalog: nil, westMappings: [:], shouldRefreshUI: false, insertedIDs: insertedIDs, listingCounts: totalCountByChannel)
                     }
 
                     Logger.database.warning(
@@ -528,10 +649,14 @@ actor EPGSyncManager {
                         inserted: count,
                         catalog: stats.catalog,
                         westMappings: stats.westMappings,
-                        shouldRefreshUI: count > 0 && !didSignalMidFeedRefresh
+                        shouldRefreshUI: count > 0 && !didSignalMidFeedRefresh,
+                        insertedIDs: insertedIDs,
+                        listingCounts: totalCountByChannel
                     )
                 }.value
 
+                insertedIDsSoFar = feedResult.insertedIDs
+                listingCountSoFar = feedResult.listingCounts
                 totalInserted += feedResult.inserted
                 if let feedCatalog = feedResult.catalog {
                     let matched = Set(feedCatalog.normalize.values)
@@ -548,7 +673,7 @@ actor EPGSyncManager {
                     }
                 }
 
-                onProgress?(matchedChannelIDs.count, totalChannels, feedIndex + 1, urls.count, feedLabel)
+                onProgress?(matchedChannelIDs.count, totalChannels, parseIndex + 1, downloadedFeeds.count, feedLabel)
 
                 if bundled, shouldStopBundledSync(matchedCount: matchedChannelIDs.count, totalCount: totalChannels) {
                     Logger.database.warning(
@@ -796,6 +921,8 @@ actor EPGSyncManager {
     private func channelCatalog() -> ChannelCatalogData {
         let context = ModelContext(modelContainer)
         context.autosaveEnabled = false
+        // Fetch all LiveStreams — the extracting of lightweight ChannelRef values
+        // ensures we don't hold on to heavy SwiftData objects beyond this scope.
         let streams = (try? context.fetch(FetchDescriptor<LiveStream>())) ?? []
         let identities = streams.map { ChannelRef(
             streamId: $0.streamId,
@@ -811,9 +938,13 @@ actor EPGSyncManager {
         let context = ModelContext(modelContainer)
         context.autosaveEnabled = false
         let prefix = "\(playlistID.uuidString)-live-"
-        let streams = (try? context.fetch(FetchDescriptor<LiveStream>())) ?? []
-        let scoped = streams.filter { $0.id.hasPrefix(prefix) }
-        return scoped.map { ChannelRef(
+        // Fetch only streams matching this playlist using a predicate to avoid
+        // loading the entire catalog into memory for multi-playlist setups.
+        let descriptor = FetchDescriptor<LiveStream>(
+            predicate: #Predicate { $0.id.localizedStandardContains(prefix) }
+        )
+        let streams = (try? context.fetch(descriptor)) ?? []
+        return streams.map { ChannelRef(
             streamId: $0.streamId,
             name: $0.name,
             epgChannelId: $0.epgChannelId,
@@ -938,6 +1069,44 @@ actor EPGSyncManager {
             Logger.database.info("EPG pruned \(expired.count) expired/out-of-range listings")
         } catch {
             Logger.database.error("EPG prune failed: \(error.localizedDescription)")
+        }
+    }
+
+    /// Trims any channel's *non-expired* row count back down to
+    /// `EPGRetention.maxListingsPerChannel`, keeping the earliest (soonest
+    /// airing) rows. `syncExternalEPG`'s insert-time cap (Jul 10) now tracks a
+    /// channel's running total across the whole pass, so this shouldn't be
+    /// needed going forward — but it self-heals devices that already
+    /// over-accumulated rows for well-covered channels across many syncs
+    /// before that fix, without requiring a fresh install or a Sync Now.
+    /// Called after every successful sync, same as `pruneExpiredListings`.
+    static func trimExcessListings(in container: ModelContainer) {
+        let context = ModelContext(container)
+        context.autosaveEnabled = false
+        let window = EPGRetention.importWindow()
+        let cutoff = window.start
+        let horizon = window.end
+        let descriptor = FetchDescriptor<EPGListing>(
+            predicate: #Predicate<EPGListing> { $0.end > cutoff && $0.start < horizon },
+            sortBy: [SortDescriptor(\.start)]
+        )
+        guard let listings = try? context.fetch(descriptor), !listings.isEmpty else { return }
+        // `Dictionary(grouping:by:)` preserves each group's relative order from
+        // the fetch, so every group here is still ascending by `start`.
+        let grouped = Dictionary(grouping: listings, by: \.channelId)
+        var trimmed = 0
+        for (_, rows) in grouped where rows.count > EPGRetention.maxListingsPerChannel {
+            for excess in rows.dropFirst(EPGRetention.maxListingsPerChannel) {
+                context.delete(excess)
+                trimmed += 1
+            }
+        }
+        guard trimmed > 0 else { return }
+        do {
+            try context.save()
+            Logger.database.info("EPG trimmed \(trimmed) excess listings over the per-channel cap")
+        } catch {
+            Logger.database.error("EPG trim failed: \(error.localizedDescription)")
         }
     }
 }

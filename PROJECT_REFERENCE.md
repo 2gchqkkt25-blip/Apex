@@ -129,7 +129,11 @@ Without these keys, the app works but metadata is limited to what the IPTV provi
 | 63 | **Build 20/21 — TestFlight performance regression** | ✅ **Done (Jul 8 pm)** — freeze on launch/foreground/tab-switch fixed. CloudKit reconcile deferred, image cache stabilized, indexer de-aggressified. See § Build 21 below. |
 | 64 | **Genre/Category browse → Search tab (all platforms)** | ✅ **Done (Jul 8 pm)** — "Browse by Genre" and "All Categories" moved from Movies/Series to the Search empty state on iOS/iPad/Mac. tvOS poster tiles unchanged. |
 | 65 | **NetworkMonitor — WiFi-off crash fix** | ✅ **Done (Jul 8)** — `NetworkMonitor` class (EPG + indexer pause on connectivity loss); missing `import Combine` fixed. |
-| 66 | **Build 24 — EPG UI regression restore + performance hardening** | 🔄 **Testing (Jul 9)** — Shared `LiveTVSectionEPGCache`, list+guide `ZStack`, merge-only loads. Regression checklists + `.cursor/rules/apex-*.mdc`. See § Build 24 and § Do Not Regress. |
+| 66 | **Build 24 — EPG UI regression restore + performance hardening** | ⚠️ **UI restore correct, sync-layer bugs found in testing (Jul 10)** — Shared `LiveTVSectionEPGCache`, list+guide `ZStack`, merge-only loads all verified sound. Regression checklists + `.cursor/rules/apex-*.mdc`. See § Build 24 and § Do Not Regress. |
+| 67 | **Build 25 hotfix — EPG sync crash + iOS/macOS store-wipe** | ⚠️ **Necessary but not sufficient (Jul 10)** — Fixed cross-feed duplicate-id SwiftData crash in `syncExternalEPG`; iOS/macOS no longer wipes the whole `EPGListing` store on routine/background sync. Shipped in Build 26; still crashed (Guide screen) + still slow — see row 68. See § Build 25 Hotfix. |
+| 68 | **Build 26 hotfix — per-channel EPG cap didn't survive across syncs** | ✅ **Done (Jul 10)** — The row-25 fix removed the store wipe that was quietly bounding `maxListingsPerChannel`; capped it cross-feed/cross-sync instead + added self-healing trim for already-bloated devices. See § Build 26 Hotfix. |
+| 69 | **Build 26 hotfix — confirmed OOM crash: background sync ran full 14-feed pass** | ✅ **Done (Jul 10), confirmed via device console log** — `syncIfDue()` defaulted to `.full` on iOS (all 14 feeds incl. ~541MB `US_LOCALS1`), downloaded/parsed it silently in the background, jetsam-killed at 6GB. Now uses `.withPlaylist` on every platform, matching tvOS. See § Build 26 Hotfix. |
+| 70 | **EPG speed: parallel downloads + memory + guide focus** | ✅ **Done (Jul 11)** — External EPG feeds download in parallel (4 concurrent iOS / 2 tvOS) instead of sequential; `LiveChannelQuery` capped at 500 per category (was unbounded); guide snaps to current time on vertical scroll. See § Build 27 below. |
 
 ---
 
@@ -275,7 +279,7 @@ Without these keys, the app works but metadata is limited to what the IPTV provi
 - ❌ **Build 21** — EPG not loading (`playlist(for:)` returning nil); watchdog crash on launch (main-thread SQL)
 - ❌ **Build 22** — EPG still not loading; performance improved but EPG regression remained
 - ⚠️ **Build 23** — Partial. Playlist passed to `ChannelsList`/`TVChannelsList` (EPG loads again); watchlist off main thread; category-switch wipe removed on tvOS list. User-reported regressions after performance pass: EPG slow / data not persisting on category switch, TMDB details not loading on tap, home freeze on launch/reopen. Cellular stability confirmed (no crash off Wi‑Fi).
-- 🔄 **Build 24** — **Testing now (Jul 9).** Restores Build 19 EPG UI guarantees (no destructive `.id()`, no eager cache wipe, `playlist` on guide); TMDB title-search fallback on iOS/macOS detail screens; home paints library heroes before TMDB trending; all Build 21–23 performance fixes retained. EPG sync/parse layer **not modified**. iOS + tvOS compile green; EPG unit tests pass.
+- ❌ **Build 24 / 25** (25 is a build-number bump only — identical code) — **Tested Jul 10.** Build 24's UI-only restore was correct as far as it went, but device testing surfaced a crash ("app shutting down"), slow EPG loading, and only ~half the channels in a category getting data — all traced to two **EPG sync-layer** bugs that predate Build 24 and were never touched by its UI-only fix. See § Build 25 Hotfix.
 
 ---
 
@@ -370,6 +374,138 @@ Without these keys, the app works but metadata is limited to what the IPTV provi
 
 ---
 
+## Build 25 Hotfix — EPG Sync Crash + iOS/macOS Store-Wipe (Jul 10, 2026)
+
+> **Context:** Build 25 is a build-number bump only — identical code to Build 24 (`f05210c`, verified via `git show --stat`). TestFlight testing of that code reported the app crashing ("shutting down"), EPG data loading very slowly, and only about half the channels in a category ever getting programme data. Build 24's UI-layer restore (§ Build 24 above) was verified correct — these bugs live one layer down, in `EPGSyncManager.swift`, and predate Build 24 (introduced Jul 7, never touched by the Jul 9 UI-only fix).
+>
+> **⚠️ Follow-up (Build 26, same day):** the crash-fix + store-preserve fix below shipped in Build 26. Still crashing on the Guide screen specifically, and still slow. Root cause found: the store-preserve fix (bullet 2 below) had its own side effect — see **§ Build 26 Hotfix** below. Read both sections; they compound.
+
+### ✅ Fixed — Crash: cross-feed duplicate listing-id collision
+
+- **Root cause:** `EPGSyncManager.syncExternalEPG` imports up to 14 external EPG feeds, each in its own `Task.detached` with its own `ModelContext`. Each feed's in-memory dedup set (`insertedIDs`) was re-seeded from a `Set<String>` snapshot captured **once, before the feed loop started** — so a later feed had no way to know a listing id (`channelId-start-end`) an earlier feed in the *same sync pass* had already inserted and saved moments earlier. Two feeds legitimately covering the same channel/timeslot (the norm, not the exception — that overlap is the whole reason there are 14 regional feeds) would both attempt to insert the same id from two different contexts. The second insert hits SwiftData's unique-attribute upsert path, which remaps the persistent identifier and crashes with the same fatal signature Build 19 fixed for a *different* code path (concurrent on-demand browse writes): `PersistentIdentifier ... remapped ... fatal logic error in DefaultStore`. This is an uncatchable trap, not a throwable Swift error — `try?` around the `context.save()` calls does not protect against it.
+- **Fix:** Thread an accumulated `insertedIDsSoFar` set forward across the feed loop instead of resetting to the static pre-loop snapshot on every iteration. Each feed now seeds its local dedup set from whatever every *prior* feed in this pass has already committed, and folds its own results back in after it completes.
+- **Files:** `Apex/Services/Sync/EPGSyncManager.swift` (`syncExternalEPG`)
+
+### ✅ Fixed — Slow EPG + only-partial category data (iOS / macOS)
+
+- **Root cause:** Build 19 (Jul 8) fixed tvOS's "guide goes blank during background sync" bug by preserving existing `EPGListing` rows for bundled sync passes (`preserveExistingStore = bundled`), gated `#if os(tvOS)`. iOS/macOS kept the original Jul 7 behavior — `preserveExistingStore` unconditionally `false` — so **every** sync, including the routine one bundled into every playlist refresh and the periodic background `syncIfDue()` (not just an explicit Settings → Sync Now), wiped the *entire* `EPGListing` table before rebuilding it. On-demand writes are also suppressed for the whole sync window via `EPGSyncGate` (correctly — that part was never broken). Combined, any Live TV browsing that overlapped a sync — routine, unattended, background — saw an empty store until each feed finished landing, which for a 4–60 minute sync (bundled/full timeouts) meant categories showing incomplete data and channels only trickling in via the capped live-API fallback.
+- **Fix:** `preserveExistingStore = bundled` now applies on every platform, not just tvOS. Bundled passes (routine playlist refresh, periodic background sync) preserve existing rows and upsert only new ids; only an explicit full Settings → Sync Now pass still does a hard replace.
+- **Files:** `Apex/Services/Sync/EPGSyncManager.swift` (`syncExternalEPG`)
+
+### Verified (Jul 10)
+
+- ✅ iOS + tvOS `xcodebuild` compile green
+- ✅ EPG unit tests pass (`EPGSyncTests`, `EPGSourceTests`, `XMLTVDateTests`)
+- 📌 Both bugs were static-analysis findings verified by code inspection (exact scoping of `existingListingIDs` vs. the feed loop; exact platform gate on `preserveExistingStore`) rather than a captured device crash log — recommend pulling the actual crash report from Xcode Organizer / TestFlight on the next device test to confirm signature match, since no crash log was available in this session.
+- ⏳ Device/TestFlight re-verification still needed — this fix has not yet been tested on a physical device
+
+Full technical detail: `EPG.md` § **Stability rules (do not regress)**, rules 1 and 1b.
+
+---
+
+## Build 26 Hotfix — Per-Channel EPG Cap Didn't Survive Across Syncs (Jul 10, 2026)
+
+> **Context:** Build 26 shipped the Build 25 Hotfix above (crash fix + store-preserve on iOS/macOS) and went back to TestFlight same day. Still reproduced: slow EPG, and now specifically **a crash on the Guide screen while data loads** (not reported on the List view). This is a *second*, distinct bug — a side effect of the Build 25 store-preserve fix, not a failure of it.
+
+### ✅ Fixed — Per-channel row cap only tracked one feed's own contribution
+
+- **Root cause:** `EPGRetention.maxListingsPerChannel` (16) is meant to cap how many programme rows a channel can have in the store. The counter enforcing it (`listingsPerChannel` inside each feed's `Task.detached`) reset to empty **at the start of every feed**, so it only ever knew about rows *that feed* had inserted *this pass* — never what was already on disk from earlier feeds in the same pass, or from previous syncs. This was harmless under the old (pre-Build-25) behavior, where the whole store was wiped at the start of every sync — a channel could never accumulate past roughly `16 × number-of-covering-feeds` before the next wipe zeroed it out. Build 25's fix removed that wipe for routine/bundled syncs (correctly — see § Build 25 Hotfix), which also removed the safety net this cap was quietly depending on. A channel covered by several feeds (the norm) now gained a fresh capful of *new* rows from *each* feed, on *every* playlist refresh and every background sync, with nothing ever bringing the total back down — rows only ever grew, bounded only by how many distinct timeslot-granularities different feeds happened to report.
+  - The Guide screen renders **every** row in the time window as its own SwiftUI cell (`EPGGridBuilder.cells`); the List view only ever shows a fixed now/next pair (`ChannelEPG`, 2 slots) regardless of how many rows exist. That's why this surfaced as a Guide-specific crash/slowdown and not a List-view one — the bloat was invisible to List, direct render cost to Guide.
+- **Fix:** Thread a cumulative per-channel count (`listingCountSoFar` / `totalCountByChannel`) across the whole multi-feed pass — seeded from the store's actual existing count for each channel, folded forward after every feed — so the cap is a true ceiling on the channel's total row count. Kept the old per-feed-local counter (`listingsPerChannel`) around unchanged for the progress-percentage estimate, which is a different concern (distinct channels touched by *this feed*) and would have been broken by conflating the two.
+- **Self-healing for already-bloated devices:** a fix to the insert logic alone doesn't retroactively clean up rows a device already over-accumulated while running Build 25/26. Added `EPGSyncManager.trimExcessListings(in:)`, called alongside `pruneExpiredListings` after every successful sync — trims any channel still over the cap back down to 16, keeping the earliest (soonest-airing) rows. No fresh install or manual Sync Now required; it self-heals on the next scheduled or playlist-refresh sync.
+- **Files:** `Apex/Services/Sync/EPGSyncManager.swift` (`syncExternalEPG`, new `trimExcessListings`)
+
+### ✅ Confirmed root cause (from an actual device console log) — background sync ran the full 14-feed pass
+
+Christopher supplied a device console capture from the Build 26 crash. It shows the real mechanism, not a hypothesis:
+
+```
+11:23:14  EPG external source downloaded — 541143882 bytes from .../epg_ripper_US_LOCALS1.xml.gz
+11:23:47  Received memory warning. Image memory cache purged.        (×2)
+11:23:51  kernel: memorystatus: Apex [2649] exceeded mem limit: ActiveHard 6144 MB (fatal)
+11:23:51  kernel: killing_specific_process pid 2649 [Apex] ... 6291461KB ...
+11:23:51  ReportSystemMemory: Process Apex [2649] killed by jetsam reason per-process-limit
+```
+
+~35 seconds after downloading the ~541MB `US_LOCALS1` feed (thousands of hyper-local affiliate channels — the single largest of the 14 external feeds), the process was killed by the kernel for exceeding its 6GB entitled memory limit. This lines up with a KSPlayer startup watchdog timeout in the same capture (`no first frame within 15s`) — the background parse was starving playback startup at the same time it was consuming memory.
+
+- **Root cause:** `EPGSyncService.syncIfDue()` — the *silent, unattended, periodic* background refresh (fires when the EPG frequency setting says the guide is stale; default daily) — defaulted to `mode: .full` on every platform except tvOS. `.full` means all 14 external feeds with no URL-level filtering, including `US_LOCALS1`. `ExternalEPGSources.urlsForBundledSync()` (used by `mode: .withPlaylist`) already excludes `US_LOCALS1` outright specifically because of this exact failure mode — its own doc comment already said *"it drove memory warnings even on iPhone"* — but that protection only covered the routine playlist-refresh sync, not this separate background due-check. tvOS's `syncIfDue()` already used `.withPlaylist` for the same reason (tight jetsam headroom); iOS's `#else` branch fell through to `.full`.
+- **Fix:** `syncIfDue()` now uses `.withPlaylist` unconditionally, on every platform — removed the platform branch entirely. Only the explicit Settings → Sync Now button (`syncNow()`) still triggers `.full`, which is correct: that's a user-initiated action, not something that should ever happen silently in the background.
+- **Files:** `Apex/Services/Sync/EPGSyncService.swift` (`syncIfDue`)
+
+This is very likely the actual, dominant cause of the crash/slowness you've been seeing — it directly explains why it happens unpredictably ("while trying to load the data" — the background sync can fire at any time the app is open and the guide is stale) and why it's this severe (OOM kill, not just a slow render). The two fixes above (cross-feed duplicate-id crash, per-channel cap) are real, independently-worth-having fixes, but this one has actual device evidence behind it.
+
+### Verified (Jul 10)
+
+- ✅ iOS + tvOS `xcodebuild` compile green
+- ✅ EPG unit tests pass, including `EPGSyncTests/per channel insert cap prevents guide table explosion` (pre-existing test for this exact mechanism — still passes with the cross-feed threading in place)
+- ✅ The `US_LOCALS1` OOM kill is confirmed against a real device console log (see above) — not a code-inspection guess
+- 📌 The cross-feed duplicate-id crash and the per-channel-cap fix are still code-inspection findings, not individually confirmed against a crash log — they're real bugs worth having fixed regardless, but may not be what you were hitting specifically
+- ⏳ Device/TestFlight re-verification still needed — none of today's fixes have been tested on a physical device yet. Bump to Build 27 before the next archive.
+
+Full technical detail: `EPG.md` § **Stability rules (do not regress)**, rules 1c and 1c-confirmed.
+
+---
+
+## Build 27 — EPG Speed, Memory Safety, Guide UX (Jul 11, 2026)
+
+> **Context:** TestFlight testing reported three issues: (1) EPG data still takes 3-4 minutes to load when other IPTV apps do it in seconds, (2) app crashes (jetsam) on large playlists (~17K channels, 20K movies/shows) while on the playlist or content management screen, (3) the EPG guide grid drifts away from current time when scrolling vertically through channels. Build 27 fixes all three without touching any of the EPG persistence, cache, or UI-mount patterns established in Builds 19 and 24.
+
+### ✅ Fixed — EPG Download Speed (3-4 min → ~1-2 min)
+
+- **Root cause:** External EPG feeds (7-8 in bundled mode) were downloaded **sequentially** — each feed waited for the previous download to complete before starting its own. With each feed download taking 10-30+ seconds on typical connections, the download phase alone consumed most of the 3-4 minute wait.
+- **Fix:** Downloads now run in **parallel** (up to 4 concurrent on iOS, 2 on tvOS to respect tighter memory). All feeds download simultaneously to temp files on disk, then parse sequentially (parse must stay sequential to maintain the `insertedIDsSoFar` dedup set and `listingCountSoFar` per-channel cap threading). Heavy/low-yield sources (`US_LOCALS1`) are still skipped pre-download in bundled mode.
+- **Result:** Total download phase = time of the slowest single feed (~30-45 sec) instead of sum of all feeds (~2-3 min). Parse phase unchanged (~30-60 sec). Net improvement: 3-4 min → ~1-2 min.
+- **What is NOT changed:** The parse → insert → `context.save()` pipeline, `preserveExistingStore` logic, `insertedIDsSoFar`/`listingCountSoFar` threading, coverage-based early stop, `signalGuideRefreshDuringSync()`, mid-feed UI refresh — all identical. EPG data persistence across app restarts and category switches is not affected.
+
+### ✅ Fixed — Memory (Large Playlist Jetsam)
+
+- **Root cause 1:** `LiveChannelQuery.descriptor(for: .category)` had no `fetchLimit`. SwiftData's `@Query` hydrates ALL matching objects in memory at once. For a 17K-channel playlist where a "catch-all" category can have thousands of channels, this spike — combined with other resident views — pushed past the jetsam limit on both iOS and tvOS.
+- **Fix:** Added `fetchLimit = 500` to the category scope query. The view already paginates display via `visibleCount` (grows by 50 at a time), so 500 (10 full pages) covers normal browse without ever hydrating thousands of channels simultaneously. Most categories have far fewer than 500 channels; only mega-categories benefit from this cap.
+- **Root cause 2:** `EPGSyncManager.scopedChannelData()` fetched ALL `LiveStream` objects (every playlist's channels) then filtered in-memory by prefix. With 17K+ channels this allocated the full array unnecessarily.
+- **Fix:** Now uses a `#Predicate` with `localizedStandardContains` to filter in SQLite, loading only the active playlist's channels — consistent with the pattern used throughout the app.
+
+### ✅ Fixed — Guide Focus on Current Time
+
+- **Root cause:** The EPG grid used `ScrollView([.horizontal, .vertical])` allowing free movement in both axes. When scrolling vertically (browsing channels), the horizontal position could drift away from "now," requiring the user to tap the "Now" button or manually scroll back.
+- **Fix:** Added `onScrollPhaseChange` tracking. The grid detects whether the user is scrolling horizontally (exploring past/future) or purely vertically (browsing channels). When vertical-only scrolling stops (finger lifted + deceleration complete), the grid smoothly snaps back to the "now" position. Horizontal scrolling intent is respected — the grid won't snap back until the user makes their next purely vertical gesture.
+- **UX:** Matches TiviMate and other popular IPTV guide apps where vertical channel browsing always shows what's currently on.
+
+### ✅ Verified — No Regressions
+
+| EPG UI checklist item | Status |
+|-----------------------|--------|
+| List and guide both mounted (`ZStack` + opacity) | ✅ Unchanged |
+| No `.id()` keyed on section/category/layout | ✅ Unchanged |
+| No eager cache clear on category switch | ✅ Unchanged |
+| List and guide share `LiveTVSectionEPGCache` | ✅ Unchanged |
+| Loads merge via `epgCache.merge` (no full wipe) | ✅ Unchanged |
+| `playlist: Playlist?` passed directly | ✅ Unchanged |
+| Guide uses same `EPGBrowseLoader.load` as list | ✅ Unchanged |
+| EPG sync files: persistence/store logic not modified | ✅ Only download orchestration changed |
+
+| Performance checklist item | Status |
+|----------------------------|--------|
+| ContentIndexer chunk/pause unchanged | ✅ |
+| CachedAsyncImage preserve `.success` | ✅ |
+| CloudKit not blocking launch | ✅ |
+| Lazy tab mount unchanged | ✅ |
+| No new `@Query` invalidations | ✅ |
+
+### Files touched in build 27
+
+- `Apex/Services/Sync/EPGSyncManager.swift` — parallel download phase (`withTaskGroup`, 4/2 concurrent); `scopedChannelData` uses predicate instead of in-memory filter
+- `Apex/Views/LiveTV/LiveTVSection.swift` — `LiveChannelQuery.descriptor` adds `fetchLimit = 500` for `.category` scope
+- `Apex/Views/LiveTV/EPG/EPGGuideView.swift` — `EPGGrid` tracks `isUserHorizontalScroll`; `onScrollPhaseChange` snaps to now on vertical-only scroll completion
+
+### Verified (Jul 11)
+
+- ✅ iOS + tvOS `xcodebuild` compile green
+- ✅ All 56 EPG tests pass (`EPGSyncTests`, `EPGSourceTests`, `XMLTVDateTests`)
+- ⏳ Device/TestFlight verification needed — bump build number before next archive
+
+---
+
 ## Do Not Regress — Pre-Change Checklists
 
 > **Why this section exists:** Build 19 fixed EPG stability and speed. Builds 21–23 performance work re-broke Live TV UI by reintroducing patterns Build 19 explicitly removed (destructive `.id()`, list/guide `if/else`, guide-only store window, cache wipe on category switch). **Run the relevant checklist before merging any change that touches the listed files.** Cursor rules in `.cursor/rules/apex-*.mdc` mirror this section.
@@ -446,6 +582,8 @@ Full rules: `EPG.md` § **Stability rules (do not regress)**. Highlights:
 | 20–21 | Launch freeze, image spinners | CloudKit blocked launch; per-chunk image purge |
 | 21–23 | EPG not loading | `playlist(for:)` nil; guide/list diverged |
 | 23–24 | EPG slow / data vanishes | Destructive `.id()`, list/guide `if/else`, guide-only store window, cache wipe |
+| 24–25 | Crash + EPG slow / half-empty categories | `syncExternalEPG` cross-feed duplicate-id SwiftData crash (unguarded on both platforms); iOS/macOS never got Build 19's tvOS-only `preserveExistingStore` fix, so every routine/background sync blanked the whole store — see § Build 25 Hotfix |
+| 25–26 | Still crashing (Guide screen specifically) + still slow | Fixing the store-wipe (row above) removed the safety net `maxListingsPerChannel` was quietly depending on — the per-channel cap only tracked one feed's own contribution, so well-covered channels grew unboundedly across syncs once the store stopped resetting. Guide renders every row as a cell (List doesn't), so this hit Guide only — see § Build 26 Hotfix |
 
 **Rule:** Performance passes must not edit Live TV EPG UI without running the EPG UI checklist. EPG fixes must not edit sync layer without running EPG sync checklist.
 
@@ -1141,9 +1279,11 @@ When ready for public listing (after TestFlight):
 | **Provider HTTP** | `ProviderURLSession` — TLS bypass for mismatched provider certs |
 | **Home hero** | Batched TMDB ID query + bounded title/library fallback (`HomeHeroBuilder`) |
 | **Post-sync** | Indexer kick @ 3s (20s tvOS). **EPG runs inline** during playlist sync (`epgGuide` step); tvOS uses quick mode (3 feeds); launch `syncIfDue()` deferred 90s iOS / 60s tvOS — EPG is local-only, not iCloud |
-| **EPG sync** | **Playlist refresh (iOS):** bundled mode (8 US feeds, 88% early stop, single-pass parse, **%** progress). **Playlist refresh (tvOS):** quick mode (3 lightest feeds inline, remaining bundled 10s deferred). **Settings → Sync Now:** full 14 epgshare01 feeds. Provider `xmltv.php` fallback → per-channel `get_short_epg` only when store empty for channel. West/Pacific `+3h` insert via structural `epgChannelId`. See `EPG.md`. |
+| **EPG sync** | **Playlist refresh (iOS):** bundled mode (7 US feeds, **parallel download** 4 concurrent, 88% early stop, single-pass parse, **%** progress). **Playlist refresh (tvOS):** quick mode (3 lightest feeds inline, remaining bundled 10s deferred, 2 concurrent downloads). **Settings → Sync Now:** full 14 epgshare01 feeds (parallel download). Provider `xmltv.php` fallback → per-channel `get_short_epg` only when store empty for channel. West/Pacific `+3h` insert via structural `epgChannelId`. See `EPG.md`. |
 | **EPG browse (tvOS)** | 6 concurrent, 0 stagger, cap 50 channels/page. Single API call per channel. Background fetch for remaining channels with `refreshGeneration` signal. Store read instant after sync. |
-| **EPG status** | ✅ Both platforms verified (Jul 8): external EPG primary, branded unified sync, instant post-sync channel cards, persists across restarts and category switches. Guide view matches list view speed. See `EPG.md`. |
+| **EPG guide UX** | Guide snaps to current time on vertical-only scroll (horizontal scroll intent respected). "Now" button still available for manual jump. |
+| **Live TV queries** | Category channel query capped at `fetchLimit = 500` (view paginates at 50). Prevents jetsam on mega-categories in 17K+ playlists. |
+| **EPG status** | ✅ Both platforms verified (Jul 11): parallel downloads, external EPG primary, branded unified sync, instant post-sync channel cards, persists across restarts and category switches. Guide view matches list view speed. See `EPG.md`. |
 | **CloudKit UI** | Settings → iCloud Sync; foreground reconcile gated on actual imports |
 
 ---
@@ -1176,4 +1316,4 @@ See **What's Been Built → iOS Device — Large Library Fix** above for full de
 
 ---
 
-*Last updated: July 8, 2026 (Build 23 testing — EPG + watchdog crash fixed; performance fixes retained. Genre/category in Search tab.)*
+*Last updated: July 11, 2026 (Build 27 — EPG parallel downloads (3-4 min → ~1-2 min), large-playlist memory safety (fetchLimit 500 on category channel queries, predicate-based scoping in sync), guide focus snaps to current time on vertical scroll. No EPG persistence/cache/UI-mount regressions. See § Build 27.)*
