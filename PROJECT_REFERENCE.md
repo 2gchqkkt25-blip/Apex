@@ -136,8 +136,9 @@ Without these keys, the app works but metadata is limited to what the IPTV provi
 | 70 | **EPG speed: parallel downloads + memory + guide focus** | ✅ **Done (Jul 11)** — External EPG feeds download in parallel (4 concurrent iOS / 2 tvOS) instead of sequential; `LiveChannelQuery` capped at 500 per category (was unbounded); guide snaps to current time on vertical scroll. See § Build 30 below. |
 | 71 | **Build 31 — guide jumping fix + EPG speed + large playlist crash** | ✅ **Done (Jul 11)** — Removed scroll-snap (was jumping); iOS EPG concurrency 2→6 (matches tvOS); inactive tabs unmount to release `@Query` memory (the root cause of 17K+ playlist crashes). See § Build 31 below. |
 | 72 | **Build 32 — EPG provider-first + single-pass + instant UI** | ✅ **Done (Jul 11)** — Provider `xmltv.php` used directly (like Chilli/SwipTV), single-pass parse (was 2 passes), store data shows instantly (was waiting for live API), 60s UI throttle removed. See § Build 32 below. |
-| 73 | **Stremio — sync fix + multi-addon + stream picker + addon browser** | ✅ **Done (Jul 11)** — Sync hang fixed (pagination guards, stream-only addon detection). Multi-addon stream resolution (queries all configured stream addons). Stream picker UI (quality-ranked list). Addon catalog browser (one-tap install from official collection). |
-| 74 | **tvOS — icon black bars fix + Top Shelf** | ✅ **Done (Jul 11)** — Icon layers regenerated (landscape crop, no black bars). Top Shelf extension with configurable content (Recently Watched / Favorites / Trending / Continue Watching). Settings UI on tvOS. |
+| 73 | **Stremio — sync fix + multi-addon + stream picker + addon browser** | ✅ **Done (Jul 11)** — Sync hang fixed (pagination guards, stream-only addon detection). Multi-addon stream resolution (queries all configured stream addons). Stream picker UI (quality-ranked list). Addon browser removed for App Store safety. |
+| 74 | **tvOS — icon black bars fix + Top Shelf** | ✅ **Done (Jul 11-12)** — Icon layers regenerated (landscape crop, no black bars). Top Shelf extension with configurable content. Data writes on launch + setting change. |
+| 75 | **Build 34 — Stremio catalog + auto-sync + content management** | ✅ **Done (Jul 12)** — Stremio auto-catalog (Cinemeta for stream-only addons), categories created so content shows in tabs, ModelContext crash fixed, catalog cap 100 items (sync in seconds), progress bar, auto-sync on any playlist add, Hide All/Show All in Content Management. |
 
 ---
 
@@ -1431,4 +1432,4 @@ See **What's Been Built → iOS Device — Large Library Fix** above for full de
 
 ---
 
-*Last updated: July 11, 2026 (Builds 30–32 + Stremio + tvOS. EPG provider-first (10-20 sec), instant UI update, large-playlist tab-unmount fix, Stremio multi-addon + stream picker + addon browser, tvOS icon fix + Top Shelf extension. See § Build 30, § Build 31, § Build 32.)*
+*Last updated: July 12, 2026 (Build 34 — Stremio fully working (auto-catalog, categories, stream picker, multi-addon, sync progress, 100-item cap). Auto-sync triggers on any playlist add. Content Management Hide All/Show All. Top Shelf writes on launch+setting change. tvOS icon fixed. See § Build 32, § Build 34.)*

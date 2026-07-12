@@ -4,6 +4,32 @@ All notable changes to Apex Stream Player.
 
 ---
 
+## Build 34 (1.2.0) — July 12, 2026
+
+### Stremio — Fully Working
+
+- **Auto-catalog for stream-only addons** — When you add a stream addon (AIOStreams, Torrentio), the app automatically fetches the Cinemeta catalog so you have movies/series to browse. Just paste your URL → sync → content appears in Movies/Series tabs.
+- **Categories created properly** — Stremio content now shows in Movies/Series tabs (was invisible due to missing category assignment).
+- **ModelContext crash fixed** — Category creation no longer crashes with "illegal attempt to insert model in different context."
+- **Catalog capped to 100 items** — Sync finishes in ~10-15 seconds instead of minutes (was pulling 2000+ items per catalog).
+- **Sync progress bar** — Shows step-by-step progress (manifest fetch → per-catalog import with name + fraction).
+- **Addon browser removed** — For App Store safety. URL input still works (same model as VLC/Infuse).
+
+### Auto-Sync Fix
+
+- **Playlist auto-sync triggers reliably** — Adding any playlist (Xtream after Stremio, or any order) now always shows the sync refresh screen. Was keyed on `playlists.count`; now keyed on `playlists.map(\.id)`.
+
+### Content Management
+
+- **Hide All / Show All buttons** — Bulk toggle category visibility for Live TV, Movies, or Series. iOS shows a `...` toolbar menu; tvOS shows header buttons.
+
+### tvOS
+
+- **Top Shelf data writes on launch + setting change** — No longer requires a new sync for content to appear. Existing watch history/favorites populate immediately.
+- **TestFlight upload fix** — Added `UIRequiredDeviceCapabilities` arm64 to the Top Shelf extension.
+
+---
+
 ## Build 33 (1.2.0) — July 11, 2026
 
 ### Stremio — Full Addon Support
