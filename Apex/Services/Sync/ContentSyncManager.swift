@@ -515,9 +515,11 @@ actor ContentSyncManager {
             try await fetchXtreamEpisodes(seriesId: seriesId, seriesElementId: seriesElementId, playlist: playlist)
         case .stalker:
             try await fetchStalkerEpisodes(seriesId: seriesId, seriesElementId: seriesElementId, playlist: playlist)
-        case .m3u, .stremio:
-            // M3U/Stremio content is imported during sync; no lazy episode fetch.
+        case .m3u:
+            // M3U content is imported during sync; no lazy episode fetch.
             []
+        case .stremio:
+            try await fetchStremioEpisodes(seriesElementId: seriesElementId, playlist: playlist)
         }
     }
 

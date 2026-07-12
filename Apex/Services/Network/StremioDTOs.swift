@@ -158,6 +158,19 @@ struct StremioMeta: Decodable {
     let language: String?
     let awards: String?
     let website: String?
+    /// Episodes/videos for series — each has a season, episode, and stream id.
+    let videos: [StremioVideo]?
+}
+
+/// A single episode/video in a Stremio series metadata response.
+struct StremioVideo: Decodable {
+    let id: String
+    let title: String?
+    let season: Int?
+    let episode: Int?
+    let released: String?
+    let thumbnail: String?
+    let overview: String?
 }
 
 // MARK: - Stream

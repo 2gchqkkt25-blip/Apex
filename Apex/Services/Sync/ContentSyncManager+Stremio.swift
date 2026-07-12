@@ -257,4 +257,98 @@ extension ContentSyncManager {
         }
         return seen
     }
+
+    // MARK: - Episode fetch (lazy, on detail screen open)
+
+    /// Fetches episodes for a Stremio series from the addon's /meta endpoint.
+    /// Returns ParsedEpisode values that the caller inserts into SwiftData.
+    func fetchStremioEpisodes(seriesElementId: String, playlist: Playlist) async throws -> [ParsedEpisode] {
+        let client = StremioClient()
+        guard let base = StremioURL.normalize(playlist.serverURL) else { return [] }
+
+        // The series stores the stremio ID in its id field as "{playlistUUID}-series-{hash}".
+        // We need the original Stremio content ID. It was stored in the series during import
+        // — we need to recover it. The series' `directURL` equivalent isn't stored, but we
+        // can fetch from Cinemeta using the series name or TMDB ID if available.
+        // Actually, let's look at what we have: the seriesId field is set to stremioID.hashValue.
+        // We need the original meta id (like "tt1234567") to fetch from Cinemeta/addon.
+
+        // Recover the stremio meta ID from the series. During import, the series object
+        // doesn't store the raw Stremio ID directly. Let's check if we can get it from
+        // the catalog metadata. The simplest approach: fetch meta from Cinemeta using
+        // the series' tmdbId or imdb-style ID.
+
+        // For Cinemeta, the meta endpoint accepts IMDB IDs directly.
+        // The series was imported from Cinemeta catalog which uses IMDB IDs as the meta.id.
+        // Let's try to recover the ID from the series model.
+        let context = ModelContext(modelContainer)
+        context.autosaveEnabled = false
+        guard let series = try? context.fetch(
+            FetchDescriptor<Series>(predicate: #Predicate { $0.id == seriesElementId })
+        ).first else { return [] }
+
+        // Try to find the original Stremio meta ID. During Stremio import, the catalog
+        // returns items with `id` being the IMDB ID (e.g. "tt1234567"). We need that.
+        // The series' tmdbId might help, but Cinemeta uses IMDB IDs.
+        // Let's check if the series has an imdbId set.
+        let metaId: String
+        if let imdbId = series.imdbId, !imdbId.isEmpty {
+            metaId = imdbId
+        } else if let tmdbId = series.tmdbId {
+            metaId = "tmdb:\(tmdbId)"
+        } else {
+            // Fall back: try the series name as a search — but Stremio doesn't support search on meta.
+            // Without a known ID, we can't fetch episodes.
+            Logger.database.warning("Stremio series '\(series.name, privacy: .public)' has no IMDB/TMDB ID — cannot fetch episodes")
+            return []
+        }
+
+        // Fetch from the addon's base URL first, then Cinemeta as fallback
+        let metaURLs: [URL] = [base, Self.cinemetaBaseURL]
+        var meta: StremioMeta?
+        for metaBase in metaURLs {
+            if let fetched = try? await client.fetchMeta(baseURL: metaBase, type: "series", id: metaId) {
+                if fetched.videos != nil, !(fetched.videos?.isEmpty ?? true) {
+                    meta = fetched
+                    break
+                }
+            }
+        }
+
+        guard let videos = meta?.videos, !videos.isEmpty else {
+            Logger.database.warning("Stremio series '\(series.name, privacy: .public)' returned no episodes from meta")
+            return []
+        }
+
+        // Convert StremioVideos to ParsedEpisodes
+        let playlistPrefix = playlist.id.uuidString
+        var episodes: [ParsedEpisode] = []
+        for video in videos {
+            let season = video.season ?? 1
+            let episode = video.episode ?? (episodes.count + 1)
+            let episodeId = "\(playlistPrefix)-ep-\(video.id.hash)"
+            // The stream resolution ID: for Stremio, streams are fetched via
+            // /stream/series/{videoId}.json where videoId is the video's id field
+            let stremioStreamId = "stremio://\(base.absoluteString)|\("series")|\(video.id)"
+
+            episodes.append(ParsedEpisode(
+                id: episodeId,
+                episodeId: video.id,
+                title: video.title ?? "Episode \(episode)",
+                containerExtension: "mp4",
+                seasonNum: season,
+                episodeNum: episode,
+                added: nil,
+                directSource: stremioStreamId,
+                durationSecs: nil,
+                movieImage: video.thumbnail,
+                rating: nil,
+                airDate: video.released,
+                plot: video.overview
+            ))
+        }
+
+        Logger.database.info("Stremio fetched \(episodes.count) episodes for '\(series.name, privacy: .public)'")
+        return episodes
+    }
 }
