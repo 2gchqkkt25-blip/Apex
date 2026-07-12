@@ -135,6 +135,7 @@ Without these keys, the app works but metadata is limited to what the IPTV provi
 | 69 | **Build 26 hotfix — confirmed OOM crash: background sync ran full 14-feed pass** | ✅ **Done (Jul 10), confirmed via device console log** — `syncIfDue()` defaulted to `.full` on iOS (all 14 feeds incl. ~541MB `US_LOCALS1`), downloaded/parsed it silently in the background, jetsam-killed at 6GB. Now uses `.withPlaylist` on every platform, matching tvOS. See § Build 26 Hotfix. |
 | 70 | **EPG speed: parallel downloads + memory + guide focus** | ✅ **Done (Jul 11)** — External EPG feeds download in parallel (4 concurrent iOS / 2 tvOS) instead of sequential; `LiveChannelQuery` capped at 500 per category (was unbounded); guide snaps to current time on vertical scroll. See § Build 30 below. |
 | 71 | **Build 31 — guide jumping fix + EPG speed + large playlist crash** | ✅ **Done (Jul 11)** — Removed scroll-snap (was jumping); iOS EPG concurrency 2→6 (matches tvOS); inactive tabs unmount to release `@Query` memory (the root cause of 17K+ playlist crashes). See § Build 31 below. |
+| 72 | **Build 32 — EPG provider-first + single-pass + instant UI** | ✅ **Done (Jul 11)** — Provider `xmltv.php` used directly (like Chilli/SwipTV), single-pass parse (was 2 passes), store data shows instantly (was waiting for live API), 60s UI throttle removed. See § Build 32 below. |
 
 ---
 
@@ -560,6 +561,58 @@ Estimated effort: ~2-3 days for the read layer; ~1 week for full integration + t
 - ✅ All 56 EPG tests pass
 - ✅ EPG data persistence not affected (store reads from disk, tab unmount only releases in-memory query results)
 - ⏳ Device/TestFlight verification needed with the 17K-channel playlist
+
+---
+
+## Build 32 — EPG Provider-First, Single-Pass, Instant UI (Jul 11, 2026)
+
+> **Context:** Build 31 fixed the guide jumping, increased iOS EPG concurrency, and added tab unmounting for large playlists. Testing confirmed EPG data now matches correctly (same as Chilli/SwipTV). But opening a Live TV category still took 1+ minute to show EPG data even though the store already had it. Root cause: the browse path was waiting for slow live API calls before returning any data, and the UI refresh was throttled to 60 seconds.
+
+### ✅ Fixed — Provider-First EPG Strategy
+
+- **Before:** External epgshare01 feeds tried FIRST (7 separate downloads, 1-2 min), provider's `xmltv.php` only tried as fallback, often rejected as "stale" by a timezone-sensitive freshness check.
+- **After:** Provider's `xmltv.php` tried FIRST (one download, ~10-20 sec). Data accepted if ANY channels matched — no stale rejection. External feeds only used as fallback when provider data fails to download or matches zero channels.
+- **Why:** Other apps (Chilli, SwipTV, TiviMate) use the provider's data directly without second-guessing it. The "stale" detection was often a timezone misinterpretation that discarded perfectly good data.
+- **Result:** EPG sync during playlist refresh: ~10-20 seconds (was 1-2 min).
+
+### ✅ Fixed — Single-Pass Parse
+
+- **Before:** Two full SAX passes over the provider's `xmltv.php` file: (1) `XMLTVChannelDiskCache.collect` to extract channel display names, (2) `XMLTVParser.importGuide` to extract programmes. For a 50-200MB file (1600+ channels × 7 days), each pass took 30-90 seconds.
+- **After:** Single pass only. The `XMLTVGuideImporter` already handles `<channel>` elements inline (building display-name aliases on the fly) while parsing `<programme>` elements. The pre-pass was redundant.
+- **Result:** Parse time cut roughly in half.
+
+### ✅ Fixed — Instant UI Update (the main user-visible fix)
+
+- **Root cause 1:** `EPGBrowseLoader.load()` awaited ALL channels (store + live API) before returning anything to the view. 42 channels that loaded instantly from the store were held hostage waiting for 7 slow live API calls to finish.
+- **Fix:** Store results return immediately. Live API gap-fill runs in a fire-and-forget background task. View updates via `refreshGeneration` when the API data lands.
+- **Root cause 2:** `signalGuideRefresh()` was throttled to once per **60 seconds**. When the background live API finished and signaled, the UI wouldn't update for up to a minute.
+- **Fix:** Browse gap-fill now calls `forceGuideRefresh()` (no throttle). General throttle reduced 60s → 5s.
+- **Result:** ~84% of channels show EPG data instantly on category open. Remaining channels (not in provider's XMLTV) appear within seconds as API calls complete.
+
+### ✅ Verified — No Regressions
+
+| Concern | Status |
+|---------|--------|
+| EPG data persistence (restarts/category switches) | ✅ Unchanged — store reads from disk |
+| EPG data matching (correct programmes on correct channels) | ✅ Confirmed correct (matches Chilli/SwipTV) |
+| Tab unmounting (large playlist memory fix) | ✅ Unchanged from Build 31 |
+| No app freeze | ✅ Store read off main thread, live API in background, UI update is one property bump |
+| Sync layer (EPGSyncGate, EPGListingWriter, etc.) | ✅ Not touched |
+
+### Files touched in build 32
+
+- `Apex/Services/Sync/EPGSyncManager.swift` — provider-first strategy (xmltv.php before external feeds, no stale rejection)
+- `Apex/Services/Sync/EPGInserter.swift` — removed `XMLTVChannelDiskCache.collect` pre-pass (single-pass only)
+- `Apex/Services/Sync/EPGLiveLoader.swift` — `EPGBrowseLoader.load` returns store data immediately; live API gap-fill in background with `forceGuideRefresh()`; diagnostic logging
+- `Apex/Services/Sync/EPGSyncService.swift` — `minGuideRefreshInterval` 60s → 5s
+
+### Verified (Jul 11)
+
+- ✅ iOS + tvOS `xcodebuild` compile green
+- ✅ All 56 EPG tests pass
+- ✅ Device test: store had data for 42/50 channels (84% instant from store, 7 need live API)
+- ✅ Data matches correctly (same guide data as Chilli/SwipTV for same provider)
+- ⏳ TestFlight Build 32 — push for external tester feedback
 
 ---
 
@@ -1337,8 +1390,8 @@ When ready for public listing (after TestFlight):
 | **Provider HTTP** | `ProviderURLSession` — TLS bypass for mismatched provider certs |
 | **Home hero** | Batched TMDB ID query + bounded title/library fallback (`HomeHeroBuilder`) |
 | **Post-sync** | Indexer kick @ 3s (20s tvOS). **EPG runs inline** during playlist sync (`epgGuide` step); tvOS uses quick mode (3 feeds); launch `syncIfDue()` deferred 90s iOS / 60s tvOS — EPG is local-only, not iCloud |
-| **EPG sync** | **Playlist refresh (iOS):** bundled mode (7 US feeds, **parallel download** 4 concurrent, 88% early stop, single-pass parse, **%** progress). **Playlist refresh (tvOS):** quick mode (3 lightest feeds inline, remaining bundled 10s deferred, 2 concurrent downloads). **Settings → Sync Now:** full 14 epgshare01 feeds (parallel download). Provider `xmltv.php` fallback → per-channel `get_short_epg` only when store empty for channel. West/Pacific `+3h` insert via structural `epgChannelId`. See `EPG.md`. |
-| **EPG browse** | 6 concurrent, 0 stagger, cap 50 channels/page (all platforms). Single API call per channel. Full page loads in one urgent pass. Store read instant after sync. |
+| **EPG sync** | **Provider-first** (like Chilli/SwipTV): provider's `xmltv.php` tried first (one download, ~10-20 sec, single-pass parse). No stale rejection — data accepted if any channels match. **Fallback:** external epgshare01 feeds (parallel download, 4 concurrent iOS / 2 tvOS) only when provider data unavailable. **Settings → Sync Now:** same provider-first path. Per-channel `get_short_epg` only for channels not in provider's XMLTV. See `EPG.md`. |
+| **EPG browse** | Store-first (instant from SQLite). Live API gap-fill fires in background — view updates immediately via `forceGuideRefresh()`. 6 concurrent, 0 stagger, 50 channels/page (all platforms). ~84% of channels served from store; remaining ~16% fill in within seconds from API. |
 | **EPG guide UX** | Initial scroll-to-now on appear. "Now" button for manual jump. No auto-snap (removed — was causing jumping). |
 | **Live TV queries** | Category channel query capped at `fetchLimit = 200` (view paginates at 50). Prevents jetsam on mega-categories in 17K+ playlists. |
 | **Image cache** | 128MB iOS, 64MB tvOS. NSCache evicts under pressure; purges on memory warning + deferred on background. |
@@ -1376,4 +1429,4 @@ See **What's Been Built → iOS Device — Large Library Fix** above for full de
 
 ---
 
-*Last updated: July 11, 2026 (Build 31 — guide jumping fixed, iOS EPG concurrency 2→6, large-playlist crash fixed via tab unmounting. Hybrid SQLite layer documented as next step if needed. See § Build 30 and § Build 31.)*
+*Last updated: July 11, 2026 (Build 32 — provider-first EPG (10-20 sec sync vs 1-2 min), single-pass parse, instant UI update from store (no 60s throttle). Data matches correctly. Large playlist tab-unmount fix retained. See § Build 31 and § Build 32.)*
