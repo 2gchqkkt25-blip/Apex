@@ -524,8 +524,13 @@ actor ContentSyncManager {
     }
 
     private func fetchXtreamEpisodes(seriesId: Int, seriesElementId: String, playlist: Playlist) async throws -> [ParsedEpisode] {
+        Logger.database.warning("fetchXtreamEpisodes — seriesId=\(seriesId) playlist=\(playlist.serverURL, privacy: .public)")
         let seriesInfo = try await xtreamClient.getSeriesInfo(playlist: playlist, seriesId: seriesId)
-        guard let episodesDict = seriesInfo.episodes else { return [] }
+        guard let episodesDict = seriesInfo.episodes else {
+            Logger.database.warning("fetchXtreamEpisodes — seriesInfo.episodes is nil")
+            return []
+        }
+        Logger.database.warning("fetchXtreamEpisodes — got \(episodesDict.count) seasons")
 
         // Reseller panels: the API panel URL differs from the actual stream server.
         // Detect this by checking if any synced movie has a directURL pointing to
