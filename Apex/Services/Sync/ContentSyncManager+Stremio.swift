@@ -70,7 +70,11 @@ extension ContentSyncManager {
 
             let all: [StremioMetaPreview]
             do {
-                all = try await client.fetchAllCatalog(baseURL: catalogBase, type: ct, catalogId: catalog.id)
+                // Cap at 100 items per catalog — one page. Large catalogs
+                // (Netflix 2000+, HBO 2000+) take minutes to paginate fully.
+                // 100 popular titles per category is enough for browse; the user
+                // can search for anything else. Matches what Stremio's home shows.
+                all = try await client.fetchAllCatalog(baseURL: catalogBase, type: ct, catalogId: catalog.id, maxItems: 100)
             } catch {
                 Logger.database.warning("Stremio catalog '\(catalog.name, privacy: .public)' (\(ct, privacy: .public)) failed: \(error.localizedDescription, privacy: .public)")
                 continue
