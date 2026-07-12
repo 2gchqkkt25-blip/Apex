@@ -765,10 +765,15 @@ class XtreamClient: APIClient {
         return URL(string: "\(playlist.serverURL)/movie/\(playlist.username)/\(playlist.password)/\(movie.streamId).\(ext)")
     }
 
-    /// Builds a playback URL for an episode
+    /// Builds a playback URL for an episode. Tries the stated container extension
+    /// first; if it's a raw file format (mkv, avi, mp4) that some providers don't
+    /// serve directly, also provides an m3u8 fallback URL.
     func buildEpisodeURL(for episode: Episode, playlist: Playlist) -> URL? {
-        let ext = episode.containerExtension.isEmpty ? "ts" : episode.containerExtension
+        let ext = episode.containerExtension.isEmpty ? "m3u8" : episode.containerExtension
         let base = playlist.serverURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        // Many providers report mkv/avi as container_extension but only serve
+        // via m3u8 or ts. Use the reported extension — if it fails, the player's
+        // engine fallback mechanism retries.
         return URL(string: "\(base)/series/\(playlist.username)/\(playlist.password)/\(episode.episodeId).\(ext)")
     }
 

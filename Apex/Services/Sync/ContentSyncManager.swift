@@ -527,11 +527,27 @@ actor ContentSyncManager {
         let seriesInfo = try await xtreamClient.getSeriesInfo(playlist: playlist, seriesId: seriesId)
         guard let episodesDict = seriesInfo.episodes else { return [] }
 
+        // Reseller panels: the API panel URL differs from the actual stream server.
+        // Detect this by checking if any synced movie has a directURL pointing to
+        // a different host. If so, derive the episode stream URL from that server.
+        let streamServerBase = resolveStreamServer(for: playlist)
+
         var result: [ParsedEpisode] = []
         for (seasonKey, episodes) in episodesDict {
             guard let seasonNum = Int(seasonKey) else { continue }
             for episodeDTO in episodes {
                 guard let episodeIdString = episodeDTO.id else { continue }
+
+                // Build the stream URL. If we found a real stream server (reseller panel),
+                // construct the URL using that server instead of the API panel.
+                let directSource: String?
+                if let streamBase = streamServerBase {
+                    let ext = episodeDTO.containerExtension ?? "mkv"
+                    directSource = "\(streamBase)/series/\(playlist.username)/\(playlist.password)/\(episodeIdString).\(ext)"
+                } else {
+                    directSource = episodeDTO.directSource
+                }
+
                 let plot = episodeDTO.info?.plot
                 result.append(ParsedEpisode(
                     id: "\(seriesElementId)-episode-\(episodeIdString)",
@@ -541,7 +557,7 @@ actor ContentSyncManager {
                     seasonNum: seasonNum,
                     episodeNum: episodeDTO.episodeNum ?? 0,
                     added: episodeDTO.added,
-                    directSource: episodeDTO.directSource,
+                    directSource: directSource,
                     durationSecs: episodeDTO.info?.durationSecs,
                     movieImage: episodeDTO.info?.movieImage,
                     rating: episodeDTO.info?.rating,
@@ -551,6 +567,36 @@ actor ContentSyncManager {
             }
         }
         return result
+    }
+
+    /// Detects reseller panels where the API endpoint differs from the stream server.
+    /// Checks if any movie in this playlist has a `directURL` pointing to a different
+    /// host than `playlist.serverURL`. Returns the stream server base URL if found.
+    private func resolveStreamServer(for playlist: Playlist) -> String? {
+        let context = ModelContext(modelContainer)
+        context.autosaveEnabled = false
+        let playlistPrefix = playlist.id.uuidString
+        var descriptor = FetchDescriptor<Movie>(
+            predicate: #Predicate { $0.directURL != nil && $0.id.localizedStandardContains(playlistPrefix) }
+        )
+        descriptor.fetchLimit = 1
+        guard let movie = (try? context.fetch(descriptor))?.first,
+              let directURL = movie.directURL,
+              !directURL.isEmpty,
+              let movieURL = URL(string: directURL)
+        else { return nil }
+
+        // Extract the base: scheme + host + port (e.g. "http://proxpanel.me:8080")
+        guard let host = movieURL.host else { return nil }
+        let playlistHost = URL(string: playlist.serverURL)?.host ?? ""
+        // Only use the alternate server if it's actually different from the panel
+        guard host != playlistHost else { return nil }
+
+        var base = "\(movieURL.scheme ?? "http")://\(host)"
+        if let port = movieURL.port, port != 80, port != 443 {
+            base += ":\(port)"
+        }
+        return base
     }
 
     /// Reduces a raw Xtream episode title to just the episode name.

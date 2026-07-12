@@ -158,6 +158,10 @@ struct XtreamVODStream: Decodable {
     let categoryId: String?
     let containerExtension: String?
     let tmdb: String?
+    /// Full stream URL provided by reseller panels that proxy through a different
+    /// server than the API endpoint. When present, playback uses this directly
+    /// instead of constructing the URL from serverURL + credentials + streamId.
+    let streamUrl: String?
 
     enum CodingKeys: String, CodingKey {
         case num, name
@@ -172,6 +176,7 @@ struct XtreamVODStream: Decodable {
         case containerExtension = "container_extension"
         case tmdb
         case tmdbId = "tmdb_id"
+        case streamUrl = "stream_url"
     }
 
     init(from decoder: Decoder) throws {
@@ -188,6 +193,7 @@ struct XtreamVODStream: Decodable {
         categoryId = Self.decodeCategoryID(from: container, forKey: .categoryId)
         containerExtension = try? container.decodeIfPresent(String.self, forKey: .containerExtension)
         tmdb = Self.decodeTMDB(from: container)
+        streamUrl = try? container.decodeIfPresent(String.self, forKey: .streamUrl)
     }
 
     private static func decodeDouble(from container: KeyedDecodingContainer<CodingKeys>, forKey key: CodingKeys) -> Double? {

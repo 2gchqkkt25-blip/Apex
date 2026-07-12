@@ -143,6 +143,11 @@ extension ContentSyncManager {
         movie.tmdb = dto.tmdb
         movie.num = dto.num ?? 0
         movie.isAdult = dto.isAdult ?? 0
+        // Reseller panels provide stream_url pointing to the actual stream server
+        // (different from the API panel). When present, use it for playback.
+        if let streamUrl = dto.streamUrl, !streamUrl.isEmpty {
+            movie.directURL = streamUrl
+        }
 
         if let catIdStr = dto.categoryId {
             movie.categoryId = playlistPrefix + catIdStr
