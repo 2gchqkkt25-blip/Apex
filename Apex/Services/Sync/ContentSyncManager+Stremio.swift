@@ -79,14 +79,44 @@ extension ContentSyncManager {
             guard !all.isEmpty else { continue }
             Logger.database.info("Stremio catalog '\(catalog.name, privacy: .public)' returned \(all.count) items")
 
+            // Ensure a Category exists for this catalog so Movies/Series tabs
+            // can find and display the content.
+            let categoryTypeRaw: String
+            switch ct {
+            case "movie": categoryTypeRaw = "vod"
+            case "series": categoryTypeRaw = "series"
+            case "channel", "tv": categoryTypeRaw = "live"
+            default: categoryTypeRaw = ct
+            }
+            let categoryApiId = catalog.id
+            let categoryId = "\(playlist.id.uuidString)-\(categoryTypeRaw)-\(categoryApiId)"
+            let catCtx = ModelContext(modelContainer)
+            catCtx.autosaveEnabled = false
+            let existingCat = try? catCtx.fetch(
+                FetchDescriptor<Category>(predicate: #Predicate { $0.id == categoryId })
+            ).first
+            if existingCat == nil {
+                let category = Category(
+                    apiId: categoryApiId,
+                    name: catalog.name,
+                    parentId: 0,
+                    typeRaw: categoryTypeRaw,
+                    playlist: playlist
+                )
+                category.id = categoryId
+                catCtx.insert(category)
+                try? catCtx.save()
+                Logger.database.info("Stremio created category '\(catalog.name, privacy: .public)' (type: \(categoryTypeRaw, privacy: .public))")
+            }
+
             let batchCtx = ModelContext(modelContainer)
             switch ct {
             case "movie":
-                seenMovieIDs.formUnion(importStremioMovies(all, playlist: playlist, baseURL: base, context: batchCtx))
+                seenMovieIDs.formUnion(importStremioMovies(all, playlist: playlist, baseURL: base, categoryId: categoryId, context: batchCtx))
             case "series":
-                seenSeriesIDs.formUnion(importStremioSeries(all, playlist: playlist, baseURL: base, context: batchCtx))
+                seenSeriesIDs.formUnion(importStremioSeries(all, playlist: playlist, baseURL: base, categoryId: categoryId, context: batchCtx))
             case "channel", "tv":
-                seenChannelIDs.formUnion(importStremioChannels(all, playlist: playlist, baseURL: base, context: batchCtx))
+                seenChannelIDs.formUnion(importStremioChannels(all, playlist: playlist, baseURL: base, categoryId: categoryId, context: batchCtx))
             default:
                 continue
             }
@@ -104,6 +134,7 @@ extension ContentSyncManager {
         _ metas: [StremioMetaPreview],
         playlist: Playlist,
         baseURL: URL,
+        categoryId: String,
         context: ModelContext
     ) -> Set<String> {
         var seen = Set<String>()
@@ -125,6 +156,7 @@ extension ContentSyncManager {
             movie.rating = Double(meta.imdbRating ?? "0") ?? 0
             movie.genre = meta.genres?.joined(separator: ", ")
             movie.directURL = stremioID
+            movie.categoryId = categoryId
             movie.num = 0
 
             if existing == nil {
@@ -138,6 +170,7 @@ extension ContentSyncManager {
         _ metas: [StremioMetaPreview],
         playlist: Playlist,
         baseURL: URL,
+        categoryId: String,
         context: ModelContext
     ) -> Set<String> {
         var seen = Set<String>()
@@ -158,6 +191,7 @@ extension ContentSyncManager {
             series.releaseDate = meta.releaseInfo
             series.rating = meta.imdbRating
             series.genre = meta.genres?.joined(separator: ", ")
+            series.categoryId = categoryId
             series.num = 0
 
             if existing == nil {
@@ -171,6 +205,7 @@ extension ContentSyncManager {
         _ metas: [StremioMetaPreview],
         playlist: Playlist,
         baseURL: URL,
+        categoryId: String,
         context: ModelContext
     ) -> Set<String> {
         var seen = Set<String>()
@@ -197,6 +232,7 @@ extension ContentSyncManager {
             stream.streamIcon = meta.poster
             stream.directURL = stremioID
             stream.epgChannelId = meta.id
+            stream.categoryId = categoryId
             stream.num = index
 
             if existing == nil {
