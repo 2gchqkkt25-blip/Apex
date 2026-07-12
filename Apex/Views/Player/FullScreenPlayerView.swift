@@ -58,6 +58,11 @@ struct FullScreenPlayerView: View {
     /// failure overlay instead of an endless spinner.
     @State private var resolveError: String?
 
+    /// Stremio stream picker state. When multiple streams are available, the user
+    /// can choose quality/source instead of auto-selecting.
+    @State private var stremioStreamOptions: [StremioStreamOption] = []
+    @State private var showStreamPicker = false
+
     /// The episode queued to play after `activeMedia`, resolved whenever the
     /// active stream changes. Drives both the in-player Next Episode button and
     /// auto-advance (see `PlayerNextUpOverlay`); `nil` for movies, live channels
@@ -141,6 +146,20 @@ struct FullScreenPlayerView: View {
         #endif
         .persistentSystemOverlays(.hidden)
         .preferredColorScheme(.dark)
+        .sheet(isPresented: $showStreamPicker) {
+            StremioStreamPickerView(
+                streams: stremioStreamOptions,
+                onSelect: selectStremioStream,
+                onCancel: {
+                    showStreamPicker = false
+                    // If user cancels without picking, auto-select the best
+                    if let best = stremioStreamOptions.first {
+                        resolvedMedia = mediaWith(url: best.url)
+                    }
+                }
+            )
+            .presentationDetents([.medium, .large])
+        }
         .task {
             // Seed the recall pair with the channel we opened on, so the very
             // first in-player recall has somewhere to jump back to.
@@ -325,7 +344,24 @@ struct FullScreenPlayerView: View {
             resolvedMedia = nil
             resolveError = nil
             do {
-                resolvedMedia = try await StremioStreamResolver.resolve(activeMedia, container: modelContext.container)
+                // Fetch all available streams for the picker
+                let options = try await StremioStreamResolver.fetchAllOptions(
+                    for: activeMedia,
+                    container: modelContext.container
+                )
+                if options.isEmpty {
+                    throw StremioError.noCompatibleStreams
+                }
+                // If only one stream or user has auto-play enabled, play directly
+                if options.count == 1 {
+                    resolvedMedia = mediaWith(url: options[0].url)
+                } else {
+                    // Show picker — store options and present sheet
+                    await MainActor.run {
+                        stremioStreamOptions = options
+                        showStreamPicker = true
+                    }
+                }
             } catch {
                 resolveError = error.localizedDescription
                 Logger.player.error("Stremio stream resolution failed: \(error.localizedDescription, privacy: .public)")
@@ -335,7 +371,29 @@ struct FullScreenPlayerView: View {
 
     private func retryResolve() {
         engineAttempt = 0
+        stremioStreamOptions = []
+        showStreamPicker = false
         Task { await resolveActiveMedia() }
+    }
+
+    /// Creates a PlayableMedia copy with a resolved URL.
+    private func mediaWith(url: URL) -> PlayableMedia {
+        PlayableMedia(
+            id: activeMedia.id,
+            url: url,
+            title: activeMedia.title,
+            subtitle: activeMedia.subtitle,
+            posterURL: activeMedia.posterURL,
+            kind: activeMedia.kind,
+            startTime: activeMedia.startTime,
+            contentRef: activeMedia.contentRef
+        )
+    }
+
+    /// Called when the user picks a stream from the Stremio picker sheet.
+    private func selectStremioStream(_ option: StremioStreamOption) {
+        showStreamPicker = false
+        resolvedMedia = mediaWith(url: option.url)
     }
 
     /// Persist the outgoing stream's progress, then swap in a new one. The
