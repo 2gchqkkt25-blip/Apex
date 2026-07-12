@@ -325,7 +325,7 @@ struct FullScreenPlayerView: View {
             resolvedMedia = nil
             resolveError = nil
             do {
-                resolvedMedia = try await StremioStreamResolver.resolve(activeMedia)
+                resolvedMedia = try await StremioStreamResolver.resolve(activeMedia, container: modelContext.container)
             } catch {
                 resolveError = error.localizedDescription
                 Logger.player.error("Stremio stream resolution failed: \(error.localizedDescription, privacy: .public)")

@@ -3,49 +3,29 @@
 //  Apex
 //
 //  Resolves Stremio placeholder URLs to actual playable stream URLs at
-//  playback time. Automatically selects the best available stream based on
-//  quality indicators (resolution, codec, file size) from the stream title.
+//  playback time. Queries ALL configured Stremio addons that support streams
+//  (not just the owning addon), merges results, and auto-selects the best
+//  quality. This mirrors how the Stremio desktop app works — catalog addons
+//  (Cinemeta) provide browsing, stream addons (AIOStreams, Torrentio) provide
+//  playback, and the player queries all of them.
 //
 
 import Foundation
 import OSLog
+import SwiftData
 
 enum StremioStreamResolver {
     private static let client = StremioClient()
 
-    /// Attempts to resolve a Stremio placeholder to the best playable stream URL.
-    ///
-    /// The placeholder encodes `baseURL|type|id` in its path, which is stored
-    /// in `directURL` on the content model during sync.
-    static func resolve(placeholder: String) async throws -> URL {
-        let parts = placeholder.components(separatedBy: "|")
-        guard parts.count == 3,
-              let baseURL = URL(string: parts[0])
-        else { throw StremioError.invalidURL }
-
-        let type = parts[1]
-        let id = parts[2]
-
-        let streams = try await client.fetchStreams(baseURL: baseURL, type: type, id: id)
-        guard !streams.isEmpty else { throw StremioError.noCompatibleStreams }
-
-        // Auto-select: rank streams by quality and pick the best one
-        let best = selectBestStream(from: streams)
-        guard let url = best.bestURL else { throw StremioError.noCompatibleStreams }
-
-        Logger.player.info("Stremio auto-selected: \"\(best.displayTitle, privacy: .public)\" from \(streams.count) streams")
-        return url
-    }
-
-    /// Resolves a Stremio `PlayableMedia` by replacing its placeholder URL with
-    /// the best available stream URL fetched from the addon.
-    static func resolve(_ media: PlayableMedia) async throws -> PlayableMedia {
+    /// Resolves a Stremio `PlayableMedia` by querying ALL configured stream
+    /// addons for the content, merging results, and picking the best stream.
+    static func resolve(_ media: PlayableMedia, container: ModelContainer? = nil) async throws -> PlayableMedia {
         let urlString = media.url.absoluteString
         guard urlString.hasPrefix("stremio://") else { throw StremioError.invalidURL }
         let placeholder = String(urlString.dropFirst("stremio://".count))
         guard let decoded = placeholder.removingPercentEncoding else { throw StremioError.invalidURL }
 
-        let resolvedURL = try await resolve(placeholder: decoded)
+        let resolvedURL = try await resolveMultiAddon(placeholder: decoded, container: container)
         return PlayableMedia(
             id: media.id,
             url: resolvedURL,
@@ -56,6 +36,84 @@ enum StremioStreamResolver {
             startTime: media.startTime,
             contentRef: media.contentRef
         )
+    }
+
+    /// Queries all configured Stremio stream addons for this content and picks
+    /// the best stream across all of them.
+    private static func resolveMultiAddon(placeholder: String, container: ModelContainer?) async throws -> URL {
+        let parts = placeholder.components(separatedBy: "|")
+        guard parts.count == 3,
+              let sourceBaseURL = URL(string: parts[0])
+        else { throw StremioError.invalidURL }
+
+        let type = parts[1]
+        let id = parts[2]
+
+        // Gather all Stremio addon base URLs that support streams.
+        // Always include the source addon (the one that owns this content).
+        var addonURLs: [URL] = [sourceBaseURL]
+
+        if let container {
+            let additional = await fetchStreamAddonURLs(from: container, excluding: sourceBaseURL)
+            addonURLs.append(contentsOf: additional)
+        }
+
+        Logger.player.info("Stremio resolving \(type)/\(id, privacy: .public) across \(addonURLs.count) addon(s)")
+
+        // Query all addons concurrently for streams
+        var allStreams: [StremioStream] = []
+
+        await withTaskGroup(of: [StremioStream].self) { group in
+            for addonURL in addonURLs {
+                group.addTask {
+                    do {
+                        let streams = try await client.fetchStreams(baseURL: addonURL, type: type, id: id)
+                        if !streams.isEmpty {
+                            Logger.player.info("Stremio addon \(addonURL.host() ?? "unknown", privacy: .public) returned \(streams.count) streams")
+                        }
+                        return streams
+                    } catch {
+                        // Addon doesn't have streams for this content — normal
+                        Logger.player.debug("Stremio addon \(addonURL.host() ?? "unknown", privacy: .public) — no streams: \(error.localizedDescription, privacy: .public)")
+                        return []
+                    }
+                }
+            }
+            for await streams in group {
+                allStreams.append(contentsOf: streams)
+            }
+        }
+
+        guard !allStreams.isEmpty else { throw StremioError.noCompatibleStreams }
+
+        // Auto-select the best stream across all addons
+        let best = selectBestStream(from: allStreams)
+        guard let url = best.bestURL else { throw StremioError.noCompatibleStreams }
+
+        Logger.player.info("Stremio auto-selected: \"\(best.displayTitle, privacy: .public)\" from \(allStreams.count) total streams across \(addonURLs.count) addon(s)")
+        return url
+    }
+
+    /// Fetches all Stremio playlist base URLs that support streams, excluding
+    /// the source addon (already included by the caller).
+    @MainActor
+    private static func fetchStreamAddonURLs(from container: ModelContainer, excluding sourceURL: URL) -> [URL] {
+        let context = ModelContext(container)
+        context.autosaveEnabled = false
+        let stremioType = PlaylistSourceType.stremio.rawValue
+        let descriptor = FetchDescriptor<Playlist>(
+            predicate: #Predicate { $0.sourceTypeRaw == stremioType }
+        )
+        let playlists = (try? context.fetch(descriptor)) ?? []
+
+        var urls: [URL] = []
+        for playlist in playlists {
+            guard let normalized = StremioURL.normalize(playlist.serverURL) else { continue }
+            // Don't duplicate the source addon
+            guard normalized.absoluteString != sourceURL.absoluteString else { continue }
+            urls.append(normalized)
+        }
+        return urls
     }
 
     // MARK: - Stream Quality Selection
