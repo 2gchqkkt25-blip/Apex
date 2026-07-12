@@ -767,8 +767,9 @@ class XtreamClient: APIClient {
 
     /// Builds a playback URL for an episode
     func buildEpisodeURL(for episode: Episode, playlist: Playlist) -> URL? {
-        let ext = episode.containerExtension
-        return URL(string: "\(playlist.serverURL)/series/\(playlist.username)/\(playlist.password)/\(episode.episodeId).\(ext)")
+        let ext = episode.containerExtension.isEmpty ? "ts" : episode.containerExtension
+        let base = playlist.serverURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        return URL(string: "\(base)/series/\(playlist.username)/\(playlist.password)/\(episode.episodeId).\(ext)")
     }
 
     /// Builds a playback URL for a live stream

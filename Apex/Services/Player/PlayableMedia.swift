@@ -127,8 +127,18 @@ extension PlayableMedia {
             guard let resolved = episode.directSource.flatMap(URL.init(string:)) else { return nil }
             url = resolved
         case .xtream:
-            guard let built = client.buildEpisodeURL(for: episode, playlist: playlist) else { return nil }
-            url = built
+            // Some providers supply a direct_source URL instead of relying on the
+            // constructed /series/user/pass/id.ext path. Try directSource first,
+            // fall back to building the URL from episode ID + extension.
+            if let direct = episode.directSource,
+               !direct.isEmpty,
+               let directURL = URL(string: direct) {
+                url = directURL
+            } else if let built = client.buildEpisodeURL(for: episode, playlist: playlist) {
+                url = built
+            } else {
+                return nil
+            }
         }
         let seriesName = episode.series?.name
         let subtitle = "S\(episode.seasonNum) E\(episode.episodeNum) · \(episode.title)"
