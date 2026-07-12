@@ -105,6 +105,18 @@ struct ContentManagementView: View {
         ContentOrganizer.showAll(categories)
     }
 
+    private func hideAll() {
+        for category in categories {
+            category.isHidden = true
+        }
+    }
+
+    private func showAll() {
+        for category in categories {
+            category.isHidden = false
+        }
+    }
+
     /// Drill-in provider for the reorderable list: only live categories expose a
     /// channels link. Written as a function (not a ternary) so the closure type
     /// is unambiguous.
@@ -178,9 +190,15 @@ struct ContentManagementView: View {
             HStack {
                 TVSettingsSectionLabel("Categories")
                 Spacer()
+                Button("Show All") { showAll() }
+                    .buttonStyle(TVSettingsActionButtonStyle())
+                    .disabled(isReordering || categories.isEmpty)
+                Button("Hide All") { hideAll() }
+                    .buttonStyle(TVSettingsActionButtonStyle())
+                    .disabled(isReordering || categories.isEmpty)
                 Button("Reset") { resetCurrentType() }
                     .buttonStyle(TVSettingsActionButtonStyle())
-                    .disabled(isReordering)
+                    .disabled(isReordering || categories.isEmpty)
             }
 
             if isReordering {
@@ -287,8 +305,15 @@ struct ContentManagementView: View {
                         }
                     #endif
                     ToolbarItem(placement: .automatic) {
-                        Button("Reset", role: .destructive) { resetCurrentType() }
-                            .disabled(categories.isEmpty)
+                        Menu {
+                            Button("Show All") { showAll() }
+                            Button("Hide All") { hideAll() }
+                            Divider()
+                            Button("Reset", role: .destructive) { resetCurrentType() }
+                        } label: {
+                            Label("Options", systemImage: "ellipsis.circle")
+                        }
+                        .disabled(categories.isEmpty)
                     }
                 }
         }
