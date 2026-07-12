@@ -530,7 +530,7 @@ actor ContentSyncManager {
         // Reseller panels: the API panel URL differs from the actual stream server.
         // Detect this by checking if any synced movie has a directURL pointing to
         // a different host. If so, derive the episode stream URL from that server.
-        let streamServerBase = resolveStreamServer(for: playlist)
+        let streamServer = resolveStreamServer(for: playlist)
 
         var result: [ParsedEpisode] = []
         for (seasonKey, episodes) in episodesDict {
@@ -541,9 +541,9 @@ actor ContentSyncManager {
                 // Build the stream URL. If we found a real stream server (reseller panel),
                 // construct the URL using that server instead of the API panel.
                 let directSource: String?
-                if let streamBase = streamServerBase {
+                if let server = streamServer {
                     let ext = episodeDTO.containerExtension ?? "mkv"
-                    directSource = "\(streamBase)/series/\(playlist.username)/\(playlist.password)/\(episodeIdString).\(ext)"
+                    directSource = "\(server.base)/series/\(server.username)/\(server.password)/\(episodeIdString).\(ext)"
                 } else {
                     directSource = episodeDTO.directSource
                 }
@@ -571,8 +571,15 @@ actor ContentSyncManager {
 
     /// Detects reseller panels where the API endpoint differs from the stream server.
     /// Checks if any movie in this playlist has a `directURL` pointing to a different
-    /// host than `playlist.serverURL`. Returns the stream server base URL if found.
-    private func resolveStreamServer(for playlist: Playlist) -> String? {
+    /// host than `playlist.serverURL`. Returns the stream server base + credentials
+    /// for building series episode URLs.
+    private struct StreamServerInfo {
+        let base: String      // e.g. "http://proxpanel.me:8080"
+        let username: String  // credentials from the stream URL (may differ from panel)
+        let password: String
+    }
+
+    private func resolveStreamServer(for playlist: Playlist) -> StreamServerInfo? {
         let context = ModelContext(modelContainer)
         context.autosaveEnabled = false
         let playlistPrefix = playlist.id.uuidString
@@ -585,14 +592,13 @@ actor ContentSyncManager {
               !directURL.isEmpty,
               let movieURL = URL(string: directURL)
         else {
-            Logger.database.warning("EPG resolveStreamServer — no movie with directURL found for playlist \(playlistPrefix, privacy: .public)")
+            Logger.database.warning("resolveStreamServer — no movie with directURL found for playlist \(playlistPrefix, privacy: .public)")
             return nil
         }
 
-        // Extract the base: scheme + host + port (e.g. "http://proxpanel.me:8080")
+        // Extract the base: scheme + host + port
         guard let host = movieURL.host else { return nil }
         let playlistHost = URL(string: playlist.serverURL)?.host ?? ""
-        // Only use the alternate server if it's actually different from the panel
         guard host != playlistHost else {
             Logger.database.info("resolveStreamServer — same host (\(host, privacy: .public)), using standard path")
             return nil
@@ -602,8 +608,24 @@ actor ContentSyncManager {
         if let port = movieURL.port, port != 80, port != 443 {
             base += ":\(port)"
         }
-        Logger.database.warning("resolveStreamServer — detected reseller panel. Stream server: \(base, privacy: .public)")
-        return base
+
+        // Extract credentials from the stream URL path: /movie/{username}/{password}/{id}.{ext}
+        // or /series/{username}/{password}/{id}.{ext}
+        let pathComponents = movieURL.pathComponents.filter { $0 != "/" }
+        // Expected: ["movie", "username", "password", "id.ext"]
+        let username: String
+        let password: String
+        if pathComponents.count >= 4 {
+            username = pathComponents[1]
+            password = pathComponents[2]
+        } else {
+            // Can't extract credentials — fall back to panel credentials
+            username = playlist.username
+            password = playlist.password
+        }
+
+        Logger.database.warning("resolveStreamServer — detected reseller panel. Server: \(base, privacy: .public) user: \(username, privacy: .public)")
+        return StreamServerInfo(base: base, username: username, password: password)
     }
 
     /// Reduces a raw Xtream episode title to just the episode name.
