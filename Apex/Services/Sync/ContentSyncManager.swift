@@ -560,7 +560,11 @@ actor ContentSyncManager {
                 // construct the URL using that server instead of the API panel.
                 let directSource: String?
                 if let server = streamServer {
-                    let ext = episodeDTO.containerExtension ?? "mkv"
+                    // Use m3u8 (HLS) as the streaming format. Reseller panels
+                    // often report mkv/mp4 as container_extension (source format)
+                    // but only serve via m3u8 or ts (the allowed_output_formats).
+                    // HTTP 403 is returned for raw file extensions like .mkv.
+                    let ext = "m3u8"
                     directSource = "\(server.base)/series/\(server.username)/\(server.password)/\(episodeIdString).\(ext)"
                 } else {
                     directSource = episodeDTO.directSource
