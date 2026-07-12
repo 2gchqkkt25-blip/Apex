@@ -4,6 +4,29 @@ All notable changes to Apex Stream Player.
 
 ---
 
+## Build 33 (1.2.0) — July 11, 2026
+
+### Stremio — Full Addon Support
+
+- **Sync hang fixed** — Stream-only addons (Torrentio, AIOStreams) no longer stall the sync. Added pagination guards (20-page cap, duplicate detection) and empty-catalog detection.
+- **Multi-addon stream resolution** — When playing content, ALL configured Stremio addons that support streams are queried concurrently. Browse from Cinemeta, stream from AIOStreams — just like the Stremio desktop app.
+- **Stream picker UI** — Shows all available streams ranked by quality (resolution, codec, HDR, file size) with source addon name. Pick manually or tap "Play Best Quality" for instant playback.
+- **Addon catalog browser** — Settings → Playlists → "Stremio Addons". Browse the official Stremio community addon collection, searchable and filterable (All / Catalogs / Streams). One-tap install adds any addon as a playlist.
+- **Auto-stream quality selection** — Scores streams by 4K/1080p/720p, HEVC/H.264, HDR, file size. Best stream selected automatically when only one is available or via the "Play Best" button.
+
+### tvOS — Icon Fix + Top Shelf
+
+- **Icon black bars fixed** — tvOS icon layers regenerated from the 1024×1024 source with proper landscape cropping (5:3 aspect). The logo now fills the frame edge-to-edge.
+- **Top Shelf support** — When Apex is on the top row of the Apple TV home screen, poster content appears in the Top Shelf area. Configurable in Settings → Top Shelf:
+  - Recently Watched (default)
+  - Favorites
+  - Trending
+  - Continue Watching
+- Tapping a Top Shelf item deep-links into the app.
+- Data refreshes automatically after each playlist sync.
+
+---
+
 ## Build 32 (1.2.0) — July 11, 2026
 
 ### EPG — Lightning-Fast Guide Loading
