@@ -584,18 +584,25 @@ actor ContentSyncManager {
               let directURL = movie.directURL,
               !directURL.isEmpty,
               let movieURL = URL(string: directURL)
-        else { return nil }
+        else {
+            Logger.database.warning("EPG resolveStreamServer — no movie with directURL found for playlist \(playlistPrefix, privacy: .public)")
+            return nil
+        }
 
         // Extract the base: scheme + host + port (e.g. "http://proxpanel.me:8080")
         guard let host = movieURL.host else { return nil }
         let playlistHost = URL(string: playlist.serverURL)?.host ?? ""
         // Only use the alternate server if it's actually different from the panel
-        guard host != playlistHost else { return nil }
+        guard host != playlistHost else {
+            Logger.database.info("resolveStreamServer — same host (\(host, privacy: .public)), using standard path")
+            return nil
+        }
 
         var base = "\(movieURL.scheme ?? "http")://\(host)"
         if let port = movieURL.port, port != 80, port != 443 {
             base += ":\(port)"
         }
+        Logger.database.warning("resolveStreamServer — detected reseller panel. Stream server: \(base, privacy: .public)")
         return base
     }
 
