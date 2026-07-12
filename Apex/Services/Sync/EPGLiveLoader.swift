@@ -606,7 +606,14 @@ enum EPGBrowseLoader {
     private static let synchronousFetchCap = 50
 
     /// Loads guide data for visible channels.
-    /// Xtream: live API first (returns shifted data), store as fallback.
+    /// Returns store data IMMEDIATELY — live API gap-fill runs in background
+    /// and signals `refreshGeneration` when done (caller picks it up via
+    /// `.onChange(of: epgSync.refreshGeneration)`).
+    ///
+    /// This is the key difference vs the old approach: other IPTV apps show
+    /// whatever data they have instantly and fill gaps asynchronously. The old
+    /// code awaited ALL channels (store + live API) before returning anything,
+    /// so 42 instant-from-store channels were held hostage by 7 slow API calls.
     @MainActor
     static func load(
         container: ModelContainer,
@@ -625,7 +632,7 @@ enum EPGBrowseLoader {
         if let playlist, playlist.sourceType == .xtream {
             let credentials = EPGPlaylistCredentials(playlist: playlist)
 
-            // Store first for channels with external EPG data (current timestamps).
+            // Store first — this is the fast path (instant from SQLite).
             let stored = await Task.detached(priority: .userInitiated) {
                 EPGLiveLoader.programsFromStore(
                     container: container,
@@ -639,52 +646,29 @@ enum EPGBrowseLoader {
                 programs[channelId] = slots
             }
 
-            // Live API only when the store has no rows for this channel. After a
-            // fresh bulk import, hitting the per-stream API (2 concurrent, 200 ms
-            // stagger × 24 channels) added several minutes before cards showed data.
+            // Fire-and-forget: live API gap-fill runs in background for channels
+            // not in the store. The view updates when refreshGeneration bumps.
             let needsLive = snapshots.filter { programs[$0.primaryEPGChannelId]?.isEmpty ?? true }
             if !needsLive.isEmpty {
                 Logger.database.warning("EPG browse — store had data for \(programs.count)/\(snapshots.count) channels; \(needsLive.count) need live API")
                 if let sample = needsLive.first {
                     Logger.database.warning("EPG browse — sample needing live: name=\(sample.name, privacy: .public) epgId=\(sample.epgChannelId ?? "nil", privacy: .public) primaryId=\(sample.primaryEPGChannelId, privacy: .public)")
                 }
-            }
-            let urgent = Array(needsLive.prefix(synchronousFetchCap))
-            if !urgent.isEmpty {
-                let fetched = await EPGLiveLoader.shared.programs(
-                    for: urgent,
-                    credentials: credentials,
-                    now: now
-                )
-                for (channelId, slots) in fetched {
-                    programs[channelId] = slots
-                }
-                if !fetched.isEmpty {
-                    let snapshot = fetched
-                    Task.detached(priority: .utility) {
-                        await EPGAPISync.persist(programsByChannel: snapshot, container: container, now: now)
-                    }
-                }
-            }
-
-            // Remaining channels beyond the urgent cap — fetch in background so
-            // the view can paint the first batch immediately while the rest fills
-            // in. The caller's .onChange(of: epgSync.refreshGeneration) picks up
-            // the results when the background batch completes.
-            let remaining = Array(needsLive.dropFirst(synchronousFetchCap))
-            if !remaining.isEmpty {
                 let bgCredentials = credentials
                 let bgContainer = container
+                let bgNow = now
                 Task.detached(priority: .utility) {
                     let fetched = await EPGLiveLoader.shared.programs(
-                        for: remaining,
+                        for: needsLive,
                         credentials: bgCredentials,
-                        now: now
+                        now: bgNow
                     )
                     if !fetched.isEmpty {
-                        await EPGAPISync.persist(programsByChannel: fetched, container: bgContainer, now: now)
+                        await EPGAPISync.persist(programsByChannel: fetched, container: bgContainer, now: bgNow)
+                        // Force immediate UI update — no throttle. Browse gap-fill
+                        // only fires once per category, not repeatedly like sync.
                         await MainActor.run {
-                            EPGSyncService.shared.signalGuideRefresh()
+                            EPGSyncService.shared.forceGuideRefresh()
                         }
                     }
                 }

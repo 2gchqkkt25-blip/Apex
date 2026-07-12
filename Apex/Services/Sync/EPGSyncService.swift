@@ -32,7 +32,7 @@ final class EPGSyncService {
     @MainActor private(set) var syncProgressLabel: String?
 
     @MainActor private var lastGuideRefreshSignal = Date.distantPast
-    private static let minGuideRefreshInterval: TimeInterval = 60
+    private static let minGuideRefreshInterval: TimeInterval = 5
     /// Throttle mid-sync guide reloads hard: each bump forces every EPG-observing
     /// view to re-run main-thread SwiftData fetches while the store is being
     /// written. At 5s this thrashed the UI (jank / watchdog kills on tvOS).
