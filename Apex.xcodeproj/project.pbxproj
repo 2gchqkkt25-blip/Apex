@@ -439,7 +439,9 @@
 /* Begin PBXTargetDependency section */
 		7F5135473003C99400510C34 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			platformFilters = (tvos, );
+			platformFilters = (
+				tvos,
+			);
 			target = 7F51353D3003C99400510C34 /* TopShelfExtension */;
 			targetProxy = 7F5135463003C99400510C34 /* PBXContainerItemProxy */;
 		};
@@ -459,6 +461,7 @@
 		7F51354A3003C99400510C34 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = TopShelfExtension/TopShelfExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = VS7D6GB238;
@@ -491,6 +494,7 @@
 		7F51354B3003C99400510C34 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = TopShelfExtension/TopShelfExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = VS7D6GB238;
@@ -523,6 +527,7 @@
 		7F51354C3003C99400510C34 /* Sideload */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = TopShelfExtension/TopShelfExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = VS7D6GB238;

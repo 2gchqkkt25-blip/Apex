@@ -494,6 +494,7 @@ extension SettingsView {
                         }
                     case .profiles: TVProfilesSettingsView()
                     case .home: tvHomeLayoutDetail
+                    case .topShelf: TopShelfSettingsView()
                     case .epg: EPGSettingsView()
                     case .search: tvSearchDetail
                     case .storage: StorageManagementView()

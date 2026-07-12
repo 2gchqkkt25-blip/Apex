@@ -158,6 +158,8 @@ struct SyncProgressView: View {
         #if os(tvOS)
         await MainActor.run {
             ContentIndexingService.shared.kick(after: .seconds(20))
+            // Update Top Shelf content so the extension shows fresh data
+            TopShelfDataWriter.update(container: modelContext.container)
         }
         // Run the guide import well after the sheet dismisses so the content
         // sync's memory is fully released first, giving the feed parse the whole
