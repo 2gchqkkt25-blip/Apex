@@ -84,9 +84,9 @@ struct MainTabView: View {
             .onOpenURL { url in
                 handleDeepLink(url)
             }
-            .task(id: playlists.count) {
-                // On launch (and whenever a playlist is added) sync any playlist that
-                // is due per the configured frequency.
+            .task(id: playlists.map(\.id)) {
+                // On launch (and whenever a playlist is added/removed) sync any
+                // playlist that is due per the configured frequency.
                 enqueueDueSyncs(playlists)
             }
             .onChange(of: selectedPlaylistID) {
