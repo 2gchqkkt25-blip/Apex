@@ -101,7 +101,7 @@ extension ContentSyncManager {
                     name: catalog.name,
                     parentId: 0,
                     typeRaw: categoryTypeRaw,
-                    playlist: playlist
+                    playlist: nil
                 )
                 category.id = categoryId
                 catCtx.insert(category)
