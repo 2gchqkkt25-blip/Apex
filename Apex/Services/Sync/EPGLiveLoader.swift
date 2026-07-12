@@ -286,6 +286,23 @@ actor EPGLiveLoader {
             sortBy: [SortDescriptor(\.start)]
         )
         let listings = (try? context.fetch(descriptor)) ?? []
+        if listings.isEmpty, !snapshots.isEmpty {
+            // Log diagnostic: why is the store empty for these channels?
+            let sampleIds = Array(epgIds.prefix(5))
+            Logger.database.warning("EPG store query returned 0 listings for \(snapshots.count) channels (epgIds sample: \(sampleIds.joined(separator: ", "), privacy: .public), window: \(startBound) to \(endBound))")
+            // Check total EPGListing count to see if the store is populated at all
+            let countDescriptor = FetchDescriptor<EPGListing>()
+            let totalCount = (try? context.fetchCount(countDescriptor)) ?? 0
+            Logger.database.warning("EPG store total listing count: \(totalCount)")
+            if totalCount > 0 {
+                // Sample what channelIds ARE in the store
+                var sampleDescriptor = FetchDescriptor<EPGListing>()
+                sampleDescriptor.fetchLimit = 5
+                let sampleListings = (try? context.fetch(sampleDescriptor)) ?? []
+                let storeChannelIds = sampleListings.map(\.channelId)
+                Logger.database.warning("EPG store sample channelIds: \(storeChannelIds.joined(separator: ", "), privacy: .public)")
+            }
+        }
         let grouped = Dictionary(grouping: listings, by: \.channelId)
         var result: [String: [EPGProgram]] = [:]
         for snapshot in snapshots {
@@ -626,6 +643,12 @@ enum EPGBrowseLoader {
             // fresh bulk import, hitting the per-stream API (2 concurrent, 200 ms
             // stagger × 24 channels) added several minutes before cards showed data.
             let needsLive = snapshots.filter { programs[$0.primaryEPGChannelId]?.isEmpty ?? true }
+            if !needsLive.isEmpty {
+                Logger.database.warning("EPG browse — store had data for \(programs.count)/\(snapshots.count) channels; \(needsLive.count) need live API")
+                if let sample = needsLive.first {
+                    Logger.database.warning("EPG browse — sample needing live: name=\(sample.name, privacy: .public) epgId=\(sample.epgChannelId ?? "nil", privacy: .public) primaryId=\(sample.primaryEPGChannelId, privacy: .public)")
+                }
+            }
             let urgent = Array(needsLive.prefix(synchronousFetchCap))
             if !urgent.isEmpty {
                 let fetched = await EPGLiveLoader.shared.programs(
