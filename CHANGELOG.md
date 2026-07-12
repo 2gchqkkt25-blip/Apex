@@ -4,6 +4,29 @@ All notable changes to Apex Stream Player.
 
 ---
 
+## Build 35 tvOS / Build 36 iOS (1.2.0) — July 12, 2026
+
+### Reseller Panel Series Playback — Fixed
+
+- **Stream server detection** — Reseller panels (where the API panel and stream server are different hosts) are now automatically detected by comparing movie `stream_url` hosts against the panel URL.
+- **Credential extraction** — Stream URLs use different credentials than the panel login. Now extracted from the movie's `stream_url` path (e.g. `http://server/movie/user/pass/id.ext`).
+- **HLS forced for reseller panels** — Episode URLs use `.m3u8` (HLS) instead of the source format `.mkv`. Panels return 403 for raw file extensions but serve HLS fine.
+- **Duplicate series fallback** — When a series entry has 0 episodes (common with reseller panels that list the same show in multiple categories), the app searches for an alternate entry with the same name that has episodes.
+- **VOD `stream_url` parsed** — The `stream_url` field from the Xtream VOD API is now stored as `movie.directURL` so movies play via the correct stream server.
+
+### Stremio Series — Fixed
+
+- **Episodes load on first tap** — IMDB/TMDB ID stored at catalog import time so the episode fetch doesn't need to wait for background enrichment.
+- **No more "no episodes → retry" flow** — Was caused by missing ID on first detail screen open.
+
+### What's NOT Changed (no regressions)
+
+- Standard single-server Xtream providers unaffected (reseller detection returns nil)
+- EPG, Live TV, Movies playback all unchanged
+- All previous fixes retained (EPG speed, large playlist memory, Top Shelf, Stremio catalog)
+
+---
+
 ## Build 34 (1.2.0) — July 12, 2026
 
 ### Stremio — Fully Working

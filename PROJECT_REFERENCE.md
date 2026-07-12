@@ -140,6 +140,7 @@ Without these keys, the app works but metadata is limited to what the IPTV provi
 | 74 | **tvOS — icon black bars fix + Top Shelf** | ✅ **Done (Jul 11-12)** — Icon layers regenerated (landscape crop, no black bars). Top Shelf extension with configurable content. Data writes on launch + setting change. |
 | 75 | **Build 34 — Stremio catalog + auto-sync + content management** | ✅ **Done (Jul 12)** — Stremio auto-catalog (Cinemeta for stream-only addons), categories created so content shows in tabs, ModelContext crash fixed, catalog cap 100 items (sync in seconds), progress bar, auto-sync on any playlist add, Hide All/Show All in Content Management. |
 | 76 | **Remove visionOS from build targets** | ✅ **Done (Jul 12)** — Removed `XROS_DEPLOYMENT_TARGET` and `xros/xrsimulator` from all configs (Debug/Release/Sideload, app + tests). Build targets: iOS, tvOS, macOS only. |
+| 77 | **Build 35/36 — Reseller panel series + Stremio series fix** | ✅ **Done (Jul 12)** — Reseller panel full fix (stream server detection, credential extraction from `stream_url`, `.m3u8` forced for HLS-only panels, duplicate series fallback). Stremio series loads episodes on first tap (IMDB ID stored at import). |
 
 ---
 
@@ -1433,4 +1434,4 @@ See **What's Been Built → iOS Device — Large Library Fix** above for full de
 
 ---
 
-*Last updated: July 12, 2026 (Build 34 — Stremio fully working, auto-sync, Content Management Hide/Show All, Top Shelf writes on launch, tvOS icon fixed, visionOS removed from build targets. See § Build 32, § Build 34.)*
+*Last updated: July 12, 2026 (Build 35 tvOS / 36 iOS — Reseller panel series fully working: stream server detection, credential extraction from movie stream_url, duplicate series fallback, .m3u8 forced for HLS-only panels. Stremio series episode fetch fixed (IMDB ID at import time). See § Build 35/36.)*
