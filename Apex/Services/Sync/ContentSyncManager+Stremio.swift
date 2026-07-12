@@ -14,6 +14,11 @@ extension ContentSyncManager {
 
     // MARK: - Entry point
 
+    /// The official Stremio catalog addon — provides movie/series browsing.
+    /// Used automatically when a stream-only addon (AIOStreams, Torrentio) is
+    /// added, so the user has content to browse + play via their stream addon.
+    private static let cinemetaBaseURL = URL(string: "https://v3-cinemeta.strem.io")!
+
     func performStremioSync(playlist: Playlist, playlistId: UUID, progress: SyncProgress?) async throws {
         let client = StremioClient()
         guard let base = StremioURL.normalize(playlist.serverURL) else {
@@ -31,23 +36,41 @@ extension ContentSyncManager {
         playlist.name = manifest.name
         try ctx.save()
 
-        // Stream-only addons (Torrentio, etc.) have no catalogs — sync is instant.
-        guard manifest.hasCatalogs, !manifest.catalogs.isEmpty else {
-            Logger.database.info("Stremio addon '\(manifest.name, privacy: .public)' has no catalogs — stream-only addon, sync complete")
-            return
+        // Determine catalog source: use the addon's own catalogs if it has them,
+        // otherwise use Cinemeta (the standard Stremio catalog) so stream-only
+        // addons (AIOStreams, Torrentio) still have browsable content.
+        let catalogBase: URL
+        let catalogs: [StremioCatalogDef]
+
+        if manifest.hasCatalogs, !manifest.catalogs.isEmpty {
+            // Addon has its own catalog — use it directly
+            catalogBase = base
+            catalogs = manifest.catalogs
+            Logger.database.info("Stremio addon '\(manifest.name, privacy: .public)' has \(manifest.catalogs.count) catalogs")
+        } else {
+            // Stream-only addon — fetch Cinemeta catalog for browsing
+            Logger.database.info("Stremio addon '\(manifest.name, privacy: .public)' is stream-only — using Cinemeta catalog for browsing")
+            do {
+                let cinemetaManifest = try await client.fetchManifest(baseURL: Self.cinemetaBaseURL)
+                catalogBase = Self.cinemetaBaseURL
+                catalogs = cinemetaManifest.catalogs
+            } catch {
+                Logger.database.warning("Stremio Cinemeta fetch failed: \(error.localizedDescription, privacy: .public) — no catalog available")
+                return
+            }
         }
 
         var seenMovieIDs = Set<String>()
         var seenSeriesIDs = Set<String>()
         var seenChannelIDs = Set<String>()
 
-        for catalog in manifest.catalogs {
+        for catalog in catalogs {
             guard !Task.isCancelled else { break }
             let ct = catalog.type
 
             let all: [StremioMetaPreview]
             do {
-                all = try await client.fetchAllCatalog(baseURL: base, type: ct, catalogId: catalog.id)
+                all = try await client.fetchAllCatalog(baseURL: catalogBase, type: ct, catalogId: catalog.id)
             } catch {
                 Logger.database.warning("Stremio catalog '\(catalog.name, privacy: .public)' (\(ct, privacy: .public)) failed: \(error.localizedDescription, privacy: .public)")
                 continue
