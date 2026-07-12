@@ -205,12 +205,6 @@ struct SettingsView: View {
                     } label: {
                         Label("Add Playlist", systemImage: canAddPlaylist ? "plus" : "crown")
                     }
-
-                    NavigationLink {
-                        StremioAddonBrowserView()
-                    } label: {
-                        Label("Stremio Addons", systemImage: "puzzlepiece.extension")
-                    }
                 }
             } header: {
                 Text("Playlists")
