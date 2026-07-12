@@ -7,11 +7,20 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		7F5135413003C99400510C34 /* TVServices.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7F5135403003C99400510C34 /* TVServices.framework */; };
+		7F5135483003C99400510C34 /* TopShelfExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 7F51353E3003C99400510C34 /* TopShelfExtension.appex */; platformFilters = (tvos, ); settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		C66C81672FC5A59D0048468D /* KSPlayer in Frameworks */ = {isa = PBXBuildFile; productRef = C66C81682FC5A59D0048468D /* KSPlayer */; };
 		C6FF000A2FC5A59D00484601 /* VLCKitSPM in Frameworks */ = {isa = PBXBuildFile; productRef = C6FF000B2FC5A59D00484602 /* VLCKitSPM */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
+		7F5135463003C99400510C34 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = C67C02B82F880F2200842DBA /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 7F51353D3003C99400510C34;
+			remoteInfo = TopShelfExtension;
+		};
 		C67C02D22F880F2400842DBA /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = C67C02B82F880F2200842DBA /* Project object */;
@@ -28,7 +37,23 @@
 		};
 /* End PBXContainerItemProxy section */
 
+/* Begin PBXCopyFilesBuildPhase section */
+		7F5135493003C99400510C34 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				7F5135483003C99400510C34 /* TopShelfExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
+		7F51353E3003C99400510C34 /* TopShelfExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = TopShelfExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		7F5135403003C99400510C34 /* TVServices.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = TVServices.framework; path = Library/Frameworks/TVServices.framework; sourceTree = DEVELOPER_DIR; };
 		C6339AC72FE20238008DDD93 /* Apex.storekit */ = {isa = PBXFileReference; lastKnownFileType = text; path = Apex.storekit; sourceTree = "<group>"; };
 		C67C02C02F880F2200842DBA /* Apex.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Apex.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C67C02D12F880F2400842DBA /* ApexTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ApexTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -36,6 +61,13 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		7F51354E3003C99400510C34 /* Exceptions for "TopShelfExtension" folder in "TopShelfExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 7F51353D3003C99400510C34 /* TopShelfExtension */;
+		};
 		C67C02E32F880F2400842DBA /* Exceptions for "Apex" folder in "Apex" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
@@ -46,6 +78,14 @@
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		7F5135423003C99400510C34 /* TopShelfExtension */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				7F51354E3003C99400510C34 /* Exceptions for "TopShelfExtension" folder in "TopShelfExtension" target */,
+			);
+			path = TopShelfExtension;
+			sourceTree = "<group>";
+		};
 		C67C02C22F880F2200842DBA /* Apex */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
@@ -67,6 +107,14 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		7F51353B3003C99400510C34 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				7F5135413003C99400510C34 /* TVServices.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		C67C02BD2F880F2200842DBA /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -93,6 +141,14 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		7F51353F3003C99400510C34 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				7F5135403003C99400510C34 /* TVServices.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
 		C67C02B72F880F2200842DBA = {
 			isa = PBXGroup;
 			children = (
@@ -100,6 +156,8 @@
 				C67C02C22F880F2200842DBA /* Apex */,
 				C67C02D42F880F2400842DBA /* ApexTests */,
 				C67C02DE2F880F2400842DBA /* ApexUITests */,
+				7F5135423003C99400510C34 /* TopShelfExtension */,
+				7F51353F3003C99400510C34 /* Frameworks */,
 				C67C02C12F880F2200842DBA /* Products */,
 			);
 			sourceTree = "<group>";
@@ -110,6 +168,7 @@
 				C67C02C02F880F2200842DBA /* Apex.app */,
 				C67C02D12F880F2400842DBA /* ApexTests.xctest */,
 				C67C02DB2F880F2400842DBA /* ApexUITests.xctest */,
+				7F51353E3003C99400510C34 /* TopShelfExtension.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -117,6 +176,28 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		7F51353D3003C99400510C34 /* TopShelfExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 7F51354D3003C99400510C34 /* Build configuration list for PBXNativeTarget "TopShelfExtension" */;
+			buildPhases = (
+				7F51353A3003C99400510C34 /* Sources */,
+				7F51353B3003C99400510C34 /* Frameworks */,
+				7F51353C3003C99400510C34 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				7F5135423003C99400510C34 /* TopShelfExtension */,
+			);
+			name = TopShelfExtension;
+			packageProductDependencies = (
+			);
+			productName = TopShelfExtension;
+			productReference = 7F51353E3003C99400510C34 /* TopShelfExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 		C67C02BF2F880F2200842DBA /* Apex */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = C67C02E42F880F2400842DBA /* Build configuration list for PBXNativeTarget "Apex" */;
@@ -125,11 +206,13 @@
 				C67C02BC2F880F2200842DBA /* Sources */,
 				C67C02BD2F880F2200842DBA /* Frameworks */,
 				C67C02BE2F880F2200842DBA /* Resources */,
+				7F5135493003C99400510C34 /* Embed Foundation Extensions */,
 				C6FEED020000000000000002 /* Inject .env secrets */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				7F5135473003C99400510C34 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				C67C02C22F880F2200842DBA /* Apex */,
@@ -196,9 +279,12 @@
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
-				LastSwiftUpdateCheck = 2640;
+				LastSwiftUpdateCheck = 2660;
 				LastUpgradeCheck = 2640;
 				TargetAttributes = {
+					7F51353D3003C99400510C34 = {
+						CreatedOnToolsVersion = 26.6;
+					};
 					C67C02BF2F880F2200842DBA = {
 						CreatedOnToolsVersion = 26.4;
 					};
@@ -241,11 +327,19 @@
 				C67C02BF2F880F2200842DBA /* Apex */,
 				C67C02D02F880F2400842DBA /* ApexTests */,
 				C67C02DA2F880F2400842DBA /* ApexUITests */,
+				7F51353D3003C99400510C34 /* TopShelfExtension */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		7F51353C3003C99400510C34 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		C67C02BE2F880F2200842DBA /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -299,7 +393,6 @@
 			);
 			inputPaths = (
 				"$(SRCROOT)/.env",
-				"$(TARGET_BUILD_DIR)/$(INFOPLIST_PATH)",
 			);
 			name = "Inject .env secrets";
 			outputFileListPaths = (
@@ -313,6 +406,13 @@
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		7F51353A3003C99400510C34 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		C67C02BC2F880F2200842DBA /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -337,6 +437,12 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		7F5135473003C99400510C34 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			platformFilters = (tvos, );
+			target = 7F51353D3003C99400510C34 /* TopShelfExtension */;
+			targetProxy = 7F5135463003C99400510C34 /* PBXContainerItemProxy */;
+		};
 		C67C02D32F880F2400842DBA /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = C67C02BF2F880F2200842DBA /* Apex */;
@@ -350,6 +456,102 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		7F51354A3003C99400510C34 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = VS7D6GB238;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = TopShelfExtension/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = TopShelfExtension;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.streaminfinity.apex.TopShelfExtension;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = appletvos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 3;
+				TVOS_DEPLOYMENT_TARGET = 26.5;
+			};
+			name = Debug;
+		};
+		7F51354B3003C99400510C34 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = VS7D6GB238;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = TopShelfExtension/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = TopShelfExtension;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.streaminfinity.apex.TopShelfExtension;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = appletvos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 3;
+				TVOS_DEPLOYMENT_TARGET = 26.5;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		7F51354C3003C99400510C34 /* Sideload */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = VS7D6GB238;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = TopShelfExtension/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = TopShelfExtension;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.streaminfinity.apex.TopShelfExtension;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = appletvos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 3;
+				TVOS_DEPLOYMENT_TARGET = 26.5;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Sideload;
+		};
 		C67C02E52F880F2400842DBA /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -358,7 +560,7 @@
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
 				CODE_SIGN_ENTITLEMENTS = Apex/Apex.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 28;
+				CURRENT_PROJECT_VERSION = 32;
 				DEVELOPMENT_TEAM = VS7D6GB238;
 				ENABLE_APP_SANDBOX = YES;
 				"ENABLE_APP_SANDBOX[sdk=macosx*]" = YES;
@@ -408,7 +610,7 @@
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
 				CODE_SIGN_ENTITLEMENTS = "Apex/Apex-Release.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 28;
+				CURRENT_PROJECT_VERSION = 32;
 				DEVELOPMENT_TEAM = VS7D6GB238;
 				ENABLE_APP_SANDBOX = YES;
 				"ENABLE_APP_SANDBOX[sdk=macosx*]" = YES;
@@ -506,7 +708,7 @@
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
-				ONLY_ACTIVE_ARCH = YES;
+				ONLY_ACTIVE_ARCH = NO;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 			};
@@ -562,6 +764,7 @@
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
 				SWIFT_COMPILATION_MODE = wholemodule;
 			};
 			name = Release;
@@ -731,7 +934,7 @@
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
 				CODE_SIGN_ENTITLEMENTS = "Apex/Apex-Release.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 28;
+				CURRENT_PROJECT_VERSION = 32;
 				DEVELOPMENT_TEAM = VS7D6GB238;
 				ENABLE_APP_SANDBOX = YES;
 				"ENABLE_APP_SANDBOX[sdk=macosx*]" = NO;
@@ -827,6 +1030,16 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		7F51354D3003C99400510C34 /* Build configuration list for PBXNativeTarget "TopShelfExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				7F51354A3003C99400510C34 /* Debug */,
+				7F51354B3003C99400510C34 /* Release */,
+				7F51354C3003C99400510C34 /* Sideload */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		C67C02BB2F880F2200842DBA /* Build configuration list for PBXProject "Apex" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
