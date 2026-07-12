@@ -25,6 +25,8 @@ extension ContentSyncManager {
             throw StremioError.invalidURL
         }
 
+        // Step 1: Fetch manifest (shown as "Downloading playlist")
+        await progress?.start(.playlistDownload)
         let ctx = ModelContext(modelContainer)
         let manifest: StremioManifest
         do {
@@ -35,6 +37,8 @@ extension ContentSyncManager {
         }
         playlist.name = manifest.name
         try ctx.save()
+        await progress?.update(detail: manifest.name, fraction: 1)
+        await progress?.complete(.playlistDownload)
 
         // Determine catalog source: use the addon's own catalogs if it has them,
         // otherwise use Cinemeta (the standard Stremio catalog) so stream-only
@@ -64,9 +68,15 @@ extension ContentSyncManager {
         var seenSeriesIDs = Set<String>()
         var seenChannelIDs = Set<String>()
 
-        for catalog in catalogs {
+        // Step 2: Import catalogs (shown as "Importing content")
+        await progress?.start(.playlistImport)
+        let totalCatalogs = catalogs.count
+
+        for (catalogIndex, catalog) in catalogs.enumerated() {
             guard !Task.isCancelled else { break }
             let ct = catalog.type
+            let fraction = Double(catalogIndex) / Double(max(totalCatalogs, 1))
+            await progress?.update(detail: catalog.name, fraction: fraction)
 
             let all: [StremioMetaPreview]
             do {
@@ -127,9 +137,11 @@ extension ContentSyncManager {
             try batchCtx.save()
         }
 
+        await progress?.update(detail: "Cleaning up", fraction: 1)
         pruneStaleMovies(playlistId: playlistId, seenIds: seenMovieIDs)
         pruneStaleSeries(playlistId: playlistId, seenIds: seenSeriesIDs)
         pruneStaleLiveStreams(playlistId: playlistId, seenIds: seenChannelIDs)
+        await progress?.complete(.playlistImport)
     }
 
     // MARK: - Import helpers
