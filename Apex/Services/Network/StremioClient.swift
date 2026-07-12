@@ -139,7 +139,8 @@ final class StremioClient {
         }
     }
 
-    /// Fetches all pages of a catalog until exhausted.
+    /// Fetches all pages of a catalog until exhausted. Guards against addons
+    /// that return repeating data (pagination loops) or hang indefinitely.
     func fetchAllCatalog(
         baseURL: URL,
         type: String,
@@ -148,11 +149,30 @@ final class StremioClient {
     ) async throws -> [StremioMetaPreview] {
         var all: [StremioMetaPreview] = []
         var skip = 0
-        while all.count < maxItems {
-            let page = try await fetchCatalog(baseURL: baseURL, type: type, catalogId: catalogId, skip: skip)
+        var maxPages = 20 // Safety cap — no catalog should need 20+ pages
+        var previousCount = 0
+        while all.count < maxItems, maxPages > 0 {
+            maxPages -= 1
+            let page: StremioCatalog
+            do {
+                page = try await fetchCatalog(baseURL: baseURL, type: type, catalogId: catalogId, skip: skip)
+            } catch {
+                // If the first page fails, propagate the error. If a later page
+                // fails (e.g. addon doesn't support pagination), return what we have.
+                if all.isEmpty { throw error }
+                break
+            }
             if page.metas.isEmpty { break }
             all.append(contentsOf: page.metas)
+            // Guard against addons that always return the same page regardless
+            // of skip value (infinite loop). If count didn't grow, stop.
+            if all.count == previousCount { break }
+            previousCount = all.count
             skip += page.metas.count
+            // Many addons don't support pagination and return the same first page
+            // for any skip value. If the page size is suspiciously small after the
+            // first request or if we got what looks like a complete catalog, stop.
+            if page.metas.count < 20, skip > 0 { break }
         }
         return all
     }

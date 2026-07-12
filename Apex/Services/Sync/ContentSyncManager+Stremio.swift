@@ -7,6 +7,7 @@
 //
 
 import Foundation
+import OSLog
 import SwiftData
 
 extension ContentSyncManager {
@@ -20,11 +21,21 @@ extension ContentSyncManager {
         }
 
         let ctx = ModelContext(modelContainer)
-        let manifest = try await client.fetchManifest(baseURL: base)
+        let manifest: StremioManifest
+        do {
+            manifest = try await client.fetchManifest(baseURL: base)
+        } catch {
+            Logger.database.error("Stremio manifest fetch failed: \(error.localizedDescription, privacy: .public)")
+            throw error
+        }
         playlist.name = manifest.name
         try ctx.save()
 
-        guard manifest.hasCatalogs else { return }
+        // Stream-only addons (Torrentio, etc.) have no catalogs — sync is instant.
+        guard manifest.hasCatalogs, !manifest.catalogs.isEmpty else {
+            Logger.database.info("Stremio addon '\(manifest.name, privacy: .public)' has no catalogs — stream-only addon, sync complete")
+            return
+        }
 
         var seenMovieIDs = Set<String>()
         var seenSeriesIDs = Set<String>()
@@ -38,8 +49,12 @@ extension ContentSyncManager {
             do {
                 all = try await client.fetchAllCatalog(baseURL: base, type: ct, catalogId: catalog.id)
             } catch {
+                Logger.database.warning("Stremio catalog '\(catalog.name, privacy: .public)' (\(ct, privacy: .public)) failed: \(error.localizedDescription, privacy: .public)")
                 continue
             }
+
+            guard !all.isEmpty else { continue }
+            Logger.database.info("Stremio catalog '\(catalog.name, privacy: .public)' returned \(all.count) items")
 
             let batchCtx = ModelContext(modelContainer)
             switch ct {
