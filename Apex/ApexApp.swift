@@ -222,6 +222,9 @@ struct ApexApp: App {
                     ContentIndexingService.shared.configure(container: catalogContainer)
                     #if os(tvOS)
                     ContentIndexingService.shared.kick(after: .seconds(30))
+                    // Update Top Shelf content on launch so the extension has
+                    // fresh data even without a new sync.
+                    TopShelfDataWriter.update(container: catalogContainer)
                     #else
                     // Defer so the first Home paint (hero + rows) isn't fighting
                     // TMDB enrichment saves that merge into every @Query.

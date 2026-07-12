@@ -6,6 +6,7 @@
 //  when the app is on the top row of the home screen.
 //
 
+import SwiftData
 import SwiftUI
 
 #if os(tvOS)
@@ -13,6 +14,8 @@ import SwiftUI
 struct TopShelfSettingsView: View {
     @AppStorage(TopShelfSettings.contentModeKey, store: UserDefaults(suiteName: TopShelfSettings.appGroupID))
     private var selectedMode: String = TopShelfSettings.ContentMode.recentlyWatched.rawValue
+
+    @Environment(\.modelContext) private var modelContext
 
     var body: some View {
         ScrollView {
@@ -70,11 +73,8 @@ struct TopShelfSettingsView: View {
     }
 
     private func notifyExtension() {
-        // Trigger the extension to refresh its content
-        Task {
-            try? await Task.sleep(for: .milliseconds(500))
-            // The extension will pick up the new mode on next launch/refresh
-        }
+        // Write fresh data immediately when the user changes the setting
+        TopShelfDataWriter.update(container: modelContext.container)
     }
 }
 
