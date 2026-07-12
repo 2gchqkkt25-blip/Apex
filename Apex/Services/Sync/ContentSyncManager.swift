@@ -526,8 +526,21 @@ actor ContentSyncManager {
     private func fetchXtreamEpisodes(seriesId: Int, seriesElementId: String, playlist: Playlist) async throws -> [ParsedEpisode] {
         Logger.database.warning("fetchXtreamEpisodes — seriesId=\(seriesId) playlist=\(playlist.serverURL, privacy: .public)")
         let seriesInfo = try await xtreamClient.getSeriesInfo(playlist: playlist, seriesId: seriesId)
-        guard let episodesDict = seriesInfo.episodes else {
-            Logger.database.warning("fetchXtreamEpisodes — seriesInfo.episodes is nil")
+        var episodesDict = seriesInfo.episodes ?? [:]
+
+        // Reseller panels often have duplicate series entries across categories
+        // (e.g. "Silo" in Sci-Fi with episodes, "Silo (2023)" in Apple TV+ empty).
+        // When the primary entry has no episodes, search for an alternate entry
+        // with the same name that does have episodes.
+        if episodesDict.isEmpty {
+            Logger.database.warning("fetchXtreamEpisodes — 0 episodes, searching for alternate entry")
+            if let altDict = await findAlternateEpisodes(seriesId: seriesId, seriesElementId: seriesElementId, playlist: playlist) {
+                episodesDict = altDict
+            }
+        }
+
+        guard !episodesDict.isEmpty else {
+            Logger.database.warning("fetchXtreamEpisodes — no episodes found (primary or alternate)")
             return []
         }
         Logger.database.warning("fetchXtreamEpisodes — got \(episodesDict.count) seasons")
@@ -631,6 +644,50 @@ actor ContentSyncManager {
 
         Logger.database.warning("resolveStreamServer — detected reseller panel. Server: \(base, privacy: .public) user: \(username, privacy: .public)")
         return StreamServerInfo(base: base, username: username, password: password)
+    }
+
+    /// Searches for an alternate series entry with the same name that has episodes.
+    /// Common with reseller panels that duplicate series across categories (one with
+    /// data, one empty).
+    private func findAlternateEpisodes(seriesId: Int, seriesElementId: String, playlist: Playlist) async -> [String: [XtreamEpisode]]? {
+        // Find the series name from our local store
+        let context = ModelContext(modelContainer)
+        context.autosaveEnabled = false
+        guard let series = try? context.fetch(
+            FetchDescriptor<Series>(predicate: #Predicate { $0.id == seriesElementId })
+        ).first else { return nil }
+
+        // Clean the name for comparison: strip year suffixes like "(2023)"
+        let baseName = series.name
+            .replacingOccurrences(of: #"\s*\(\d{4}\)\s*$"#, with: "", options: .regularExpression)
+            .trimmingCharacters(in: .whitespaces)
+            .lowercased()
+        guard !baseName.isEmpty else { return nil }
+
+        // Find other series in the same playlist with a matching base name
+        let playlistPrefix = playlist.id.uuidString
+        let allSeries = (try? context.fetch(
+            FetchDescriptor<Series>(predicate: #Predicate { $0.id.localizedStandardContains(playlistPrefix) })
+        )) ?? []
+
+        let candidates = allSeries.filter { candidate in
+            guard candidate.seriesId != seriesId else { return false }
+            let candidateName = candidate.name
+                .replacingOccurrences(of: #"\s*\(\d{4}\)\s*$"#, with: "", options: .regularExpression)
+                .trimmingCharacters(in: .whitespaces)
+                .lowercased()
+            return candidateName == baseName
+        }
+
+        // Try each candidate's series info until we find one with episodes
+        for candidate in candidates {
+            if let info = try? await xtreamClient.getSeriesInfo(playlist: playlist, seriesId: candidate.seriesId),
+               let eps = info.episodes, !eps.isEmpty {
+                Logger.database.warning("fetchXtreamEpisodes — found alternate entry (id=\(candidate.seriesId)) with \(eps.values.flatMap{$0}.count) episodes")
+                return eps
+            }
+        }
+        return nil
     }
 
     /// Reduces a raw Xtream episode title to just the episode name.
