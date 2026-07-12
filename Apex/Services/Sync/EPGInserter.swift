@@ -43,37 +43,26 @@ nonisolated enum EPGInserter {
     ) -> Result {
         let effectiveTZ = XMLTVDate.resolveWallClockTimezone(server: timezone, detected: nil)
 
-        var activeCatalog = catalog
-        var channelTableSize = 0
-
         // Log sample playlist channel names for debugging EPG matching.
         let sampleNames = identities.prefix(5).map { "\($0.name) [epgId=\($0.epgChannelId ?? "nil")]" }
         Logger.database.warning("EPG playlist sample channels: \(sampleNames.joined(separator: ", "), privacy: .public)")
 
-        if let channelFile = XMLTVChannelDiskCache.collect(
-            fileURL: fileURL,
-            catalog: catalog,
-            identities: identities
-        ) {
-            defer { try? FileManager.default.removeItem(at: channelFile) }
-            let index = XMLTVChannelDiskCache.loadIndex(from: channelFile)
-            channelTableSize = index.idToDisplayNames.count
-            activeCatalog = catalog.enriching(with: index, identities: identities)
-            Logger.database.warning(
-                "EPG XMLTV import — \(fileSize) bytes, channel aliases: \(channelTableSize), server tz: \(timezone?.identifier ?? "nil", privacy: .public), effective tz: \(effectiveTZ.identifier, privacy: .public)"
-            )
-        } else {
-            Logger.database.warning(
-                "EPG XMLTV import — \(fileSize) bytes, direct id match, server tz: \(timezone?.identifier ?? "nil", privacy: .public), effective tz: \(effectiveTZ.identifier, privacy: .public)"
-            )
-        }
+        // Single-pass import: the XMLTVGuideImporter handles <channel> elements
+        // inline (building display-name aliases on the fly) while simultaneously
+        // parsing <programme> elements. This halves parse time vs the old two-pass
+        // approach (separate channel-collect pass + programme pass) — critical for
+        // large provider xmltv.php files (50-200MB) where each SAX pass takes
+        // 30-90 seconds on an iPhone. Other IPTV apps do single-pass.
+        Logger.database.warning(
+            "EPG XMLTV import — \(fileSize) bytes, single-pass, server tz: \(timezone?.identifier ?? "nil", privacy: .public), effective tz: \(effectiveTZ.identifier, privacy: .public)"
+        )
 
         return importProgrammes(
             fileURL: fileURL,
             container: container,
-            catalog: activeCatalog,
+            catalog: catalog,
             identities: identities,
-            channelTableSize: channelTableSize,
+            channelTableSize: 0,
             serverTimezone: timezone,
             effectiveTimezone: effectiveTZ,
             alignLatestToNow: alignLatestToNow,
