@@ -209,6 +209,14 @@ extension ContentSyncManager {
             series.genre = meta.genres?.joined(separator: ", ")
             series.categoryId = categoryId
             series.num = 0
+            // Store the original Stremio meta ID (usually IMDB like "tt1234567")
+            // so fetchStremioEpisodes can use it immediately without waiting for
+            // TMDB enrichment.
+            if meta.id.hasPrefix("tt") {
+                series.imdbId = meta.id
+            } else if meta.id.hasPrefix("tmdb:"), let tmdbNum = Int(meta.id.dropFirst(5)) {
+                series.tmdbId = tmdbNum
+            }
 
             if existing == nil {
                 context.insert(series)
