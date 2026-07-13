@@ -22,12 +22,14 @@ import SwiftUI
 /// A selectable entry in the Live TV category rail. Either a real synced
 /// category or one of the virtual cross-category collections.
 enum LiveTVSection: Identifiable, Hashable {
+    case all
     case favorites
     case recentlyWatched
     case category(Category)
 
     var id: String {
         switch self {
+        case .all: "apex.liveSection.all"
         case .favorites: "apex.liveSection.favorites"
         case .recentlyWatched: "apex.liveSection.recentlyWatched"
         case let .category(category): category.id
@@ -36,6 +38,7 @@ enum LiveTVSection: Identifiable, Hashable {
 
     var scope: LiveChannelScope {
         switch self {
+        case .all: .all
         case .favorites: .favorites
         case .recentlyWatched: .recentlyWatched
         case let .category(category): .category(category.id)
@@ -45,6 +48,7 @@ enum LiveTVSection: Identifiable, Hashable {
     /// SF Symbol shown beside the virtual collections; nil for plain categories.
     var icon: String? {
         switch self {
+        case .all: "rectangle.stack"
         case .favorites: "heart.fill"
         case .recentlyWatched: "clock.arrow.circlepath"
         case .category: nil
@@ -55,6 +59,7 @@ enum LiveTVSection: Identifiable, Hashable {
     /// provider's verbatim strings.
     var titleText: Text {
         switch self {
+        case .all: Text("All Channels")
         case .favorites: Text("Favorites")
         case .recentlyWatched: Text("Recently Watched")
         case let .category(category): Text(category.name)
@@ -65,6 +70,7 @@ enum LiveTVSection: Identifiable, Hashable {
     /// rows that style the label themselves).
     var title: String {
         switch self {
+        case .all: String(localized: "All Channels")
         case .favorites: String(localized: "Favorites")
         case .recentlyWatched: String(localized: "Recently Watched")
         case let .category(category): category.name
@@ -73,7 +79,7 @@ enum LiveTVSection: Identifiable, Hashable {
 
     var isVirtual: Bool {
         switch self {
-        case .favorites, .recentlyWatched: true
+        case .all, .favorites, .recentlyWatched: true
         case .category: false
         }
     }
@@ -83,6 +89,8 @@ enum LiveTVSection: Identifiable, Hashable {
 
 /// What a Live TV channel list / guide should show.
 enum LiveChannelScope: Hashable {
+    /// Every channel in the active playlist (all categories combined).
+    case all
     /// Channels in a single synced category (carries the category id).
     case category(String)
     /// Every favorited channel in the active playlist.
@@ -111,6 +119,15 @@ enum LiveChannelQuery {
     /// lazily through SwiftData's faulting mechanism.
     static func descriptor(for scope: LiveChannelScope, sort: ContentSortOption) -> FetchDescriptor<LiveStream> {
         switch scope {
+        case .all:
+            // All channels across all categories — sorted by the user's choice.
+            // Capped at 200 to prevent memory issues on large playlists.
+            var descriptor = FetchDescriptor<LiveStream>(
+                predicate: #Predicate { $0.isHidden == false },
+                sortBy: sort.liveStreamDescriptors
+            )
+            descriptor.fetchLimit = 200
+            return descriptor
         case let .category(categoryId):
             var descriptor = FetchDescriptor<LiveStream>(
                 predicate: #Predicate { $0.categoryId == categoryId && $0.isHidden == false },
@@ -156,7 +173,7 @@ enum LiveChannelQuery {
         switch scope {
         case .category:
             streams
-        case .favorites, .recentlyWatched:
+        case .all, .favorites, .recentlyWatched:
             streams.filter { $0.id.hasPrefix(playlistPrefix) }
         }
     }

@@ -48,7 +48,15 @@ enum LiveChannelNavigator {
 
         let streams: [LiveStream]
 
-        if let scope, case .favorites = scope {
+        if let scope, case .all = scope {
+            // Surf within all channels
+            var descriptor = FetchDescriptor<LiveStream>(
+                predicate: #Predicate { $0.isHidden == false },
+                sortBy: sort.liveStreamDescriptors
+            )
+            descriptor.fetchLimit = 200
+            streams = (try? context.fetch(descriptor)) ?? []
+        } else if let scope, case .favorites = scope {
             // Surf within favorites only
             let descriptor = FetchDescriptor<LiveStream>(
                 predicate: #Predicate { $0.isFavorite && $0.isHidden == false },

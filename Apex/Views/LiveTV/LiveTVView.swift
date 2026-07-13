@@ -345,6 +345,7 @@ struct LiveTVView: View {
     /// the synced categories.
     private var sortedSections: [LiveTVSection] {
         var sections: [LiveTVSection] = []
+        sections.append(.all)
         if hasFavorites { sections.append(.favorites) }
         if hasRecents { sections.append(.recentlyWatched) }
         sections.append(contentsOf: sortedCategories.map(LiveTVSection.category))
