@@ -432,7 +432,7 @@ struct LoginView: View {
                     insertAndFinish(playlist)
                 }
             } catch {
-                errorMessage = error.localizedDescription
+                errorMessage = Self.verboseError(error, context: "Xtream login to \(serverURL)")
                 isLoading = false
             }
         }
@@ -457,7 +457,7 @@ struct LoginView: View {
                     insertAndFinish(playlist)
                 }
             } catch {
-                errorMessage = error.localizedDescription
+                errorMessage = Self.verboseError(error, context: "M3U validation of \(urlString)")
                 isLoading = false
             }
         }
@@ -490,7 +490,7 @@ struct LoginView: View {
                     insertAndFinish(playlist)
                 }
             } catch {
-                errorMessage = error.localizedDescription
+                errorMessage = Self.verboseError(error, context: "Stalker portal \(portal)")
                 isLoading = false
             }
         }
@@ -516,7 +516,7 @@ struct LoginView: View {
                 playlist.name = manifest.name
                 insertAndFinish(playlist)
             } catch {
-                errorMessage = error.localizedDescription
+                errorMessage = Self.verboseError(error, context: "Stremio manifest \(url)")
                 isLoading = false
             }
         }
@@ -542,6 +542,47 @@ struct LoginView: View {
         if isModal {
             dismiss()
         }
+    }
+
+    // MARK: - Verbose Error Formatting
+
+    /// Produces a detailed, user-readable error message that includes the
+    /// underlying cause. Users can screenshot this and send it for support
+    /// without needing Xcode or Console.app.
+    private static func verboseError(_ error: Error, context: String) -> String {
+        let base: String
+        if let urlError = error as? URLError {
+            switch urlError.code {
+            case .timedOut:
+                base = "Connection timed out. The server didn't respond within 15 seconds."
+            case .cannotConnectToHost:
+                base = "Can't connect to server. Check the URL and make sure the server is online."
+            case .notConnectedToInternet:
+                base = "No internet connection. Check your Wi-Fi or cellular data."
+            case .cannotFindHost:
+                base = "Server not found. The URL may be incorrect (check for typos)."
+            case .secureConnectionFailed:
+                base = "SSL/TLS error. The server's certificate is invalid or expired."
+            case .networkConnectionLost:
+                base = "Connection lost during the request. Try again."
+            default:
+                base = "Network error: \(urlError.localizedDescription) (code \(urlError.code.rawValue))"
+            }
+        } else if let xtreamError = error as? XtreamError {
+            switch xtreamError {
+            case .invalidURL:
+                base = "Invalid server URL. Make sure it starts with http:// or https:// and includes the port."
+            case .serverError(let code):
+                base = "Server returned HTTP \(code). \(code == 403 ? "Access denied — check credentials or IP restrictions." : code == 404 ? "API endpoint not found — check the URL." : "Server error.")"
+            case .decodingError:
+                base = "Server response wasn't valid JSON. The URL may not be an Xtream-compatible panel."
+            default:
+                base = xtreamError.localizedDescription
+            }
+        } else {
+            base = error.localizedDescription
+        }
+        return "\(base)\n\n[\(context)]"
     }
 }
 
