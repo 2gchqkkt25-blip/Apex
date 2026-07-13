@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Apex — Playlist Tester</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0d0d1a;
+            color: #e0e0e0;
+            padding: 24px;
+            min-height: 100vh;
+        }
+        .container { max-width: 700px; margin: 0 auto; }
+        h1 {
+            font-size: 28px;
+            background: linear-gradient(135deg, #6B7AFF, #A855F7);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 8px;
+        }
+        .subtitle { color: #888; margin-bottom: 32px; font-size: 14px; }
+        .form-group { margin-bottom: 16px; }
+        label { display: block; font-size: 13px; color: #aaa; margin-bottom: 6px; font-weight: 500; }
+        input, select {
+            width: 100%;
+            padding: 12px 16px;
+            background: #1a1a2e;
+            border: 1px solid #333;
+            border-radius: 8px;
+            color: #fff;
+            font-size: 15px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        input:focus, select:focus { border-color: #6B7AFF; }
+        input::placeholder { color: #555; }
+        .row { display: flex; gap: 12px; }
+        .row .form-group { flex: 1; }
+        button {
+            width: 100%;
+            padding: 14px;
+            background: linear-gradient(135deg, #6B7AFF, #A855F7);
+            border: none;
+            border-radius: 8px;
+            color: #fff;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            margin-top: 8px;
+            transition: opacity 0.2s;
+        }
+        button:hover { opacity: 0.9; }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+        .results {
+            margin-top: 32px;
+            background: #1a1a2e;
+            border-radius: 12px;
+            padding: 24px;
+            display: none;
+        }
+        .results.visible { display: block; }
+        .result-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 16px;
+        }
+        .status-dot {
+            width: 12px; height: 12px;
+            border-radius: 50%;
+        }
+        .status-dot.success { background: #22c55e; }
+        .status-dot.error { background: #ef4444; }
+        .status-dot.warning { background: #f59e0b; }
+        .result-title { font-size: 18px; font-weight: 600; }
+        .result-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin-top: 16px;
+        }
+        .result-card {
+            background: #0d0d1a;
+            border-radius: 8px;
+            padding: 14px;
+        }
+        .result-card .label { font-size: 12px; color: #888; margin-bottom: 4px; }
+        .result-card .value { font-size: 16px; font-weight: 500; }
+        .result-card .value.green { color: #22c55e; }
+        .result-card .value.red { color: #ef4444; }
+        .result-card .value.yellow { color: #f59e0b; }
+        .log {
+            margin-top: 16px;
+            font-family: 'SF Mono', Monaco, monospace;
+            font-size: 12px;
+            background: #0d0d1a;
+            border-radius: 8px;
+            padding: 14px;
+            max-height: 200px;
+            overflow-y: auto;
+            line-height: 1.6;
+        }
+        .log-line { margin-bottom: 2px; }
+        .log-line.ok { color: #22c55e; }
+        .log-line.err { color: #ef4444; }
+        .log-line.warn { color: #f59e0b; }
+        .log-line.info { color: #888; }
+        .type-picker { margin-bottom: 16px; display: flex; gap: 8px; }
+        .type-btn {
+            flex: 1; padding: 10px; text-align: center;
+            background: #1a1a2e; border: 1px solid #333; border-radius: 8px;
+            color: #aaa; cursor: pointer; font-size: 13px; font-weight: 500;
+            transition: all 0.2s;
+        }
+        .type-btn.active { border-color: #6B7AFF; color: #fff; background: #6B7AFF22; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Apex Playlist Tester</h1>
+        <p class="subtitle">Test if a user's playlist credentials work with Apex before troubleshooting.</p>
+
+        <div class="type-picker">
+            <div class="type-btn active" data-type="xtream" onclick="setType('xtream')">Xtream</div>
+            <div class="type-btn" data-type="m3u" onclick="setType('m3u')">M3U</div>
+            <div class="type-btn" data-type="stalker" onclick="setType('stalker')">Stalker</div>
+        </div>
+
+        <div id="xtream-fields">
+            <div class="form-group">
+                <label>Server URL</label>
+                <input type="url" id="server-url" placeholder="http://example.com:8080">
+            </div>
+            <div class="row">
+                <div class="form-group">
+                    <label>Username</label>
+                    <input type="text" id="username" placeholder="username">
+                </div>
+                <div class="form-group">
+                    <label>Password</label>
+                    <input type="text" id="password" placeholder="password">
+                </div>
+            </div>
+        </div>
+
+        <div id="m3u-fields" style="display:none">
+            <div class="form-group">
+                <label>M3U URL</label>
+                <input type="url" id="m3u-url" placeholder="http://example.com/playlist.m3u">
+            </div>
+        </div>
+
+        <div id="stalker-fields" style="display:none">
+            <div class="form-group">
+                <label>Portal URL</label>
+                <input type="url" id="stalker-url" placeholder="http://example.com:8080/c/">
+            </div>
+            <div class="form-group">
+                <label>MAC Address</label>
+                <input type="text" id="mac-address" placeholder="00:1A:79:xx:xx:xx">
+            </div>
+        </div>
+
+        <button id="test-btn" onclick="runTest()">Test Connection</button>
+
+        <div class="results" id="results">
+            <div class="result-header">
+                <div class="status-dot" id="status-dot"></div>
+                <span class="result-title" id="result-title"></span>
+            </div>
+            <div class="result-grid" id="result-grid"></div>
+            <div class="log" id="log"></div>
+        </div>
+    </div>
+
+    <script>
+        let currentType = 'xtream';
+
+        function setType(type) {
+            currentType = type;
+            document.querySelectorAll('.type-btn').forEach(b => b.classList.remove('active'));
+            document.querySelector(`.type-btn[data-type="${type}"]`).classList.add('active');
+            document.getElementById('xtream-fields').style.display = type === 'xtream' ? 'block' : 'none';
+            document.getElementById('m3u-fields').style.display = type === 'm3u' ? 'block' : 'none';
+            document.getElementById('stalker-fields').style.display = type === 'stalker' ? 'block' : 'none';
+        }
+
+        function log(msg, cls = 'info') {
+            const el = document.getElementById('log');
+            el.innerHTML += `<div class="log-line ${cls}">${msg}</div>`;
+            el.scrollTop = el.scrollHeight;
+        }
+
+        function showResults(status, title) {
+            const r = document.getElementById('results');
+            r.classList.add('visible');
+            document.getElementById('status-dot').className = `status-dot ${status}`;
+            document.getElementById('result-title').textContent = title;
+        }
+
+        function addCard(label, value, cls = '') {
+            const grid = document.getElementById('result-grid');
+            grid.innerHTML += `<div class="result-card"><div class="label">${label}</div><div class="value ${cls}">${value}</div></div>`;
+        }
+
+        function clearResults() {
+            document.getElementById('results').classList.remove('visible');
+            document.getElementById('result-grid').innerHTML = '';
+            document.getElementById('log').innerHTML = '';
+        }
+
+        async function runTest() {
+            clearResults();
+            const btn = document.getElementById('test-btn');
+            btn.disabled = true;
+            btn.textContent = 'Testing...';
+
+            try {
+                if (currentType === 'xtream') await testXtream();
+                else if (currentType === 'm3u') await testM3U();
+                else if (currentType === 'stalker') await testStalker();
+            } catch (e) {
+                showResults('error', 'Test Failed');
+                log(`Error: ${e.message}`, 'err');
+            }
+
+            btn.disabled = false;
+            btn.textContent = 'Test Connection';
+        }
+
+        async function testXtream() {
+            const server = document.getElementById('server-url').value.trim().replace(/\/$/, '');
+            const user = document.getElementById('username').value.trim();
+            const pass = document.getElementById('password').value.trim();
+
+            if (!server || !user || !pass) {
+                showResults('error', 'Missing Fields');
+                log('Please fill in server URL, username, and password.', 'err');
+                return;
+            }
+
+            log(`Testing ${server}...`, 'info');
+
+            // Test 1: Server reachable
+            const authUrl = `${server}/player_api.php?username=${encodeURIComponent(user)}&password=${encodeURIComponent(pass)}`;
+            log(`GET ${authUrl}`, 'info');
+
+            let data;
+            try {
+                const resp = await fetch(authUrl);
+                if (!resp.ok) {
+                    showResults('error', `HTTP ${resp.status}`);
+                    log(`Server returned HTTP ${resp.status}`, 'err');
+                    if (resp.status === 403) log('403 = server is blocking this request (IP restriction or wrong credentials)', 'warn');
+                    return;
+                }
+                data = await resp.json();
+                log('Server responded with JSON', 'ok');
+            } catch (e) {
+                showResults('error', 'Connection Failed');
+                log(`Could not reach server: ${e.message}`, 'err');
+                log('Possible causes: server down, wrong URL, CORS blocking (try from terminal instead)', 'warn');
+                return;
+            }
+
+            // Test 2: Auth
+            const userInfo = data.user_info;
+            const serverInfo = data.server_info;
+
+            if (!userInfo || userInfo.auth !== 1) {
+                showResults('error', 'Authentication Failed');
+                log('Server rejected credentials (auth != 1)', 'err');
+                addCard('Auth', 'Failed', 'red');
+                return;
+            }
+
+            log('Authentication successful', 'ok');
+            showResults('success', 'Connection OK');
+
+            addCard('Status', userInfo.status || 'Unknown', userInfo.status === 'Active' ? 'green' : 'red');
+            addCard('Username', user);
+
+            if (userInfo.exp_date) {
+                const exp = new Date(parseInt(userInfo.exp_date) * 1000);
+                const isExpired = exp < new Date();
+                addCard('Expires', exp.toLocaleDateString(), isExpired ? 'red' : 'green');
+                if (isExpired) log('Account is EXPIRED', 'err');
+            }
+
+            if (userInfo.max_connections) addCard('Max Connections', userInfo.max_connections);
+            if (userInfo.active_cons) addCard('Active Connections', userInfo.active_cons);
+
+            if (serverInfo) {
+                addCard('Server', serverInfo.url || 'Unknown');
+                addCard('Protocol', `${serverInfo.server_protocol || 'http'}:${serverInfo.port || '80'}`);
+                if (serverInfo.timezone) addCard('Timezone', serverInfo.timezone);
+            }
+
+            if (userInfo.allowed_output_formats) {
+                addCard('Formats', userInfo.allowed_output_formats.join(', '));
+            }
+
+            // Test 3: Content counts
+            log('Fetching content counts...', 'info');
+            try {
+                const liveResp = await fetch(`${server}/player_api.php?username=${encodeURIComponent(user)}&password=${encodeURIComponent(pass)}&action=get_live_categories`);
+                const liveCats = await liveResp.json();
+                addCard('Live Categories', Array.isArray(liveCats) ? liveCats.length : '?');
+                log(`Live categories: ${Array.isArray(liveCats) ? liveCats.length : 'error'}`, 'ok');
+            } catch (e) { log('Could not fetch live categories', 'warn'); }
+
+            try {
+                const vodResp = await fetch(`${server}/player_api.php?username=${encodeURIComponent(user)}&password=${encodeURIComponent(pass)}&action=get_vod_categories`);
+                const vodCats = await vodResp.json();
+                addCard('VOD Categories', Array.isArray(vodCats) ? vodCats.length : '?');
+                log(`VOD categories: ${Array.isArray(vodCats) ? vodCats.length : 'error'}`, 'ok');
+            } catch (e) { log('Could not fetch VOD categories', 'warn'); }
+
+            try {
+                const serResp = await fetch(`${server}/player_api.php?username=${encodeURIComponent(user)}&password=${encodeURIComponent(pass)}&action=get_series_categories`);
+                const serCats = await serResp.json();
+                addCard('Series Categories', Array.isArray(serCats) ? serCats.length : '?');
+                log(`Series categories: ${Array.isArray(serCats) ? serCats.length : 'error'}`, 'ok');
+            } catch (e) { log('Could not fetch series categories', 'warn'); }
+
+            // Test 4: EPG
+            log('Testing EPG endpoint...', 'info');
+            try {
+                const epgUrl = `${server}/xmltv.php?username=${encodeURIComponent(user)}&password=${encodeURIComponent(pass)}`;
+                const epgResp = await fetch(epgUrl, { method: 'HEAD' });
+                const epgSize = epgResp.headers.get('content-length');
+                if (epgResp.ok) {
+                    const sizeMB = epgSize ? `${(parseInt(epgSize) / 1024 / 1024).toFixed(1)} MB` : 'Available';
+                    addCard('EPG (xmltv.php)', sizeMB, 'green');
+                    log(`EPG endpoint OK (${sizeMB})`, 'ok');
+                } else {
+                    addCard('EPG', `HTTP ${epgResp.status}`, 'yellow');
+                    log(`EPG returned HTTP ${epgResp.status}`, 'warn');
+                }
+            } catch (e) { 
+                addCard('EPG', 'Not available', 'yellow');
+                log('EPG endpoint not reachable', 'warn');
+            }
+
+            log('All tests complete.', 'ok');
+            log('This playlist should work with Apex.', 'ok');
+        }
+
+        async function testM3U() {
+            const url = document.getElementById('m3u-url').value.trim();
+            if (!url) {
+                showResults('error', 'Missing URL');
+                log('Please enter an M3U URL.', 'err');
+                return;
+            }
+            log(`Testing ${url}...`, 'info');
+            try {
+                const resp = await fetch(url, { method: 'HEAD' });
+                if (resp.ok) {
+                    const size = resp.headers.get('content-length');
+                    showResults('success', 'M3U Reachable');
+                    addCard('Status', 'OK', 'green');
+                    if (size) addCard('Size', `${(parseInt(size) / 1024).toFixed(0)} KB`);
+                    addCard('Content-Type', resp.headers.get('content-type') || 'Unknown');
+                    log('M3U URL is reachable and should work with Apex.', 'ok');
+                } else {
+                    showResults('error', `HTTP ${resp.status}`);
+                    log(`Server returned HTTP ${resp.status}`, 'err');
+                }
+            } catch (e) {
+                showResults('error', 'Connection Failed');
+                log(`Could not reach URL: ${e.message}`, 'err');
+            }
+        }
+
+        async function testStalker() {
+            const url = document.getElementById('stalker-url').value.trim();
+            const mac = document.getElementById('mac-address').value.trim();
+            if (!url || !mac) {
+                showResults('error', 'Missing Fields');
+                log('Please enter portal URL and MAC address.', 'err');
+                return;
+            }
+            log(`Testing ${url}...`, 'info');
+            showResults('warning', 'Stalker Test Limited');
+            addCard('Portal URL', url);
+            addCard('MAC', mac);
+            log('Stalker portals require server-side token exchange that cannot be tested from a browser.', 'warn');
+            log('If the portal URL is reachable and the MAC is authorized, it should work with Apex.', 'info');
+
+            try {
+                const resp = await fetch(url, { method: 'HEAD', mode: 'no-cors' });
+                log('Portal URL appears reachable (no-cors check).', 'ok');
+            } catch (e) {
+                log(`Portal may not be reachable: ${e.message}`, 'warn');
+            }
+        }
+    </script>
+</body>
+</html>
