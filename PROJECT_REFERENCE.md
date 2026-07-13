@@ -1435,4 +1435,24 @@ See **What's Been Built → iOS Device — Large Library Fix** above for full de
 
 ---
 
+### Future Integrations (planned, not started)
+
+| Service | Difficulty | Notes |
+|---------|-----------|-------|
+| **Jellyfin** | Medium (~2-3 days) | Start here — open-source, simple API key auth, clean REST API. Fetch libraries → movies/series/episodes. Direct play URLs with auth token. Server handles transcoding. |
+| **Emby** | Medium (~2 days after Jellyfin) | Nearly identical API to Jellyfin (forked from it). Same auth pattern, same library/stream structure. Minimal incremental work. |
+| **Plex** | Medium-Hard (~3-5 days) | Unique PIN-based auth flow (user authorizes on plex.tv, app polls for token). Larger user base. Libraries + direct play similar to Jellyfin once authenticated. |
+
+**Shared approach for all three:**
+- New `PlaylistSourceType` cases (`.jellyfin`, `.emby`, `.plex`)
+- Login flow in Add Playlist (server URL + credentials/API key)
+- Sync pipeline fetches libraries → content → episodes (same pattern as Xtream/Stremio)
+- Playback uses direct HTTP stream URLs with auth token (no special resolution needed)
+- Metadata already provided by the server (posters, ratings, descriptions — no TMDB needed)
+- Watch state + resume position sync back to server (mark watched, resume where left off)
+
+**Recommended order:** Jellyfin → Emby → Plex (builds on each other, increasing complexity)
+
+---
+
 *Last updated: July 12, 2026 (Build 37 — Hidden content filtered from Home, favorites channel surf fixed, Live TV section reorder from picker, tvOS sync interrupt prevented, OpenSubtitles.com integration (settings + auto-fetch + SRT overlay). See § Build 35/36, § Build 37.)*
