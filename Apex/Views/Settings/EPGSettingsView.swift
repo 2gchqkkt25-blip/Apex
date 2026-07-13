@@ -57,6 +57,24 @@ struct EPGSettingsView: View {
         modelContext.delete(source)
         try? modelContext.save()
     }
+
+    private func clearEPGData() {
+        let context = ModelContext(modelContext.container)
+        context.autosaveEnabled = false
+        do {
+            try context.delete(model: EPGListing.self)
+            try context.save()
+            // Clear the in-memory live cache so the guide reloads from scratch
+            Task {
+                await EPGLiveLoader.shared.invalidateAll()
+                await MainActor.run {
+                    EPGSyncService.shared.forceGuideRefresh()
+                }
+            }
+        } catch {
+            // Silently fail — the next sync will repopulate
+        }
+    }
 }
 
 // MARK: - iOS / macOS
@@ -156,6 +174,13 @@ struct EPGSettingsView: View {
                     }
                 }
                 .disabled(epgSync.isSyncing || sources.isEmpty)
+
+                Button(role: .destructive) {
+                    clearEPGData()
+                } label: {
+                    Label("Clear Guide Data", systemImage: "trash")
+                }
+                .disabled(epgSync.isSyncing)
 
                 if epgSync.isSyncing, let progress = epgSync.syncProgress {
                     ProgressView(value: progress)
@@ -456,6 +481,20 @@ struct EPGSettingsView: View {
                     }
                     .buttonStyle(TVSettingsRowButtonStyle())
                     .disabled(epgSync.isSyncing || sources.isEmpty)
+
+                    Button {
+                        clearEPGData()
+                    } label: {
+                        HStack(spacing: 16) {
+                            Text("Clear Guide Data")
+                                .foregroundStyle(.red)
+                            Spacer(minLength: 0)
+                            Image(systemName: "trash")
+                                .foregroundStyle(.red)
+                        }
+                    }
+                    .buttonStyle(TVSettingsRowButtonStyle())
+                    .disabled(epgSync.isSyncing)
                 }
 
                 if epgSync.isSyncing, let progress = epgSync.syncProgress {
