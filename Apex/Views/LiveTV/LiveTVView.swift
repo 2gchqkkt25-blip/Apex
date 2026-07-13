@@ -481,7 +481,9 @@ struct CategorySidebar: View {
         @Binding var selectedSection: LiveTVSection?
 
         @Environment(\.dismiss) private var dismiss
+        @Environment(\.modelContext) private var modelContext
         @State private var query = ""
+        @State private var isEditing = false
 
         private var filteredSections: [LiveTVSection] {
             let trimmed = query.trimmingCharacters(in: .whitespaces)
@@ -489,47 +491,106 @@ struct CategorySidebar: View {
             return sections.filter { $0.title.localizedCaseInsensitiveContains(trimmed) }
         }
 
+        /// Only category sections (not virtual Favorites/Recently Watched) are reorderable.
+        private var reorderableSections: [LiveTVSection] {
+            sections.filter { if case .category = $0 { return true } else { return false } }
+        }
+
         var body: some View {
             NavigationStack {
-                List(filteredSections) { section in
-                    let isSelected = selectedSection?.id == section.id
-                    Button {
-                        selectedSection = section
-                        dismiss()
-                    } label: {
-                        HStack(spacing: 12) {
-                            if let icon = section.icon {
-                                Image(systemName: icon)
-                                    .foregroundStyle(.secondary)
+                List {
+                    if !isEditing {
+                        ForEach(filteredSections) { section in
+                            let isSelected = selectedSection?.id == section.id
+                            Button {
+                                selectedSection = section
+                                dismiss()
+                            } label: {
+                                HStack(spacing: 12) {
+                                    if let icon = section.icon {
+                                        Image(systemName: icon)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    section.titleText
+                                        .foregroundStyle(.primary)
+                                    Spacer()
+                                    if isSelected {
+                                        Image(systemName: "checkmark")
+                                            .fontWeight(.semibold)
+                                            .foregroundStyle(.tint)
+                                    }
+                                }
+                                .contentShape(Rectangle())
                             }
-                            section.titleText
-                                .foregroundStyle(.primary)
-                            Spacer()
-                            if isSelected {
-                                Image(systemName: "checkmark")
-                                    .fontWeight(.semibold)
-                                    .foregroundStyle(.tint)
-                            }
+                            .buttonStyle(.plain)
                         }
-                        .contentShape(Rectangle())
+                    } else {
+                        // Edit mode: drag-to-reorder category sections
+                        Section {
+                            ForEach(reorderableSections) { section in
+                                HStack(spacing: 12) {
+                                    if let icon = section.icon {
+                                        Image(systemName: icon)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    section.titleText
+                                        .foregroundStyle(.primary)
+                                }
+                            }
+                            .onMove(perform: moveCategories)
+                        } header: {
+                            Text("Drag to reorder")
+                        }
                     }
-                    .buttonStyle(.plain)
                 }
                 .listStyle(.plain)
+                .environment(\.editMode, isEditing ? .constant(.active) : .constant(.inactive))
                 .overlay {
-                    if filteredSections.isEmpty {
+                    if filteredSections.isEmpty, !isEditing {
                         ContentUnavailableView.search(text: query)
                     }
                 }
                 .searchable(text: $query, prompt: "Search categories")
-                .navigationTitle("Categories")
+                .navigationTitle(isEditing ? "Reorder" : "Categories")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("Done") { dismiss() }
+                    ToolbarItem(placement: .cancellationAction) {
+                        if isEditing {
+                            Button("Done") { isEditing = false }
+                        }
+                    }
+                    ToolbarItem(placement: .primaryAction) {
+                        if !isEditing {
+                            Menu {
+                                Button { isEditing = true } label: {
+                                    Label("Reorder", systemImage: "arrow.up.arrow.down")
+                                }
+                                Button("Done") { dismiss() }
+                            } label: {
+                                Image(systemName: "ellipsis.circle")
+                            }
+                        }
                     }
                 }
             }
+        }
+
+        private func moveCategories(from source: IndexSet, to destination: Int) {
+            var ordered = reorderableSections
+            ordered.move(fromOffsets: source, toOffset: destination)
+            // Persist the new order onto the Category model's customOrder field
+            for (index, section) in ordered.enumerated() {
+                if case let .category(cat) = section {
+                    let categoryId = cat.id
+                    let descriptor = FetchDescriptor<Category>(
+                        predicate: #Predicate { $0.id == categoryId }
+                    )
+                    if let found = try? modelContext.fetch(descriptor).first {
+                        found.customOrder = index
+                    }
+                }
+            }
+            try? modelContext.save()
         }
     }
 #endif
