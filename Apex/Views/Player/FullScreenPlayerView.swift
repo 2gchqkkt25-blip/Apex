@@ -79,6 +79,10 @@ struct FullScreenPlayerView: View {
     /// Wired by the active engine so the host-level skip overlay can seek.
     @State private var seekBridge = PlayerSeekBridge()
 
+    /// External subtitle file URL (from OpenSubtitles.com). Set when the stream
+    /// doesn't have embedded subtitle tracks and OpenSubtitles is configured.
+    @State private var externalSubtitleURL: URL?
+
     init(media: PlayableMedia) {
         self.media = media
         _activeMedia = State(initialValue: media)
@@ -128,6 +132,16 @@ struct FullScreenPlayerView: View {
                     onSeek: { seekBridge.seek($0) }
                 )
                 .zIndex(100)
+            }
+
+            // External subtitles (OpenSubtitles.com) — shown when the stream
+            // doesn't have embedded subtitle tracks.
+            if displayMedia != nil, let externalSubtitleURL {
+                ExternalSubtitleOverlay(
+                    subtitleURL: externalSubtitleURL,
+                    clock: clock
+                )
+                .zIndex(99)
             }
 
             // VLCKit and KSPlayer ship their own close button inside the
@@ -215,6 +229,63 @@ struct FullScreenPlayerView: View {
                 }
             } catch {
                 Logger.player.warning("[SkipIntro] IntroDB request failed: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+        .task(id: activeMedia.id) {
+            // Fetch external subtitles from OpenSubtitles.com when configured.
+            // Only for VOD content (not live) and only when no embedded tracks
+            // are detected after a brief delay.
+            externalSubtitleURL = nil
+            guard !activeMedia.isLive else { return }
+            guard OpenSubtitlesClient.shared.isConfigured else { return }
+            guard UserDefaults.standard.bool(forKey: OpenSubtitlesSettings.enabledKey) else { return }
+
+            // Wait briefly for the stream to load and expose its tracks.
+            // If embedded subs exist, the user can pick those instead.
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled else { return }
+
+            // Resolve IMDB ID from the content reference
+            let imdbId: String?
+            let season: Int?
+            let episode: Int?
+
+            switch activeMedia.contentRef {
+            case let .movie(id):
+                var descriptor = FetchDescriptor<Movie>(predicate: #Predicate { $0.id == id })
+                descriptor.fetchLimit = 1
+                let movie = try? modelContext.fetch(descriptor).first
+                imdbId = movie?.imdbId
+                season = nil
+                episode = nil
+            case let .episode(id):
+                var descriptor = FetchDescriptor<Episode>(predicate: #Predicate { $0.id == id })
+                descriptor.fetchLimit = 1
+                let ep = try? modelContext.fetch(descriptor).first
+                season = ep?.seasonNum
+                episode = ep?.episodeNum
+                imdbId = ep?.series?.imdbId
+            default:
+                imdbId = nil
+                season = nil
+                episode = nil
+            }
+
+            guard let imdbId, !imdbId.isEmpty else { return }
+
+            do {
+                let subtitleFile = try await OpenSubtitlesClient.shared.fetchBestSubtitle(
+                    imdbId: imdbId,
+                    season: season,
+                    episode: episode
+                )
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    externalSubtitleURL = subtitleFile
+                }
+                Logger.player.info("[Subtitles] OpenSubtitles loaded for \(imdbId, privacy: .public)")
+            } catch {
+                Logger.player.debug("[Subtitles] OpenSubtitles: \(error.localizedDescription, privacy: .public)")
             }
         }
         .task {
