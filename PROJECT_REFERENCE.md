@@ -141,6 +141,7 @@ Without these keys, the app works but metadata is limited to what the IPTV provi
 | 75 | **Build 34 — Stremio catalog + auto-sync + content management** | ✅ **Done (Jul 12)** — Stremio auto-catalog (Cinemeta for stream-only addons), categories created so content shows in tabs, ModelContext crash fixed, catalog cap 100 items (sync in seconds), progress bar, auto-sync on any playlist add, Hide All/Show All in Content Management. |
 | 76 | **Remove visionOS from build targets** | ✅ **Done (Jul 12)** — Removed `XROS_DEPLOYMENT_TARGET` and `xros/xrsimulator` from all configs (Debug/Release/Sideload, app + tests). Build targets: iOS, tvOS, macOS only. |
 | 77 | **Build 35/36 — Reseller panel series + Stremio series fix** | ✅ **Done (Jul 12)** — Reseller panel full fix (stream server detection, credential extraction from `stream_url`, `.m3u8` forced for HLS-only panels, duplicate series fallback). Stremio series loads episodes on first tap (IMDB ID stored at import). |
+| 78 | **Build 37 — Tester feedback fixes + OpenSubtitles** | ✅ **Done (Jul 12)** — Hidden content no longer shows on Home; favorites channel surf stays in favorites; reorder Live TV sections from category picker; phone sync doesn't interrupt tvOS; OpenSubtitles.com integration (auto-fetch + SRT overlay). |
 
 ---
 
@@ -1434,4 +1435,4 @@ See **What's Been Built → iOS Device — Large Library Fix** above for full de
 
 ---
 
-*Last updated: July 12, 2026 (Build 35 tvOS / 36 iOS — Reseller panel series fully working: stream server detection, credential extraction from movie stream_url, duplicate series fallback, .m3u8 forced for HLS-only panels. Stremio series episode fetch fixed (IMDB ID at import time). See § Build 35/36.)*
+*Last updated: July 12, 2026 (Build 37 — Hidden content filtered from Home, favorites channel surf fixed, Live TV section reorder from picker, tvOS sync interrupt prevented, OpenSubtitles.com integration (settings + auto-fetch + SRT overlay). See § Build 35/36, § Build 37.)*

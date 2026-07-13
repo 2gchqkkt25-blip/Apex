@@ -4,6 +4,31 @@ All notable changes to Apex Stream Player.
 
 ---
 
+## Build 37 (1.2.0) — July 12, 2026
+
+### Bug Fixes
+
+- **Hidden content on Home screen** — Movies, series, and channels from hidden categories no longer appear in Recently Watched or Favorites rows on the Home screen.
+- **Favorites channel switching** — When playing from Favorites and switching to next/previous channel, the player now stays within your favorites list instead of jumping to the full category list.
+- **Phone sync doesn't interrupt tvOS** — Adding a playlist on iPhone no longer pops up the sync screen on Apple TV while you're watching. The sync runs on next app launch or when you open Settings.
+
+### New Features
+
+- **Reorder Live TV sections** — On iOS, tap the category picker → `...` menu → "Reorder". Drag categories up/down to rearrange without going to Content Management. Much faster when you have 100+ categories.
+- **OpenSubtitles.com integration** — External subtitle support for content without embedded tracks:
+  - Settings → Subtitles: enable, enter API key, choose language
+  - Auto-fetches subtitles by IMDB ID when playing movies/episodes
+  - SRT overlay renders synced to playback time on ALL engines
+  - Works on iOS, tvOS, and macOS
+  - Get a free API key at opensubtitles.com/consumers
+
+### Notes
+
+- TV Guide settings IS available on tvOS (Settings → TV Guide, between Top Shelf and Search)
+- EPG sync during playlist refresh and Settings → TV Guide → Sync Now both use the provider-first strategy
+
+---
+
 ## Build 35 tvOS / Build 36 iOS (1.2.0) — July 12, 2026
 
 ### Reseller Panel Series Playback — Fixed
