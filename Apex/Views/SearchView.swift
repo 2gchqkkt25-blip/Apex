@@ -145,12 +145,19 @@ struct SearchView: View {
                     // Debounce raw keystrokes. .task(id:) cancels the in-flight task
                     // (including this sleep) the instant searchText changes, so the
                     // fetch below only fires once typing actually pauses.
+                    // tvOS uses a longer debounce because the iPhone Remote keyboard
+                    // sends characters in rapid bursts that cause UI jank if the
+                    // search fires on each one.
                     let trimmed = trimmedQuery
                     guard !trimmed.isEmpty else {
                         debouncedSearchText = ""
                         return
                     }
+                    #if os(tvOS)
+                    try? await Task.sleep(for: .milliseconds(600))
+                    #else
                     try? await Task.sleep(for: .milliseconds(300))
+                    #endif
                     guard !Task.isCancelled else { return }
                     debouncedSearchText = trimmed
                 }
