@@ -46,6 +46,14 @@ enum HomeMediaItem: Identifiable, Hashable {
         }
     }
 
+    var categoryId: String? {
+        switch self {
+        case let .movie(movie): movie.categoryId
+        case let .series(series): series.categoryId
+        case let .live(stream): stream.categoryId
+        }
+    }
+
     var isLive: Bool {
         if case .live = self { return true }
         return false

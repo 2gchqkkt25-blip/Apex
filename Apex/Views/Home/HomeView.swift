@@ -321,8 +321,10 @@ struct HomeView: View {
         _ items: [HomeMediaItem],
         onRemove: ((HomeMediaItem) -> Void)? = nil
     ) -> some View {
-        if !items.isEmpty {
-            HomeRow(title: title, items: items, onPlayLive: playChannel, onRemove: onRemove, animationNamespace: animationNamespace)
+        let hiddenIDs = Set(hiddenCategories.map(\.id))
+        let filtered = items.filter { !hiddenIDs.contains($0.categoryId ?? "") }
+        if !filtered.isEmpty {
+            HomeRow(title: title, items: filtered, onPlayLive: playChannel, onRemove: onRemove, animationNamespace: animationNamespace)
         }
     }
 
