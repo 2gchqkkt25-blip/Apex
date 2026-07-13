@@ -113,6 +113,7 @@ struct SettingsView: View {
                     playbackSection
                     downloadsSection
                     playerSection
+                    subtitlesSection
                     storageSection
                     supportSection
                     aboutSection
@@ -356,6 +357,20 @@ struct SettingsView: View {
             }
         }
 
+        private var subtitlesSection: some View {
+            Section {
+                NavigationLink {
+                    OpenSubtitlesSettingsView()
+                } label: {
+                    Label("Subtitles", systemImage: "captions.bubble")
+                }
+            } header: {
+                Text("Subtitles")
+            } footer: {
+                Text("Fetch subtitles from OpenSubtitles.com when the stream doesn't have embedded tracks.")
+            }
+        }
+
         private var storageSection: some View {
             Section {
                 NavigationLink {
@@ -491,6 +506,7 @@ extension SettingsView {
                     case .topShelf: TopShelfSettingsView()
                     case .epg: EPGSettingsView()
                     case .search: tvSearchDetail
+                    case .subtitles: OpenSubtitlesSettingsView()
                     case .storage: StorageManagementView()
                     case .integrations: tvIntegrationsDetail
                     case .player:
