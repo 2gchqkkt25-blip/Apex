@@ -40,6 +40,12 @@ struct HomeView: View {
     @Query private var favoriteSeries: [Series]
     @Query private var favoriteStreams: [LiveStream]
 
+    /// Hidden category IDs — used to exclude hidden content from Home rows.
+    /// Content Management lets users hide categories, but the @Query for
+    /// recently-watched/favorites doesn't know about category visibility.
+    @Query(filter: #Predicate<Category> { $0.isHidden })
+    private var hiddenCategories: [Category]
+
     @State var trendingMovies: [HomeMediaItem] = []
     @State var trendingSeries: [HomeMediaItem] = []
     @State var watchlist: [HomeMediaItem] = []
@@ -343,9 +349,10 @@ struct HomeView: View {
     // MARK: - Derived content
 
     private var recentlyWatched: [HomeMediaItem] {
-        let items = watchedMovies.filter { belongsToActivePlaylist($0.id) }.excludingRestricted(restriction).map(HomeMediaItem.movie)
-            + watchedSeries.filter { belongsToActivePlaylist($0.id) }.excludingRestricted(restriction).map(HomeMediaItem.series)
-            + watchedStreams.filter { belongsToActivePlaylist($0.id) }.excludingRestricted(restriction).map(HomeMediaItem.live)
+        let hidden = Set(hiddenCategories.map(\.id))
+        let items = watchedMovies.filter { belongsToActivePlaylist($0.id) && !hidden.contains($0.categoryId ?? "") }.excludingRestricted(restriction).map(HomeMediaItem.movie)
+            + watchedSeries.filter { belongsToActivePlaylist($0.id) && !hidden.contains($0.categoryId ?? "") }.excludingRestricted(restriction).map(HomeMediaItem.series)
+            + watchedStreams.filter { belongsToActivePlaylist($0.id) && !hidden.contains($0.categoryId ?? "") }.excludingRestricted(restriction).map(HomeMediaItem.live)
         return items
             .sorted { ($0.lastWatchedDate ?? .distantPast) > ($1.lastWatchedDate ?? .distantPast) }
             .prefix(10)
@@ -353,9 +360,10 @@ struct HomeView: View {
     }
 
     private var favorites: [HomeMediaItem] {
-        favoriteMovies.filter { belongsToActivePlaylist($0.id) }.excludingRestricted(restriction).map(HomeMediaItem.movie)
-            + favoriteSeries.filter { belongsToActivePlaylist($0.id) }.excludingRestricted(restriction).map(HomeMediaItem.series)
-            + favoriteStreams.filter { belongsToActivePlaylist($0.id) }.excludingRestricted(restriction).map(HomeMediaItem.live)
+        let hidden = Set(hiddenCategories.map(\.id))
+        return favoriteMovies.filter { belongsToActivePlaylist($0.id) && !hidden.contains($0.categoryId ?? "") }.excludingRestricted(restriction).map(HomeMediaItem.movie)
+            + favoriteSeries.filter { belongsToActivePlaylist($0.id) && !hidden.contains($0.categoryId ?? "") }.excludingRestricted(restriction).map(HomeMediaItem.series)
+            + favoriteStreams.filter { belongsToActivePlaylist($0.id) && !hidden.contains($0.categoryId ?? "") }.excludingRestricted(restriction).map(HomeMediaItem.live)
     }
 
     /// Truly empty home — only show the empty state once trending has settled

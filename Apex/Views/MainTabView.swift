@@ -285,6 +285,17 @@ struct MainTabView: View {
     /// the cover's `onDismiss` calls back here to advance the queue.
     private func promoteNextIfIdle() {
         guard activeSyncPlaylist == nil, !syncQueue.isEmpty else { return }
+        #if os(tvOS)
+        // On Apple TV, don't interrupt active viewing with a sync cover.
+        // The playlist will sync on the next app launch or foreground return
+        // when nothing is playing. This prevents a phone-triggered playlist
+        // add from interrupting what's being watched on TV.
+        if router.selectedTab != .settings, scenePhase == .active {
+            // Defer — will be picked up next time the user opens Settings
+            // or returns to the app.
+            return
+        }
+        #endif
         activeSyncPlaylist = syncQueue.removeFirst()
     }
 

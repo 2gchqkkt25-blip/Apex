@@ -54,7 +54,8 @@
             case .up, .down:
                 let sort = ContentSortOption(rawValue: liveContentSortRaw) ?? .playlist
                 target = LiveChannelNavigator.adjacentMedia(
-                    for: media, offset: direction == .up ? 1 : -1, sort: sort, in: modelContext
+                    for: media, offset: direction == .up ? 1 : -1, sort: sort,
+                    scope: LiveChannelNavigator.activeSurfScope, in: modelContext
                 )
             case .right:
                 target = LiveChannelHistory.recallMedia(in: modelContext)

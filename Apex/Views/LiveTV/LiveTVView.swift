@@ -365,6 +365,13 @@ struct LiveTVView: View {
     private func playChannel(_ stream: LiveStream) {
         guard let playlist = activePlaylist,
               let media = PlayableMedia.from(stream: stream, playlist: playlist) else { return }
+        // Set the surf scope so channel up/down stays within the current section
+        // (favorites, recently watched, or a specific category).
+        if let section = selectedSection {
+            LiveChannelNavigator.activeSurfScope = section.scope
+        } else {
+            LiveChannelNavigator.activeSurfScope = nil
+        }
         if ExternalPlayback.open(media) { return }
         #if os(macOS)
             openWindow(id: "player", value: media)
