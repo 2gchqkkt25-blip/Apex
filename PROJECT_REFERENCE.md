@@ -1456,4 +1456,80 @@ See **What's Been Built → iOS Device — Large Library Fix** above for full de
 
 ---
 
+## Roadmap — Planned Features
+
+> Features prioritized for future builds. Difficulty estimates assume the current architecture. None started yet.
+
+### Priority 1 — High Impact (next up)
+
+| Feature | Difficulty | Description |
+|---------|-----------|-------------|
+| **Unified Library (Playlist Merge)** | Medium (~3-5 days) | Merge multiple playlists into one view. Dedup by TMDB ID or channel name. Show content once with multi-source failover. If stream A fails → try stream B automatically. User sets provider priority. Toggle on/off in Settings. Safe approach: merge at view level only (merge index), not in SwiftData — no extra memory, no crashes. |
+| **Hybrid SQLite Layer** | Medium-Hard (~1 week) | Replace SwiftData `@Query` for catalog browse with GRDB.swift cursor-based reads. Constant memory regardless of playlist size. Only needed if tab-unmount approach still isn't enough for 50K+ item playlists. |
+
+### Priority 2 — Media Server Integration
+
+| Feature | Difficulty | Description |
+|---------|-----------|-------------|
+| **Jellyfin** | Medium (~2-3 days) | First media server. Open-source, simple auth, clean API. |
+| **Emby** | Low (~2 days) | Near-identical to Jellyfin. Incremental after Jellyfin. |
+| **Plex** | Medium (~3-5 days) | PIN-based auth. Largest user base. |
+
+### Priority 3 — Quality of Life
+
+| Feature | Difficulty | Description |
+|---------|-----------|-------------|
+| **EPG external feed gap-fill** | Low (~1 day) | After provider xmltv.php sync, check which channels got 0 programmes. Fill those gaps from epgshare01 feeds. Keeps speed while improving accuracy for providers with incomplete guides. |
+| **Stream quality picker for Xtream** | Low (~1 day) | Let user choose stream format (m3u8/ts/original) per playlist or globally. Some providers serve better quality in one format. |
+| **Multi-audio track selection** | Low (~1 day) | Surface audio track picker in player controls (some streams have English + Spanish + commentary tracks). |
+| **Parental PIN on app launch** | Low (~half day) | Optional PIN/Face ID gate on app open for households with shared Apple TV. |
+| **Watch history sync to Trakt** | Medium (~2 days) | Auto-scrobble live TV and VOD to Trakt. Already has Trakt client — needs the watch-event hook. |
+| **Picture-in-Picture improvements** | Low (~1 day) | PiP for live TV while browsing the guide. Currently works for VOD. |
+
+### Priority 4 — Platform Polish
+
+| Feature | Difficulty | Description |
+|---------|-----------|-------------|
+| **macOS signing + distribution** | Low (setup) | Requires Apple Developer certs on build machine. No code changes. |
+| **iPad multi-window** | Medium (~2 days) | Split View support — watch live TV in one window, browse in another. |
+| **CarPlay** | Medium (~3 days) | Audio-only streams (radio channels) via CarPlay. Limited to audio per Apple guidelines. |
+| **Widgets (iOS/macOS)** | Medium (~2 days) | Home Screen widget showing what's on now / next up / continue watching. |
+
+### Architecture Notes for Playlist Merge
+
+```
+┌─────────────────┐     ┌─────────────────┐
+│   Playlist A    │     │   Playlist B    │
+│  (SwiftData)    │     │  (SwiftData)    │
+└────────┬────────┘     └────────┬────────┘
+         │                       │
+         └───────────┬───────────┘
+                     │
+              ┌──────▼──────┐
+              │ Merge Index │  (in-memory dictionary)
+              │ TMDB ID →   │  
+              │ [SourceA,   │
+              │  SourceB]   │
+              └──────┬──────┘
+                     │
+              ┌──────▼──────┐
+              │ Unified     │  (browse views)
+              │ Movies /    │
+              │ Series /    │
+              │ Live TV     │
+              └──────┬──────┘
+                     │
+              ┌──────▼──────┐
+              │  Playback   │  (try SourceA → fail → SourceB)
+              └─────────────┘
+```
+
+- Content stays per-playlist in SwiftData (no migration, no duplication)
+- Merge index built after each sync (~100ms for 20K items)
+- Toggle "Merge Playlists" off → instant revert to per-playlist view
+- Failover adds ~2-3 seconds on stream failure before trying next source
+- No memory increase (same fetchLimit caps, just different source selection)
+
+---
+
 *Last updated: July 12, 2026 (Build 38 — Hidden content fully filtered from all Home rows, Clear Guide Data button, All Channels section in Live TV, tvOS search debounce for phone keyboard, OpenSubtitles iCloud sync, verbose login errors, playlist tester tool. See § Build 37, § Build 38.)*
