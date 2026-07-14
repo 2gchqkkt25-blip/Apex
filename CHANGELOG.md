@@ -19,8 +19,13 @@ All notable changes to Apex Stream Player.
 - **Streams not recovering after provider outages** — Previously required removing and re-adding the playlist. Root cause: iOS cached error responses (401/403) from the provider. Fix: URL caching disabled on all provider HTTP sessions. Streams now recover instantly when the provider comes back.
 - **Live TV favorites not syncing to tvOS** — Favorites and recently watched channels now sync across all devices via iCloud. Previously only the favorite flag synced; watch history was device-local.
 - **Hidden live channels in Recently Watched** — Channels hidden via Content Management no longer appear in the Home → Recently Watched row.
+- **Hidden content in Recently Added** — Movies and series from hidden categories no longer appear in the Recently Added rows on Movies/Series tabs.
 - **macOS: categories not selectable in Guide mode** — The Live TV sidebar couldn't be clicked when the EPG grid was showing. Root cause: macOS NSOutlineView (used by SwiftUI List) lost first-responder focus to the EPG ScrollView. Fix: rebuilt sidebar with ScrollView + onTapGesture which always responds regardless of focus state.
 - **macOS: traffic light buttons covering sidebar** — Added top padding so "All Channels" and other items at the top aren't hidden behind the window close/minimize/maximize buttons.
+- **tvOS: Trending Movies/Series missing from Home** — Phase 2 (TMDB trending fetch) was in an unstructured Task that got orphaned when tabs unmount. Now runs as structured await with deferred start so it survives tab lifecycle.
+- **tvOS: All Channels showing no channels** — Query fetched 200 channels from any playlist without scoping, then in-memory prefix filter eliminated them. Now filters by playlist ID in the query predicate.
+- **tvOS: iPhone Remote keyboard still jittery** — Search debounce increased 600ms → 1000ms.
+- **Home launch slowdown** — TMDB trending fetch (structured for tvOS fix) was blocking first paint. Now defers 500ms when library heroes are already visible, letting the UI render immediately.
 
 ### What's NOT Changed
 

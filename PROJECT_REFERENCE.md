@@ -148,6 +148,7 @@ Without these keys, the app works but metadata is limited to what the IPTV provi
 | 81 | **Recently Watched — hidden live channels filtered on Home** | ✅ **Done (Jul 14)** — Live channels individually hidden via Content Management (`isHidden`) now excluded from the Home → Recently Watched row. Movies/series were already filtered by hidden category; live streams needed the per-channel `isHidden` check too. |
 | 82 | **Build 39 — Wyzie Subs + stale stream fix + subtitle parser** | ✅ **Done (Jul 14)** — Replaced OpenSubtitles with Wyzie Subs (simpler, no login, 1K req/day free). Fixed streams not recovering after provider outages (URL cache disabled). Fixed SRT parser (Windows line endings). Fixed series subtitle IMDB resolution. |
 | 83 | **macOS Live TV sidebar — grid mode selection + traffic lights** | ✅ **Done (Jul 14)** — Categories now selectable in Guide (grid) mode on macOS. Sidebar rebuilt with ScrollView + onTapGesture (List/NSOutlineView lost focus to EPG ScrollView). Top padding added to clear traffic light buttons. |
+| 84 | **tvOS — trending rows + All Channels + hidden content + search + perf** | ✅ **Done (Jul 14)** — Trending Movies/Series rows restored on tvOS (structured task fix). All Channels now shows channels on tvOS (playlist-scoped query). Hidden content filtered from Recently Added. iPhone Remote debounce 1000ms. Home launch performance regression fixed (deferred phase 2). |
 
 ---
 
@@ -1626,4 +1627,4 @@ See **What's Been Built → iOS Device — Large Library Fix** above for full de
 
 ---
 
-*Last updated: July 14, 2026 (Build 39 — Wyzie Subs, stale stream fix, subtitle parser, iCloud sync, macOS Live TV sidebar fix. All platforms build clean; macOS ready for TestFlight.)*
+*Last updated: July 14, 2026 (Build 39 — Wyzie Subs, stale stream fix, subtitle parser, iCloud sync, macOS sidebar fix, tvOS trending/All Channels/hidden content/search/performance. All platforms build clean and verified.)*
