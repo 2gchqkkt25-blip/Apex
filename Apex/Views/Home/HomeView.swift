@@ -354,7 +354,7 @@ struct HomeView: View {
         let hidden = Set(hiddenCategories.map(\.id))
         let items = watchedMovies.filter { belongsToActivePlaylist($0.id) && !hidden.contains($0.categoryId ?? "") }.excludingRestricted(restriction).map(HomeMediaItem.movie)
             + watchedSeries.filter { belongsToActivePlaylist($0.id) && !hidden.contains($0.categoryId ?? "") }.excludingRestricted(restriction).map(HomeMediaItem.series)
-            + watchedStreams.filter { belongsToActivePlaylist($0.id) && !hidden.contains($0.categoryId ?? "") }.excludingRestricted(restriction).map(HomeMediaItem.live)
+            + watchedStreams.filter { belongsToActivePlaylist($0.id) && !$0.isHidden && !hidden.contains($0.categoryId ?? "") }.excludingRestricted(restriction).map(HomeMediaItem.live)
         return items
             .sorted { ($0.lastWatchedDate ?? .distantPast) > ($1.lastWatchedDate ?? .distantPast) }
             .prefix(10)
