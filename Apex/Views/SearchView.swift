@@ -154,7 +154,7 @@ struct SearchView: View {
                         return
                     }
                     #if os(tvOS)
-                    try? await Task.sleep(for: .milliseconds(600))
+                    try? await Task.sleep(for: .milliseconds(1000))
                     #else
                     try? await Task.sleep(for: .milliseconds(300))
                     #endif

@@ -137,6 +137,8 @@ struct MovieCollectionRow: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.contentRestriction) private var restriction
     @Query private var movies: [Movie]
+    @Query(filter: #Predicate<Category> { $0.isHidden })
+    private var hiddenCategories: [Category]
 
     init(kind: LibraryCollection.Kind, playlistPrefix: String, animationNamespace: Namespace.ID? = nil) {
         self.kind = kind
@@ -146,7 +148,8 @@ struct MovieCollectionRow: View {
     }
 
     private var scoped: [Movie] {
-        movies.filter { $0.id.hasPrefix(playlistPrefix) }.excludingRestricted(restriction)
+        let hidden = Set(hiddenCategories.map(\.id))
+        return movies.filter { $0.id.hasPrefix(playlistPrefix) && !hidden.contains($0.categoryId ?? "") }.excludingRestricted(restriction)
     }
 
     var body: some View {
@@ -295,6 +298,8 @@ struct SeriesCollectionRow: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.contentRestriction) private var restriction
     @Query private var series: [Series]
+    @Query(filter: #Predicate<Category> { $0.isHidden })
+    private var hiddenCategories: [Category]
 
     init(kind: LibraryCollection.Kind, playlistPrefix: String, animationNamespace: Namespace.ID? = nil) {
         self.kind = kind
@@ -304,7 +309,8 @@ struct SeriesCollectionRow: View {
     }
 
     private var scoped: [Series] {
-        series.filter { $0.id.hasPrefix(playlistPrefix) }.excludingRestricted(restriction)
+        let hidden = Set(hiddenCategories.map(\.id))
+        return series.filter { $0.id.hasPrefix(playlistPrefix) && !hidden.contains($0.categoryId ?? "") }.excludingRestricted(restriction)
     }
 
     var body: some View {

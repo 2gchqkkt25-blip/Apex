@@ -118,10 +118,26 @@ enum LiveChannelQuery {
     /// Views paginate display via `visibleCount` — the query itself loads results
     /// lazily through SwiftData's faulting mechanism.
     static func descriptor(for scope: LiveChannelScope, sort: ContentSortOption) -> FetchDescriptor<LiveStream> {
+        return descriptor(for: scope, sort: sort, playlistPrefix: nil)
+    }
+
+    /// Builds the `@Query` descriptor for a scope. When `playlistPrefix` is
+    /// provided, the `.all` scope filters at the query level (not just in-memory)
+    /// so the fetchLimit doesn't clip results from the wrong playlist.
+    static func descriptor(for scope: LiveChannelScope, sort: ContentSortOption, playlistPrefix: String?) -> FetchDescriptor<LiveStream> {
         switch scope {
         case .all:
             // All channels across all categories — sorted by the user's choice.
-            // Capped at 200 to prevent memory issues on large playlists.
+            // When a playlist prefix is known, filter in the predicate so the
+            // fetchLimit doesn't clip channels from other playlists first.
+            if let prefix = playlistPrefix, !prefix.isEmpty {
+                var descriptor = FetchDescriptor<LiveStream>(
+                    predicate: #Predicate { $0.isHidden == false && $0.id.starts(with: prefix) },
+                    sortBy: sort.liveStreamDescriptors
+                )
+                descriptor.fetchLimit = 200
+                return descriptor
+            }
             var descriptor = FetchDescriptor<LiveStream>(
                 predicate: #Predicate { $0.isHidden == false },
                 sortBy: sort.liveStreamDescriptors

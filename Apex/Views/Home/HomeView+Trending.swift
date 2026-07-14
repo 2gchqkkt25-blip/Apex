@@ -19,7 +19,7 @@ extension HomeView {
         let playlistStamp = activePlaylist?.lastSyncDate?.timeIntervalSince1970 ?? 0
 
         // Skip re-fetch when we already have a settled carousel for this playlist.
-        if trendingState == .loaded, !heroItems.isEmpty, lastTrendingPlaylistStamp == playlistStamp {
+        if trendingState == .loaded, !heroItems.isEmpty, !trendingMovies.isEmpty, lastTrendingPlaylistStamp == playlistStamp {
             return
         }
 
@@ -47,12 +47,8 @@ extension HomeView {
         // the empty-state gate when phase 1 produced nothing to show.
         if heroItems.isEmpty {
             trendingState = .loading
-            await upgradeTrendingFromTMDB(client: client, playlistStamp: playlistStamp)
-        } else {
-            Task(priority: .utility) {
-                await upgradeTrendingFromTMDB(client: client, playlistStamp: playlistStamp)
-            }
         }
+        await upgradeTrendingFromTMDB(client: client, playlistStamp: playlistStamp)
     }
 
     /// Fetches TMDB trending and merges into Home. Runs after playlist sync

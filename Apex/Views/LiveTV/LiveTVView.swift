@@ -641,7 +641,7 @@ struct ChannelsList: View {
         self.sectionToken = sectionToken
         self._epgCache = Bindable(epgCache)
         self.onPlay = onPlay
-        _streams = Query(LiveChannelQuery.descriptor(for: scope, sort: sort))
+        _streams = Query(LiveChannelQuery.descriptor(for: scope, sort: sort, playlistPrefix: playlistPrefix))
     }
 
     private var scopedStreams: [LiveStream] {

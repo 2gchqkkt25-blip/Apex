@@ -50,7 +50,7 @@ struct EPGGuideView: View {
         let timeline = EPGTimeline.live(now: Date(), pointsPerMinute: EPGMetrics.current.pointsPerMinute, hoursBehind: 1, hoursAhead: 5)
         self.timeline = timeline
 
-        _streams = Query(LiveChannelQuery.descriptor(for: scope, sort: sort))
+        _streams = Query(LiveChannelQuery.descriptor(for: scope, sort: sort, playlistPrefix: playlistPrefix))
     }
 
     private var scopedStreams: [LiveStream] {
