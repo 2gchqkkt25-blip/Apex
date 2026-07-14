@@ -43,12 +43,20 @@ extension HomeView {
         }
         guard !Task.isCancelled else { return }
 
-        // Phase 2 — TMDB trending upgrades heroes in the background. Only block
-        // the empty-state gate when phase 1 produced nothing to show.
+        // Phase 2 — TMDB trending fetches the actual trending rows. Runs within
+        // the structured task (so it survives tvOS tab unmount) but yields first
+        // so phase-1 heroes paint immediately without waiting for network.
         if heroItems.isEmpty {
             trendingState = .loading
+            // No heroes yet — await directly so the loading state is visible
+            await upgradeTrendingFromTMDB(client: client, playlistStamp: playlistStamp)
+        } else {
+            // Heroes already visible — give the UI a moment to render the first
+            // paint before starting the network-heavy phase 2.
+            try? await Task.sleep(for: .milliseconds(500))
+            guard !Task.isCancelled else { return }
+            await upgradeTrendingFromTMDB(client: client, playlistStamp: playlistStamp)
         }
-        await upgradeTrendingFromTMDB(client: client, playlistStamp: playlistStamp)
     }
 
     /// Fetches TMDB trending and merges into Home. Runs after playlist sync
