@@ -142,6 +142,7 @@ Without these keys, the app works but metadata is limited to what the IPTV provi
 | 76 | **Remove visionOS from build targets** | ✅ **Done (Jul 12)** — Removed `XROS_DEPLOYMENT_TARGET` and `xros/xrsimulator` from all configs (Debug/Release/Sideload, app + tests). Build targets: iOS, tvOS, macOS only. |
 | 77 | **Build 35/36 — Reseller panel series + Stremio series fix** | ✅ **Done (Jul 12)** — Reseller panel full fix (stream server detection, credential extraction from `stream_url`, `.m3u8` forced for HLS-only panels, duplicate series fallback). Stremio series loads episodes on first tap (IMDB ID stored at import). |
 | 78 | **Build 37 — Tester feedback fixes + OpenSubtitles** | ✅ **Done (Jul 12)** — Hidden content no longer shows on Home; favorites channel surf stays in favorites; reorder Live TV sections from category picker; phone sync doesn't interrupt tvOS; OpenSubtitles.com integration (auto-fetch + SRT overlay). |
+| 79 | **Build 38 — Home filter fix + Clear Guide + All Channels + polish** | ✅ **Done (Jul 12)** — Hidden content fully filtered from ALL Home rows (was only filtering some); Clear Guide Data button in TV Guide settings; All Channels section in Live TV; tvOS search debounce 600ms; OpenSubtitles iCloud sync; verbose login error messages; playlist tester tool. |
 
 ---
 
@@ -1455,4 +1456,4 @@ See **What's Been Built → iOS Device — Large Library Fix** above for full de
 
 ---
 
-*Last updated: July 12, 2026 (Build 37 — Hidden content filtered from Home, favorites channel surf fixed, Live TV section reorder from picker, tvOS sync interrupt prevented, OpenSubtitles.com integration (settings + auto-fetch + SRT overlay). See § Build 35/36, § Build 37.)*
+*Last updated: July 12, 2026 (Build 38 — Hidden content fully filtered from all Home rows, Clear Guide Data button, All Channels section in Live TV, tvOS search debounce for phone keyboard, OpenSubtitles iCloud sync, verbose login errors, playlist tester tool. See § Build 37, § Build 38.)*

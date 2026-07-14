@@ -4,6 +4,26 @@ All notable changes to Apex Stream Player.
 
 ---
 
+## Build 38 (1.2.0) — July 12, 2026
+
+### Bug Fixes
+
+- **Hidden content on Home screen (final fix)** — All Home rows (Trending, Recently Watched, Favorites, Trakt Watchlist, For You) now filter out content from hidden categories. The previous fix only covered some rows.
+- **Verbose login errors** — When adding a playlist fails, the error message now shows exactly what went wrong (timed out, can't connect, 403, invalid JSON, etc.) with the context URL. Users can screenshot and send for support — no Xcode needed.
+
+### New Features
+
+- **Clear Guide Data** — Settings → TV Guide → "Clear Guide Data" (red button). Wipes all cached EPG data so a fresh sync pulls clean data from the provider. No reinstall needed.
+- **All Channels section** — Live TV now has an "All Channels" option at the top of the category list, showing every channel across all categories in one combined view.
+- **OpenSubtitles iCloud sync** — API key, language, and enabled state sync via iCloud. Enter once on iPhone → available on Apple TV automatically.
+- **Playlist tester tool** — `Tools/playlist-tester.html` — open in a browser to test user credentials (server reachability, auth, content counts, EPG) before troubleshooting.
+
+### Improvements
+
+- **tvOS search debounce** — Increased to 600ms (from 300ms) to reduce jank when typing with the iPhone Remote keyboard.
+
+---
+
 ## Build 37 (1.2.0) — July 12, 2026
 
 ### Bug Fixes
