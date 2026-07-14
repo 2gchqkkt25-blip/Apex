@@ -736,7 +736,7 @@ Full rules: `EPG.md` § **Stability rules (do not regress)**. Highlights:
 7. ~~**tvOS large-library hardening**~~ — ✅ Lazy tab mount, deferred indexing/EPG (tvOS-only); in build 17
 8. ~~**EPG guide**~~ — ✅ Working (`xmltv.php` bulk download, offset-honest parse; slow-sync + mismatch fixed); notes in `EPG.md`
 9. **App Store listing** — Screenshots + description/subtitle (not required for external TestFlight)
-10. **macOS signing** — Ready for TestFlight; requires Apple Developer certificates on this machine for archive
+10. **macOS signing** — ✅ Done; certificates configured on build machine
 11. **App Store public release** — After TestFlight validation
 
 ---
@@ -1453,7 +1453,7 @@ When ready for public listing (after TestFlight):
 - **TestFlight Pro** — beta testers get full Pro without IAP (`BetaBuildDetection`)
 - **For You** — Premium + at least one watch/favorite/vote signal; tvOS uses metadata fallback when embeddings unavailable
 - **Home hero** — TMDB key + synced playlist; title matching + library fallback when trending overlap is thin
-- **macOS builds** — compiles clean on all three platforms (iOS, tvOS, macOS). Live TV sidebar fixed for grid mode. Requires Apple Developer signing certs for TestFlight archive.
+- **macOS builds** — compiles clean on all three platforms (iOS, tvOS, macOS). Live TV sidebar fixed for grid mode. Signing certs configured; ready to archive for TestFlight.
 - **tvOS Search tab** — first tab (magnifying glass); empty state shows poster-grid category browse for Movies and Series; text search when typing
 
 ---
@@ -1475,7 +1475,7 @@ When ready for public listing (after TestFlight):
 | 🔄 | TestFlight build **17** — iOS + tvOS archive/upload |
 | 🔄 | External TestFlight — Beta App Review (see **App Store Connect & TestFlight** above) |
 | ⏳ | App Store screenshots + public listing |
-| ⏳ | macOS TestFlight / App Store (signing) |
+| ✅ | macOS signing certificates configured (Jul 14) — ready to archive for TestFlight |
 
 ---
 
@@ -1521,7 +1521,7 @@ See **What's Been Built → iOS Device — Large Library Fix** above for full de
 6. **External TestFlight** — Age rating 17+, privacy URL, App Privacy, What to Test → Beta App Review
 7. **Smoke-test** — sync (branded UI + TV Guide **%**), hero, subtitles, Discord, tvOS home, **EPG** (cards populate immediately after sync, grid + in-player browser, persistence after force-quit)
 8. **Screenshots + store copy** — when ready for **public** App Store
-9. **macOS signing** — Ready for TestFlight; needs Apple Developer certs on build machine for archive
+9. **macOS signing** — ✅ Done; archive and upload to TestFlight
 10. **App Store public release** — after TestFlight validation
 
 ### AGPL
