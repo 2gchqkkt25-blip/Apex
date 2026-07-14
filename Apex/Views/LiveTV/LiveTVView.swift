@@ -270,12 +270,14 @@ struct LiveTVView: View {
                 selectedSection: $selectedSection
             )
             .frame(width: 200)
+            .zIndex(1) // Ensure sidebar is above the guide's scroll content
 
             Divider()
 
             if let displayed {
                 detail(for: displayed)
                     .frame(maxWidth: .infinity)
+                    .clipped() // Prevent guide from bleeding into sidebar area
             } else {
                 ContentUnavailableView(
                     "Select a Category",
@@ -392,37 +394,41 @@ struct CategorySidebar: View {
     @Environment(ThemeManager.self) private var themeManager
 
     var body: some View {
-        List(selection: Binding(
-            get: { selectedSection?.id },
-            set: { newID in
-                selectedSection = sections.first { $0.id == newID }
-            }
-        )) {
-            ForEach(sections) { section in
-                HStack(spacing: 8) {
-                    if let icon = section.icon {
-                        Image(systemName: icon)
-                            .font(.subheadline)
-                            .foregroundStyle(selectedSection?.id == section.id ? themeManager.colors.accent : Color.secondary)
+        ScrollView {
+            LazyVStack(spacing: 2) {
+                ForEach(sections) { section in
+                    let isSelected = selectedSection?.id == section.id
+                    HStack(spacing: 8) {
+                        if let icon = section.icon {
+                            Image(systemName: icon)
+                                .font(.subheadline)
+                                .foregroundStyle(isSelected ? themeManager.colors.accent : Color.secondary)
+                        }
+                        Text(section.title)
+                            .font(.headline)
+                            .foregroundStyle(isSelected ? themeManager.colors.accent : Color.primary)
+                            .lineLimit(1)
+                        Spacer()
                     }
-                    section.titleText
-                        .font(.headline)
-                        .foregroundStyle(selectedSection?.id == section.id ? themeManager.colors.accent : Color.primary)
-                    Spacer()
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(isSelected ? themeManager.colors.accent.opacity(0.15) : Color.clear)
+                    )
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        selectedSection = section
+                    }
                 }
-                .contentShape(Rectangle())
-                .tag(section.id)
             }
+            #if os(macOS)
+            .padding(.top, 38) // Clear macOS traffic light buttons
+            #endif
+            .padding(.horizontal, 8)
         }
         #if os(macOS)
-        .listStyle(.sidebar)
-        .safeAreaInset(edge: .top, spacing: 0) {
-            // Reserve space so the first row isn't covered by the window
-            // traffic light buttons (close/minimize/maximize).
-            Spacer().frame(height: 4)
-        }
-        #elseif !os(tvOS)
-        .listStyle(.sidebar)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
         #endif
     }
 }
