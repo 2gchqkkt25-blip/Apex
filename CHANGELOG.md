@@ -19,6 +19,8 @@ All notable changes to Apex Stream Player.
 - **Streams not recovering after provider outages** — Previously required removing and re-adding the playlist. Root cause: iOS cached error responses (401/403) from the provider. Fix: URL caching disabled on all provider HTTP sessions. Streams now recover instantly when the provider comes back.
 - **Live TV favorites not syncing to tvOS** — Favorites and recently watched channels now sync across all devices via iCloud. Previously only the favorite flag synced; watch history was device-local.
 - **Hidden live channels in Recently Watched** — Channels hidden via Content Management no longer appear in the Home → Recently Watched row.
+- **macOS: categories not selectable in Guide mode** — The Live TV sidebar couldn't be clicked when the EPG grid was showing. Root cause: macOS NSOutlineView (used by SwiftUI List) lost first-responder focus to the EPG ScrollView. Fix: rebuilt sidebar with ScrollView + onTapGesture which always responds regardless of focus state.
+- **macOS: traffic light buttons covering sidebar** — Added top padding so "All Channels" and other items at the top aren't hidden behind the window close/minimize/maximize buttons.
 
 ### What's NOT Changed
 

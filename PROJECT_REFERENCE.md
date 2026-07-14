@@ -147,6 +147,7 @@ Without these keys, the app works but metadata is limited to what the IPTV provi
 | 80 | **Live TV iCloud sync — favorites + recently watched** | ✅ **Done (Jul 14)** — Live TV favorites and recently watched now sync across devices via CloudKit. Previously `liveEntries()` only synced the favorite flag (explicitly excluded `lastWatchedDate`); pull-from-cloud only wrote `isFavorite`/`favoriteOrder`. Both directions now carry `lastWatchedDate`. |
 | 81 | **Recently Watched — hidden live channels filtered on Home** | ✅ **Done (Jul 14)** — Live channels individually hidden via Content Management (`isHidden`) now excluded from the Home → Recently Watched row. Movies/series were already filtered by hidden category; live streams needed the per-channel `isHidden` check too. |
 | 82 | **Build 39 — Wyzie Subs + stale stream fix + subtitle parser** | ✅ **Done (Jul 14)** — Replaced OpenSubtitles with Wyzie Subs (simpler, no login, 1K req/day free). Fixed streams not recovering after provider outages (URL cache disabled). Fixed SRT parser (Windows line endings). Fixed series subtitle IMDB resolution. |
+| 83 | **macOS Live TV sidebar — grid mode selection + traffic lights** | ✅ **Done (Jul 14)** — Categories now selectable in Guide (grid) mode on macOS. Sidebar rebuilt with ScrollView + onTapGesture (List/NSOutlineView lost focus to EPG ScrollView). Top padding added to clear traffic light buttons. |
 
 ---
 
@@ -735,7 +736,7 @@ Full rules: `EPG.md` § **Stability rules (do not regress)**. Highlights:
 7. ~~**tvOS large-library hardening**~~ — ✅ Lazy tab mount, deferred indexing/EPG (tvOS-only); in build 17
 8. ~~**EPG guide**~~ — ✅ Working (`xmltv.php` bulk download, offset-honest parse; slow-sync + mismatch fixed); notes in `EPG.md`
 9. **App Store listing** — Screenshots + description/subtitle (not required for external TestFlight)
-10. **macOS signing** — Requires Apple Developer certificates on this machine
+10. **macOS signing** — Ready for TestFlight; requires Apple Developer certificates on this machine for archive
 11. **App Store public release** — After TestFlight validation
 
 ---
@@ -1452,7 +1453,7 @@ When ready for public listing (after TestFlight):
 - **TestFlight Pro** — beta testers get full Pro without IAP (`BetaBuildDetection`)
 - **For You** — Premium + at least one watch/favorite/vote signal; tvOS uses metadata fallback when embeddings unavailable
 - **Home hero** — TMDB key + synced playlist; title matching + library fallback when trending overlap is thin
-- **macOS builds** require an Apple Developer account signed into Xcode (no signing identities on this machine)
+- **macOS builds** — compiles clean on all three platforms (iOS, tvOS, macOS). Live TV sidebar fixed for grid mode. Requires Apple Developer signing certs for TestFlight archive.
 - **tvOS Search tab** — first tab (magnifying glass); empty state shows poster-grid category browse for Movies and Series; text search when typing
 
 ---
@@ -1520,7 +1521,7 @@ See **What's Been Built → iOS Device — Large Library Fix** above for full de
 6. **External TestFlight** — Age rating 17+, privacy URL, App Privacy, What to Test → Beta App Review
 7. **Smoke-test** — sync (branded UI + TV Guide **%**), hero, subtitles, Discord, tvOS home, **EPG** (cards populate immediately after sync, grid + in-player browser, persistence after force-quit)
 8. **Screenshots + store copy** — when ready for **public** App Store
-9. **macOS signing** — Apple Developer certs on build machine
+9. **macOS signing** — Ready for TestFlight; needs Apple Developer certs on build machine for archive
 10. **App Store public release** — after TestFlight validation
 
 ### AGPL
@@ -1625,4 +1626,4 @@ See **What's Been Built → iOS Device — Large Library Fix** above for full de
 
 ---
 
-*Last updated: July 14, 2026 (Build 39 — Wyzie Subs replaces OpenSubtitles; stale stream recovery fix; SRT parser rewrite; series subtitle IMDB resolution; Live TV iCloud sync; hidden channel filter.)*
+*Last updated: July 14, 2026 (Build 39 — Wyzie Subs, stale stream fix, subtitle parser, iCloud sync, macOS Live TV sidebar fix. All platforms build clean; macOS ready for TestFlight.)*
