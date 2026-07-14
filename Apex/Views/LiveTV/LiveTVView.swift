@@ -275,12 +275,14 @@ struct LiveTVView: View {
 
             if let displayed {
                 detail(for: displayed)
+                    .frame(maxWidth: .infinity)
             } else {
                 ContentUnavailableView(
                     "Select a Category",
                     systemImage: "list.bullet",
                     description: Text("Choose a category from the sidebar")
                 )
+                .frame(maxWidth: .infinity)
             }
         }
     }
@@ -390,32 +392,36 @@ struct CategorySidebar: View {
     @Environment(ThemeManager.self) private var themeManager
 
     var body: some View {
-        List(sections) { section in
-            let isSelected = selectedSection?.id == section.id
-            Button {
-                selectedSection = section
-            } label: {
+        List(selection: Binding(
+            get: { selectedSection?.id },
+            set: { newID in
+                selectedSection = sections.first { $0.id == newID }
+            }
+        )) {
+            ForEach(sections) { section in
                 HStack(spacing: 8) {
                     if let icon = section.icon {
                         Image(systemName: icon)
                             .font(.subheadline)
-                            .foregroundStyle(isSelected ? themeManager.colors.accent : Color.secondary)
+                            .foregroundStyle(selectedSection?.id == section.id ? themeManager.colors.accent : Color.secondary)
                     }
                     section.titleText
                         .font(.headline)
-                        .foregroundStyle(isSelected ? themeManager.colors.accent : Color.primary)
+                        .foregroundStyle(selectedSection?.id == section.id ? themeManager.colors.accent : Color.primary)
                     Spacer()
                 }
                 .contentShape(Rectangle())
+                .tag(section.id)
             }
-            .buttonStyle(.plain)
-            .listRowBackground(
-                isSelected
-                    ? themeManager.colors.accent.opacity(0.15)
-                    : Color.clear
-            )
         }
-        #if !os(tvOS)
+        #if os(macOS)
+        .listStyle(.sidebar)
+        .safeAreaInset(edge: .top, spacing: 0) {
+            // Reserve space so the first row isn't covered by the window
+            // traffic light buttons (close/minimize/maximize).
+            Spacer().frame(height: 4)
+        }
+        #elseif !os(tvOS)
         .listStyle(.sidebar)
         #endif
     }
