@@ -197,6 +197,10 @@ struct ApexApp: App {
                         in: catalogContainer.mainContext
                     )
 
+                    // Pull OpenSubtitles settings from iCloud so the API key
+                    // entered on another device is available for playback.
+                    OpenSubtitlesSettings.syncFromCloud()
+
                     // Restore a previously connected Trakt session (refreshing
                     // the token if stale) so watched-sync and the watchlist work
                     // from launch.

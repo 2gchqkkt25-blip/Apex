@@ -78,6 +78,10 @@ struct OpenSubtitlesSettingsView: View {
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
+        .onChange(of: isEnabled) { OpenSubtitlesSettings.syncToCloud() }
+        .onChange(of: apiKey) { OpenSubtitlesSettings.syncToCloud() }
+        .onChange(of: language) { OpenSubtitlesSettings.syncToCloud() }
+        .onAppear { OpenSubtitlesSettings.syncFromCloud() }
     }
     #endif
 
@@ -126,6 +130,10 @@ struct OpenSubtitlesSettingsView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .onChange(of: isEnabled) { OpenSubtitlesSettings.syncToCloud() }
+        .onChange(of: apiKey) { OpenSubtitlesSettings.syncToCloud() }
+        .onChange(of: language) { OpenSubtitlesSettings.syncToCloud() }
+        .onAppear { OpenSubtitlesSettings.syncFromCloud() }
     }
     #endif
 
