@@ -1480,6 +1480,7 @@ See **What's Been Built → iOS Device — Large Library Fix** above for full de
 | Feature | Difficulty | Description |
 |---------|-----------|-------------|
 | **EPG external feed gap-fill** | Low (~1 day) | After provider xmltv.php sync, check which channels got 0 programmes. Fill those gaps from epgshare01 feeds. Keeps speed while improving accuracy for providers with incomplete guides. |
+| **Live TV mini preview** | Medium (~2-3 days) | Small floating video window in the corner while browsing Live TV channels. Tap a channel → preview plays in the corner while you keep scrolling. Tap preview to go fullscreen or pick another channel to switch it. Lightweight AVPlayer overlay, not the full engine stack. Wi-Fi only (uses a concurrent connection). |
 | **Stream quality picker for Xtream** | Low (~1 day) | Let user choose stream format (m3u8/ts/original) per playlist or globally. Some providers serve better quality in one format. |
 | **Multi-audio track selection** | Low (~1 day) | Surface audio track picker in player controls (some streams have English + Spanish + commentary tracks). |
 | **Parental PIN on app launch** | Low (~half day) | Optional PIN/Face ID gate on app open for households with shared Apple TV. |
