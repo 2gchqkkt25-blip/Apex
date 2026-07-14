@@ -24,10 +24,11 @@
 - Content from **Xtream Codes**, **M3U/M3U8 playlists**, **Stalker portals**, or **Stremio addons**
 - **EPG guide** with full time-grid view
 - **TMDB/OMDb metadata** — posters, ratings, cast, descriptions
+- **Automatic subtitles** — Wyzie Subs (SRT overlay for movies + series)
 - **3 playback engines** — KSPlayer (default), VLCKit, AVPlayer (auto-fallback)
 - **5 theme system** — System, Frosted Glass, Midnight, Sunset, Ocean
 - **User profiles**, **parental controls**, **cloud sync**, **downloads**
-- Runs on **iPhone, iPad, Mac, Apple TV, Vision Pro**
+- Runs on **iPhone, iPad, Mac, Apple TV**
 
 ---
 
@@ -143,6 +144,9 @@ Without these keys, the app works but metadata is limited to what the IPTV provi
 | 77 | **Build 35/36 — Reseller panel series + Stremio series fix** | ✅ **Done (Jul 12)** — Reseller panel full fix (stream server detection, credential extraction from `stream_url`, `.m3u8` forced for HLS-only panels, duplicate series fallback). Stremio series loads episodes on first tap (IMDB ID stored at import). |
 | 78 | **Build 37 — Tester feedback fixes + OpenSubtitles** | ✅ **Done (Jul 12)** — Hidden content no longer shows on Home; favorites channel surf stays in favorites; reorder Live TV sections from category picker; phone sync doesn't interrupt tvOS; OpenSubtitles.com integration (auto-fetch + SRT overlay). |
 | 79 | **Build 38 — Home filter fix + Clear Guide + All Channels + polish** | ✅ **Done (Jul 12)** — Hidden content fully filtered from ALL Home rows (was only filtering some); Clear Guide Data button in TV Guide settings; All Channels section in Live TV; tvOS search debounce 600ms; OpenSubtitles iCloud sync; verbose login error messages; playlist tester tool. |
+| 80 | **Live TV iCloud sync — favorites + recently watched** | ✅ **Done (Jul 14)** — Live TV favorites and recently watched now sync across devices via CloudKit. Previously `liveEntries()` only synced the favorite flag (explicitly excluded `lastWatchedDate`); pull-from-cloud only wrote `isFavorite`/`favoriteOrder`. Both directions now carry `lastWatchedDate`. |
+| 81 | **Recently Watched — hidden live channels filtered on Home** | ✅ **Done (Jul 14)** — Live channels individually hidden via Content Management (`isHidden`) now excluded from the Home → Recently Watched row. Movies/series were already filtered by hidden category; live streams needed the per-channel `isHidden` check too. |
+| 82 | **Build 39 — Wyzie Subs + stale stream fix + subtitle parser** | ✅ **Done (Jul 14)** — Replaced OpenSubtitles with Wyzie Subs (simpler, no login, 1K req/day free). Fixed streams not recovering after provider outages (URL cache disabled). Fixed SRT parser (Windows line endings). Fixed series subtitle IMDB resolution. |
 
 ---
 
@@ -1171,6 +1175,93 @@ Only the last two are actual network west feeds. The others were name-based coll
 
 ---
 
+### Live TV iCloud Sync — Favorites + Recently Watched (July 14, 2026)
+
+- **Symptom:** User favorites live channels and watches live TV on iOS. When they switch to Apple TV (tvOS), neither favorites nor recently watched channels appear.
+- **Root cause:** `CloudSyncEngine+Fetch.swift` → `liveEntries()` was deliberately restricted:
+  - Predicate only fetched channels where `isFavorite == true` (excluded recently watched-only channels)
+  - `lastWatchedDate` was hardcoded to `nil` in the `ContentStateValues` payload — never pushed to CloudKit
+  - `applyContentToLocal` for `.live` only wrote `isFavorite` and `favoriteOrder` — ignored `lastWatchedDate` arriving from the cloud
+  - The original comment stated "channel-surfing recently watched stays device-local to avoid mirror bloat" — but this contradicts user expectations since Movies/Series/Episodes all sync their watch history
+- **Fix:**
+  - `liveEntries()` predicate: `$0.isFavorite` → `$0.isFavorite || $0.lastWatchedDate != nil` — includes recently watched channels in the sync
+  - `ContentStateValues` for live: passes `stream.lastWatchedDate` (was `nil`)
+  - `applyContentToLocal` `.live` case: now writes `stream.lastWatchedDate = values.lastWatchedDate`
+- **Mirror bloat concern:** Minimal impact — only channels the user has actually watched or favorited get a `UserContentState` record. Most users watch 20–50 live channels regularly, not thousands. The same mechanism already syncs thousands of movie/episode watch states without issue.
+- **Merge conflict handling:** Already correct — `ContentStateValues.mergeConflict` uses `laterDate` for `lastWatchedDate` (keeps the most recent timestamp) and OR for `isFavorite` (never loses a favorite).
+- **Files:** `CloudSyncEngine+Fetch.swift`, `CloudSyncEngine.swift`
+
+---
+
+### Recently Watched — Hidden Live Channels Filtered on Home (July 14, 2026)
+
+- **Symptom:** User hides a live channel via Content Management, but it still appears in the Home → Recently Watched row.
+- **Root cause:** The Recently Watched builder in `HomeView.swift` filtered movies and series by hidden *category* ID (`!hidden.contains($0.categoryId ?? "")`), but live channels have a per-channel `isHidden` flag (set in Content Management) that wasn't being checked. A channel hidden individually (not its entire category) would slip through.
+- **Fix:** Added `!$0.isHidden` to the `watchedStreams.filter` predicate alongside the existing category-based hidden check.
+- **Files:** `HomeView.swift`
+
+---
+
+### Build 39 — Wyzie Subs, Stale Stream Fix, Subtitle Parser (July 14, 2026)
+
+> **Context:** Users reported: (1) OpenSubtitles returning 403 errors (rate limits + login required for downloads), (2) streams not recovering after provider outages without removing/re-adding the playlist, (3) subtitles downloading but not rendering for series, (4) Live TV favorites and recently watched not syncing to tvOS.
+
+### ✅ Fixed — Subtitles: Replaced OpenSubtitles with Wyzie Subs
+
+- **Root cause:** OpenSubtitles.com's `/download` endpoint requires a JWT token from `/login` (username + password), and the free tier has very low rate limits (5-20 requests/day). Users were getting 403 errors even with a valid API key.
+- **Fix:** Replaced with **Wyzie Subs** (`sub.wyzie.io`) as the sole subtitle provider:
+  - One GET request does everything (search + download URL in response) — no login, no JWT, no separate download step
+  - Free tier: 1,000 requests/day (vs OpenSubtitles ~5-20)
+  - Supports IMDB ID, TMDB ID, season/episode, language, format filtering
+  - Settings UI simplified to: Enable toggle + API key + Language picker
+  - OpenSubtitles fields removed from UI (code still exists but is unreferenced)
+- **Files:** `WyzieSubsClient.swift` (new), `OpenSubtitlesSettingsView.swift`, `FullScreenPlayerView.swift`, `OpenSubtitlesSettings.swift`
+
+### ✅ Fixed — Subtitles: SRT parser only returned 1 cue from 35K file
+
+- **Root cause:** SRT parser split blocks on `"\n\n"` but downloaded files used Windows line endings (`\r\n`). The entire file was treated as one block → only 1 cue parsed.
+- **Fix:** Normalize `\r\n` → `\n` before parsing. Also: BOM removal, find timestamp lines by `" --> "` marker (not fixed line position), handle non-UTF-8 encoding (Latin-1, Windows-1252), validate file contains timestamps before writing. Added 0.25s poll timer as rendering fallback.
+- **Files:** `ExternalSubtitleOverlay.swift`, `WyzieSubsClient.swift`
+
+### ✅ Fixed — Subtitles: Not working for series (IMDB ID nil)
+
+- **Root cause:** For episodes, subtitle fetch used `ep?.series?.imdbId` which is `nil` until the user opens the series detail screen (TMDB enrichment). Movies worked because OMDb enrichment runs more eagerly.
+- **Fix:** Reuse `IntroSkipResolver.lookup()` which already handles this — searches TMDB by title, fetches external IDs, caches the IMDB ID on the Series for future episodes.
+- **Files:** `FullScreenPlayerView.swift`
+
+### ✅ Fixed — Streams not recovering after provider outages
+
+- **Root cause:** `URLSessionConfiguration.default` uses `URLCache.shared` which caches HTTP responses including errors. When a provider returned 401/403 during an outage, the cached error was served on subsequent attempts without hitting the network. Other IPTV apps use no-cache policies.
+- **Fix:** `ProviderURLSession.make()` now sets `urlCache = nil` and `requestCachePolicy = .reloadIgnoringLocalCacheData`. All provider HTTP (API, streams, icons, EPG) always goes to the network. TMDB/OMDb/Trakt sessions unaffected.
+- **Files:** `ProviderURLSession.swift`
+
+### ✅ Fixed — Live TV iCloud sync (favorites + recently watched)
+
+- **Root cause:** `liveEntries()` only synced `isFavorite` (excluded `lastWatchedDate` by design). `applyContentToLocal` for `.live` only wrote `isFavorite`/`favoriteOrder`.
+- **Fix:** Predicate now fetches `isFavorite || lastWatchedDate != nil`. Both push and pull carry `lastWatchedDate`.
+- **Files:** `CloudSyncEngine+Fetch.swift`, `CloudSyncEngine.swift`
+
+### ✅ Fixed — Hidden live channels showing in Recently Watched on Home
+
+- **Root cause:** Movies/series filtered by hidden category ID, but live channels have a per-channel `isHidden` flag that wasn't checked.
+- **Fix:** Added `!$0.isHidden` to the live stream filter in the Recently Watched row builder.
+- **Files:** `HomeView.swift`
+
+### Files touched in Build 39
+
+- `Apex/Services/Subtitles/WyzieSubsClient.swift` — **new**: Wyzie Subs API client
+- `Apex/Services/Subtitles/OpenSubtitlesSettings.swift` — added `SubtitleSettings` enum with `wyzieApiKeyKey`; iCloud sync includes Wyzie key
+- `Apex/Services/Subtitles/OpenSubtitlesClient.swift` — added login/JWT (unused now but kept)
+- `Apex/Services/Network/ProviderURLSession.swift` — disabled URL cache, set `.reloadIgnoringLocalCacheData`
+- `Apex/Services/Sync/CloudSync/CloudSyncEngine+Fetch.swift` — `liveEntries()` syncs `lastWatchedDate`
+- `Apex/Services/Sync/CloudSync/CloudSyncEngine.swift` — `.live` pull writes `lastWatchedDate`
+- `Apex/Views/Player/ExternalSubtitleOverlay.swift` — SRT parser rewrite (line endings, BOM, encoding, timestamp-line search); poll timer
+- `Apex/Views/Player/FullScreenPlayerView.swift` — Wyzie-only flow; `IntroSkipResolver` for episode IMDB resolution; guard fix
+- `Apex/Views/Settings/OpenSubtitlesSettingsView.swift` — simplified to Wyzie-only (API key + language + test)
+- `Apex/Views/Home/HomeView.swift` — `!$0.isHidden` on live stream recently-watched filter
+
+---
+
 ### EPG Guide — StreamInfinity panel blocked (July 6, 2026)
 
 **Status: 🔄 Blocked on maintainer test panel** — not working for correct "now" data.
@@ -1356,6 +1447,7 @@ When ready for public listing (after TestFlight):
 - A full feature inventory is at `FEATURE_INVENTORY.md`
 - **API keys** — TMDB + OMDb strongly recommended; `INTRO_DB_API_KEY` optional (Skip Intro works unauthenticated). Keys inject at **build time** via `Scripts/inject-env.sh` — **rebuild after editing `.env`**
 - **Skip Intro** — Settings toggle only (not Premium); needs IntroDB coverage per episode (some episodes have no skippable intro)
+- **Subtitles** — Wyzie Subs (`sub.wyzie.io`); auto-fetches SRT by IMDB ID during VOD playback; free key from `store.wyzie.io/redeem` (1,000 req/day). Settings → Subtitles. OpenSubtitles removed from UI (Jul 14).
 - **EPG** — 🔄 **Working on StreamInfinity panel** with 14 external epgshare01 feeds + structural West/Pacific `+3h` insert + broadened live-API gap-fill. Title accuracy correct for major networks; local-affiliate West variants and niche channels fall through to per-channel API. See **`EPG.md`**
 - **TestFlight Pro** — beta testers get full Pro without IAP (`BetaBuildDetection`)
 - **For You** — Premium + at least one watch/favorite/vote signal; tvOS uses metadata fallback when embeddings unavailable
@@ -1403,7 +1495,7 @@ When ready for public listing (after TestFlight):
 | **Live TV queries** | Category channel query capped at `fetchLimit = 200` (view paginates at 50). Prevents jetsam on mega-categories in 17K+ playlists. |
 | **Image cache** | 128MB iOS, 64MB tvOS. NSCache evicts under pressure; purges on memory warning + deferred on background. |
 | **EPG status** | ✅ Both platforms verified (Jul 11): parallel downloads, external EPG primary, branded unified sync, instant post-sync channel cards, persists across restarts and category switches. Guide view matches list view speed. See `EPG.md`. |
-| **CloudKit UI** | Settings → iCloud Sync; foreground reconcile gated on actual imports |
+| **CloudKit UI** | Settings → iCloud Sync; foreground reconcile gated on actual imports. Live TV favorites **and** recently watched sync across devices (Jul 14 fix — was favorites-only). |
 | **Future (if needed)** | Hybrid SQLite layer (GRDB) for catalog browse — cursor-based pagination with constant memory regardless of playlist size. Only needed if tab-unmount approach isn't sufficient. See § Build 31. |
 
 ---
@@ -1533,4 +1625,4 @@ See **What's Been Built → iOS Device — Large Library Fix** above for full de
 
 ---
 
-*Last updated: July 12, 2026 (Build 38 — Hidden content fully filtered from all Home rows, Clear Guide Data button, All Channels section in Live TV, tvOS search debounce for phone keyboard, OpenSubtitles iCloud sync, verbose login errors, playlist tester tool. See § Build 37, § Build 38.)*
+*Last updated: July 14, 2026 (Build 39 — Wyzie Subs replaces OpenSubtitles; stale stream recovery fix; SRT parser rewrite; series subtitle IMDB resolution; Live TV iCloud sync; hidden channel filter.)*

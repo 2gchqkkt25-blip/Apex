@@ -232,13 +232,13 @@ struct FullScreenPlayerView: View {
             }
         }
         .task(id: activeMedia.id) {
-            // Fetch external subtitles from OpenSubtitles.com when configured.
+            // Fetch external subtitles when configured.
             // Only for VOD content (not live) and only when no embedded tracks
             // are detected after a brief delay.
             externalSubtitleURL = nil
             guard !activeMedia.isLive else { return }
-            guard OpenSubtitlesClient.shared.isConfigured else { return }
-            guard UserDefaults.standard.bool(forKey: OpenSubtitlesSettings.enabledKey) else { return }
+            guard WyzieSubsClient.shared.isConfigured else { return }
+            guard UserDefaults.standard.bool(forKey: SubtitleSettings.enabledKey) else { return }
 
             // Wait briefly for the stream to load and expose its tracks.
             // If embedded subs exist, the user can pick those instead.
@@ -264,7 +264,13 @@ struct FullScreenPlayerView: View {
                 let ep = try? modelContext.fetch(descriptor).first
                 season = ep?.seasonNum
                 episode = ep?.episodeNum
-                imdbId = ep?.series?.imdbId
+                // Use the Skip Intro resolver's proven IMDB resolution path —
+                // it handles missing imdbId by looking up TMDB external IDs.
+                if let lookup = await IntroSkipResolver.lookup(for: activeMedia.contentRef, in: modelContext) {
+                    imdbId = lookup.imdbId
+                } else {
+                    imdbId = ep?.series?.imdbId
+                }
             default:
                 imdbId = nil
                 season = nil
@@ -273,8 +279,10 @@ struct FullScreenPlayerView: View {
 
             guard let imdbId, !imdbId.isEmpty else { return }
 
+            // Fetch subtitles from Wyzie Subs
+            guard WyzieSubsClient.shared.isConfigured else { return }
             do {
-                let subtitleFile = try await OpenSubtitlesClient.shared.fetchBestSubtitle(
+                let subtitleFile = try await WyzieSubsClient.shared.fetchBestSubtitle(
                     imdbId: imdbId,
                     season: season,
                     episode: episode
@@ -283,9 +291,9 @@ struct FullScreenPlayerView: View {
                 await MainActor.run {
                     externalSubtitleURL = subtitleFile
                 }
-                Logger.player.info("[Subtitles] OpenSubtitles loaded for \(imdbId, privacy: .public)")
+                Logger.player.info("[Subtitles] Wyzie loaded for \(imdbId, privacy: .public)")
             } catch {
-                Logger.player.debug("[Subtitles] OpenSubtitles: \(error.localizedDescription, privacy: .public)")
+                Logger.player.debug("[Subtitles] All providers failed: \(error.localizedDescription, privacy: .public)")
             }
         }
         .task {

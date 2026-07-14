@@ -2,16 +2,15 @@
 //  OpenSubtitlesSettingsView.swift
 //  Apex
 //
-//  Settings UI for configuring OpenSubtitles.com integration.
-//  Allows the user to enter their API key and choose a preferred language.
+//  Settings UI for configuring subtitles via Wyzie Subs.
 //
 
 import SwiftUI
 
 struct OpenSubtitlesSettingsView: View {
-    @AppStorage(OpenSubtitlesSettings.enabledKey) private var isEnabled = false
-    @AppStorage(OpenSubtitlesSettings.apiKeyKey) private var apiKey = ""
-    @AppStorage(OpenSubtitlesSettings.languageKey) private var language = "en"
+    @AppStorage(SubtitleSettings.enabledKey) private var isEnabled = false
+    @AppStorage(SubtitleSettings.wyzieApiKeyKey) private var wyzieApiKey = ""
+    @AppStorage(SubtitleSettings.languageKey) private var language = "en"
 
     @State private var testResult: String?
     @State private var isTesting = false
@@ -24,11 +23,13 @@ struct OpenSubtitlesSettingsView: View {
         #endif
     }
 
+    // MARK: - iOS / macOS
+
     #if !os(tvOS)
     private var formBody: some View {
         Form {
             Section {
-                Toggle("Enable OpenSubtitles", isOn: $isEnabled)
+                Toggle("Enable Subtitles", isOn: $isEnabled)
             } header: {
                 Text("Subtitles")
             } footer: {
@@ -37,7 +38,7 @@ struct OpenSubtitlesSettingsView: View {
 
             if isEnabled {
                 Section {
-                    TextField("API Key", text: $apiKey)
+                    TextField("API Key", text: $wyzieApiKey)
                         .textContentType(.password)
                         #if os(iOS)
                         .textInputAutocapitalization(.never)
@@ -52,7 +53,7 @@ struct OpenSubtitlesSettingsView: View {
                 } header: {
                     Text("Configuration")
                 } footer: {
-                    Text("Get a free API key at opensubtitles.com/consumers. Sign up for a free account, then create a new consumer (app) to get your API key.")
+                    Text("Get a free API key at store.wyzie.io/redeem — just verify with your email. 1,000 requests per day at no cost.")
                 }
 
                 Section {
@@ -70,7 +71,7 @@ struct OpenSubtitlesSettingsView: View {
                             }
                         }
                     }
-                    .disabled(apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(wyzieApiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
         }
@@ -79,11 +80,13 @@ struct OpenSubtitlesSettingsView: View {
         .navigationBarTitleDisplayMode(.inline)
         #endif
         .onChange(of: isEnabled) { OpenSubtitlesSettings.syncToCloud() }
-        .onChange(of: apiKey) { OpenSubtitlesSettings.syncToCloud() }
+        .onChange(of: wyzieApiKey) { OpenSubtitlesSettings.syncToCloud() }
         .onChange(of: language) { OpenSubtitlesSettings.syncToCloud() }
         .onAppear { OpenSubtitlesSettings.syncFromCloud() }
     }
     #endif
+
+    // MARK: - tvOS
 
     #if os(tvOS)
     private var tvBody: some View {
@@ -94,7 +97,7 @@ struct OpenSubtitlesSettingsView: View {
                 isEnabled.toggle()
             } label: {
                 HStack {
-                    Text("OpenSubtitles")
+                    Text("Subtitles")
                     Spacer()
                     Text(isEnabled ? "On" : "Off")
                         .foregroundStyle(.secondary)
@@ -103,7 +106,7 @@ struct OpenSubtitlesSettingsView: View {
             .buttonStyle(TVSettingsRowButtonStyle())
 
             if isEnabled {
-                TVSettingsField(title: "API Key", placeholder: "Enter your API key", text: $apiKey, isSecure: true, contentType: .password)
+                TVSettingsField(title: "API Key", placeholder: "Enter your API key", text: $wyzieApiKey, isSecure: true, contentType: .password)
 
                 VStack(spacing: 2) {
                     ForEach(OpenSubtitlesSettings.languages.prefix(10), id: \.code) { lang in
@@ -123,7 +126,7 @@ struct OpenSubtitlesSettingsView: View {
                     }
                 }
 
-                Text("Get a free API key at opensubtitles.com/consumers. Sign up, create a consumer app, and enter the API key above.")
+                Text("Get a free key at store.wyzie.io/redeem — just verify with your email. 1,000 requests per day.")
                     .font(.system(size: 20))
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, TVSettingsMetrics.rowHPadding)
@@ -131,20 +134,23 @@ struct OpenSubtitlesSettingsView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .onChange(of: isEnabled) { OpenSubtitlesSettings.syncToCloud() }
-        .onChange(of: apiKey) { OpenSubtitlesSettings.syncToCloud() }
+        .onChange(of: wyzieApiKey) { OpenSubtitlesSettings.syncToCloud() }
         .onChange(of: language) { OpenSubtitlesSettings.syncToCloud() }
         .onAppear { OpenSubtitlesSettings.syncFromCloud() }
     }
     #endif
+
+    // MARK: - Test
 
     private func testConnection() {
         isTesting = true
         testResult = nil
         Task {
             do {
-                let results = try await OpenSubtitlesClient.shared.searchSubtitles(imdbId: "tt0111161")
+                let url = try await WyzieSubsClient.shared.fetchBestSubtitle(imdbId: "tt0111161")
+                try? FileManager.default.removeItem(at: url)
                 await MainActor.run {
-                    testResult = "✓ Connected (\(results.count) results)"
+                    testResult = "✓ Connected"
                     isTesting = false
                 }
             } catch {

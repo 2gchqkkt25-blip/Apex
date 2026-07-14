@@ -34,6 +34,8 @@ final class ProviderURLSessionDelegate: NSObject, URLSessionDelegate, @unchecked
 
 enum ProviderURLSession {
     /// Builds a session that tolerates mismatched provider TLS certificates.
+    /// Cache is disabled so stale error responses (401/403 from provider outages)
+    /// never block playback after the provider recovers.
     static func make(
         timeout: TimeInterval = 30,
         resourceTimeout: TimeInterval = 120,
@@ -46,14 +48,13 @@ enum ProviderURLSession {
         config.httpMaximumConnectionsPerHost = maxConnectionsPerHost
         config.timeoutIntervalForRequest = timeout
         config.timeoutIntervalForResource = resourceTimeout
+        // Disable URL caching for provider traffic. IPTV streams and API calls
+        // should never be served from cache — a stale 401/403 cached during a
+        // provider outage would block playback even after the provider recovers.
+        config.urlCache = urlCache ?? nil
+        config.requestCachePolicy = cachePolicy ?? .reloadIgnoringLocalCacheData
         if !additionalHeaders.isEmpty {
             config.httpAdditionalHeaders = additionalHeaders
-        }
-        if let urlCache {
-            config.urlCache = urlCache
-        }
-        if let cachePolicy {
-            config.requestCachePolicy = cachePolicy
         }
         return URLSession(configuration: config, delegate: ProviderURLSessionDelegate.shared, delegateQueue: nil)
     }

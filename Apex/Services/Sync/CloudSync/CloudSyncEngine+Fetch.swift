@@ -172,18 +172,19 @@ extension CloudSyncEngine {
         }
     }
 
-    /// Live streams sync only their favorite flag/order — channel-surfing
-    /// "recently watched" stays device-local to avoid mirror bloat.
+    /// Live streams sync favorites and recently watched so both surface on
+    /// every device via iCloud. Only channels with user state (favorite or
+    /// watched) produce a cloud record — untouched channels are skipped.
     func liveEntries() throws -> [(String, LocalContentEntry)] {
         let streams = try catalogContext.fetch(FetchDescriptor<LiveStream>(
-            predicate: #Predicate { $0.isFavorite }
+            predicate: #Predicate { $0.isFavorite || $0.lastWatchedDate != nil }
         ))
         return streams.map { stream in
             (stream.id, LocalContentEntry(
                 values: ContentStateValues(
                     watchProgress: 0,
                     isWatched: false,
-                    lastWatchedDate: nil,
+                    lastWatchedDate: stream.lastWatchedDate,
                     isFavorite: stream.isFavorite,
                     addedToWatchlistDate: nil,
                     favoriteOrder: stream.favoriteOrder

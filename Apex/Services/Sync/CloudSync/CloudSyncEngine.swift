@@ -522,6 +522,7 @@ extension CloudSyncEngine {
             guard let stream = try (loaded as? LiveStream) ?? fetchLiveStream(id) else { return false }
             stream.isFavorite = values.isFavorite
             stream.favoriteOrder = values.favoriteOrder
+            stream.lastWatchedDate = values.lastWatchedDate
         }
         return true
     }

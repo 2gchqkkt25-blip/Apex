@@ -8,6 +8,7 @@
 //
 
 import SwiftUI
+import OSLog
 
 /// Parses and renders an SRT subtitle file, displaying cues based on playback time.
 struct ExternalSubtitleOverlay: View {
@@ -16,6 +17,7 @@ struct ExternalSubtitleOverlay: View {
 
     @State private var cues: [SRTCue] = []
     @State private var currentText: String = ""
+    @State private var pollTimer: Timer?
 
     var body: some View {
         VStack {
@@ -35,9 +37,26 @@ struct ExternalSubtitleOverlay: View {
         .allowsHitTesting(false)
         .task {
             cues = SRTParser.parse(fileURL: subtitleURL)
+            if cues.isEmpty {
+                Logger.player.warning("[Subtitles] SRT parser returned 0 cues from \(subtitleURL.lastPathComponent)")
+            } else {
+                Logger.player.info("[Subtitles] Parsed \(cues.count) subtitle cues")
+            }
         }
         .onChange(of: clock.current) { _, time in
             updateCurrentCue(at: time)
+        }
+        .onAppear {
+            // Poll as a fallback in case onChange doesn't fire reliably
+            // (some engine/clock combos update on a non-main dispatch queue
+            // and the Observation change may not propagate every tick)
+            pollTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { _ in
+                updateCurrentCue(at: clock.current)
+            }
+        }
+        .onDisappear {
+            pollTimer?.invalidate()
+            pollTimer = nil
         }
     }
 
@@ -87,24 +106,52 @@ enum SRTParser {
 
     static func parse(content: String) -> [SRTCue] {
         var cues: [SRTCue] = []
-        let blocks = content.components(separatedBy: "\n\n")
+
+        // Normalize line endings: \r\n → \n, standalone \r → \n
+        let normalized = content
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+
+        // Remove BOM if present
+        let cleaned = normalized.hasPrefix("\u{FEFF}") ? String(normalized.dropFirst()) : normalized
+
+        let blocks = cleaned.components(separatedBy: "\n\n")
 
         for block in blocks {
-            let lines = block.components(separatedBy: "\n").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            guard lines.count >= 3 else { continue }
+            let lines = block.components(separatedBy: "\n")
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            guard lines.count >= 2 else { continue }
 
-            // First line: cue index
-            guard let index = Int(lines[0]) else { continue }
+            // Find the timestamp line (contains " --> ")
+            // Some SRT files have extra blank lines or metadata before the index
+            var timestampLineIndex: Int?
+            for (i, line) in lines.enumerated() {
+                if line.contains(" --> ") {
+                    timestampLineIndex = i
+                    break
+                }
+            }
+            guard let tsIdx = timestampLineIndex, tsIdx + 1 < lines.count else { continue }
 
-            // Second line: timestamps "00:01:23,456 --> 00:01:26,789"
-            let timeParts = lines[1].components(separatedBy: " --> ")
+            // Parse index (line before timestamp, if available)
+            let index: Int
+            if tsIdx > 0, let parsed = Int(lines[tsIdx - 1]) {
+                index = parsed
+            } else {
+                index = cues.count + 1
+            }
+
+            // Parse timestamps "00:01:23,456 --> 00:01:26,789"
+            let timeParts = lines[tsIdx].components(separatedBy: " --> ")
             guard timeParts.count == 2,
                   let start = parseTimestamp(timeParts[0]),
                   let end = parseTimestamp(timeParts[1])
             else { continue }
 
-            // Remaining lines: subtitle text
-            let text = lines[2...].joined(separator: "\n")
+            // Remaining lines after the timestamp: subtitle text
+            let textLines = lines[(tsIdx + 1)...]
+            let text = textLines.joined(separator: "\n")
                 .replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             guard !text.isEmpty else { continue }

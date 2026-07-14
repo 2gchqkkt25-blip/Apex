@@ -4,6 +4,30 @@ All notable changes to Apex Stream Player.
 
 ---
 
+## Build 39 (1.2.0) — July 14, 2026
+
+### Subtitles — Wyzie Subs (replaces OpenSubtitles)
+
+- **New provider: Wyzie Subs** — Simpler, faster, and more reliable. Just an API key (free at store.wyzie.io/redeem, 1,000 requests/day). No username/password/login required.
+- **Series subtitles fixed** — Episodes now resolve IMDB IDs via TMDB automatically at playback time. Previously required opening the series detail screen first.
+- **SRT parser rewrite** — Fixed Windows line endings (`\r\n`), BOM characters, and non-UTF-8 encodings (Latin-1, Windows-1252). A 35K character file was only parsing 1 cue; now parses 500+.
+- **Rendering reliability** — Added poll timer fallback (0.25s) alongside `@Observable` change detection for consistent subtitle display across all engines.
+- **Settings simplified** — Settings → Subtitles now shows: Enable toggle, API key, Language picker. No more username/password fields.
+
+### Bug Fixes
+
+- **Streams not recovering after provider outages** — Previously required removing and re-adding the playlist. Root cause: iOS cached error responses (401/403) from the provider. Fix: URL caching disabled on all provider HTTP sessions. Streams now recover instantly when the provider comes back.
+- **Live TV favorites not syncing to tvOS** — Favorites and recently watched channels now sync across all devices via iCloud. Previously only the favorite flag synced; watch history was device-local.
+- **Hidden live channels in Recently Watched** — Channels hidden via Content Management no longer appear in the Home → Recently Watched row.
+
+### What's NOT Changed
+
+- EPG, playback engines, themes, Skip Intro all unchanged
+- Embedded subtitle track picker (CC button) still shows for streams with built-in tracks
+- Existing Wyzie API key syncs via iCloud to all devices automatically
+
+---
+
 ## Build 38 (1.2.0) — July 12, 2026
 
 ### Bug Fixes
