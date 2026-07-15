@@ -4,7 +4,7 @@ All notable changes to Apex Stream Player.
 
 ---
 
-## Build 40 (1.2.0) — July 15, 2026
+## Build 41 (1.2.0) — July 15, 2026
 
 ### Live TV / EPG (iOS)
 

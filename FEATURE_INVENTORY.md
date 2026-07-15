@@ -2,7 +2,7 @@
 
 > **Purpose:** Track what stays, what goes, and what changes during the Lume → Apex rebrand.
 >
-> **Last updated:** July 15, 2026 (Build 40)
+> **Last updated:** July 15, 2026 (Build 41)
 
 ---
 
@@ -38,7 +38,7 @@ Create, edit, delete playlists. Stores server URL, credentials, MAC address, EPG
 - **Status:** Core — **Decision:** ✅ Keep
 
 ### 1.5 Playlist Switching
-Switch between multiple playlists with progress overlay. Each switch re-scopes all content tabs. Limited to 1 playlist on free tier. Empty selection prefers **Xtream → M3U → Stalker → Stremio** so a CloudKit restore does not leave Stremio as the default when a catalog playlist exists (Build 40).
+Switch between multiple playlists with progress overlay. Each switch re-scopes all content tabs. Limited to 1 playlist on free tier. Empty selection prefers **Xtream → M3U → Stalker → Stremio** so a CloudKit restore does not leave Stremio as the default when a catalog playlist exists (Build 41).
 - **Files:** `PlaylistSwitcher.swift`, `PlaylistSwitchProgress.swift`, `MainTabView.swift`
 - **Status:** Core — **Decision:** ✅ Keep
 
@@ -335,7 +335,7 @@ Actor-based background sync for Xtream, M3U, Stalker. Downloads catalogs in batc
 - **Status:** Core — **Decision:** ✅ Keep
 
 ### 9.2 Auto-Sync on Launch/Foreground/Add
-Playlists sync automatically on launch, playlist add, foreground return, and playlist switch. Configurable frequency (hourly, daily, weekly, manual). Catalog providers (Xtream / M3U / Stalker) enqueue ahead of Stremio. On tvOS, first-time syncs (`lastSyncDate == nil`) always present the sync cover; routine refreshes still defer when browsing Home (Build 40).
+Playlists sync automatically on launch, playlist add, foreground return, and playlist switch. Configurable frequency (hourly, daily, weekly, manual). Catalog providers (Xtream / M3U / Stalker) enqueue ahead of Stremio. On tvOS, first-time syncs (`lastSyncDate == nil`) always present the sync cover; routine refreshes still defer when browsing Home (Build 41).
 - **Files:** `MainTabView.swift`, `SyncProgressView.swift`, `SettingsView+AutoSync.swift`, `PlaylistSwitcher.swift` (`orderedForAutoSync`)
 - **Status:** Core — **Decision:** ✅ Keep
 
@@ -350,7 +350,7 @@ Lightweight CloudKit mirror of playlists (credentials + config only, not catalog
 - **Status:** Core — **Decision:** ✅ Keep
 
 ### 9.5 Cloud Sync Launch / Initial Sync
-Fresh-device handling: waits for initial iCloud sync before showing login form so cloud playlists arrive first. After restore, empty `apex.selectedPlaylistID` prefers **Xtream → M3U → Stalker → Stremio** (`preferredDefault`); progressive imports that pinned Stremio first are promoted when a never-synced catalog playlist arrives (Build 40).
+Fresh-device handling: waits for initial iCloud sync before showing login form so cloud playlists arrive first. After restore, empty `apex.selectedPlaylistID` prefers **Xtream → M3U → Stalker → Stremio** (`preferredDefault`); progressive imports that pinned Stremio first are promoted when a never-synced catalog playlist arrives (Build 41).
 - **Files:** `CloudSyncLaunchView.swift`, `PlaylistSwitcher.swift`, `MainTabView.swift` (`settleDefaultPlaylistSelection`)
 - **Status:** Core — **Decision:** ✅ Keep
 
@@ -388,7 +388,7 @@ Full-bleed TMDB backdrop carousel on Home: trending movies/series with artwork, 
 - **Status:** Core — **Decision:** ✅ Keep
 
 ### 11.2 Home Content Rows (User-Configurable)
-Reorderable, toggleable horizontal content rails: Recently Watched, Favorites, For You, Trending Movies, Trending Series, Trakt Watchlist. Order/visibility configurable in Settings → Layout → Home (iOS/macOS) or Settings → Home (tvOS). **Recently Watched Includes** (Build 40): independently include Movies, Series, and/or Live Channels (all on by default; per-device `@AppStorage`, not iCloud).
+Reorderable, toggleable horizontal content rails: Recently Watched, Favorites, For You, Trending Movies, Trending Series, Trakt Watchlist. Order/visibility configurable in Settings → Layout → Home (iOS/macOS) or Settings → Home (tvOS). **Recently Watched Includes** (Build 41): independently include Movies, Series, and/or Live Channels (all on by default; per-device `@AppStorage`, not iCloud).
 - **Files:** `HomeView.swift`, `HomeRows.swift`, `HomeLayoutSettings.swift` (`RecentlyWatchedIncludeSettings`), `HomeLayoutSettingsView.swift`, `SettingsView+TVHome.swift`
 - **Status:** Core — **Decision:** ✅ Keep
 
@@ -975,7 +975,7 @@ Actor-based background sync for Xtream, M3U, Stalker. Downloads catalogs in batc
 - **Decision:** keep
 
 ### 9.2 Auto-Sync on Launch/Foreground/Add
-Playlists sync automatically on launch, playlist add, foreground return, and playlist switch. Configurable frequency (hourly, daily, weekly, manual). Catalog providers (Xtream / M3U / Stalker) enqueue ahead of Stremio. On tvOS, first-time syncs (`lastSyncDate == nil`) always present the sync cover; routine refreshes still defer when browsing Home (Build 40).
+Playlists sync automatically on launch, playlist add, foreground return, and playlist switch. Configurable frequency (hourly, daily, weekly, manual). Catalog providers (Xtream / M3U / Stalker) enqueue ahead of Stremio. On tvOS, first-time syncs (`lastSyncDate == nil`) always present the sync cover; routine refreshes still defer when browsing Home (Build 41).
 - **Files:** `MainTabView.swift`, `SyncProgressView.swift`, `SettingsView+AutoSync.swift`, `PlaylistSwitcher.swift` (`orderedForAutoSync`)
 - **Status:** Core
 - **Decision:** keep
@@ -993,7 +993,7 @@ Lightweight CloudKit mirror of playlists (credentials + config only, not catalog
 - **Decision:** keep
 
 ### 9.5 Cloud Sync Launch / Initial Sync
-Fresh-device handling: waits for initial iCloud sync before showing login form so cloud playlists arrive first. After restore, empty `apex.selectedPlaylistID` prefers **Xtream → M3U → Stalker → Stremio** (`preferredDefault`); progressive imports that pinned Stremio first are promoted when a never-synced catalog playlist arrives (Build 40).
+Fresh-device handling: waits for initial iCloud sync before showing login form so cloud playlists arrive first. After restore, empty `apex.selectedPlaylistID` prefers **Xtream → M3U → Stalker → Stremio** (`preferredDefault`); progressive imports that pinned Stremio first are promoted when a never-synced catalog playlist arrives (Build 41).
 - **Files:** `CloudSyncLaunchView.swift`, `PlaylistSwitcher.swift`, `MainTabView.swift` (`settleDefaultPlaylistSelection`)
 - **Status:** Core
 - **Decision:** keep
@@ -1037,7 +1037,7 @@ Full-bleed TMDB backdrop carousel on Home: trending movies/series with artwork, 
 - **Decision:** keep
 
 ### 11.2 Home Content Rows (User-Configurable)
-Reorderable, toggleable horizontal content rails: Recently Watched, Favorites, For You, Trending Movies, Trending Series, Trakt Watchlist. Order/visibility configurable in Settings → Layout → Home (iOS/macOS) or Settings → Home (tvOS). **Recently Watched Includes** (Build 40): independently include Movies, Series, and/or Live Channels (all on by default; per-device `@AppStorage`, not iCloud).
+Reorderable, toggleable horizontal content rails: Recently Watched, Favorites, For You, Trending Movies, Trending Series, Trakt Watchlist. Order/visibility configurable in Settings → Layout → Home (iOS/macOS) or Settings → Home (tvOS). **Recently Watched Includes** (Build 41): independently include Movies, Series, and/or Live Channels (all on by default; per-device `@AppStorage`, not iCloud).
 - **Files:** `HomeView.swift`, `HomeRows.swift`, `HomeLayoutSettings.swift` (`RecentlyWatchedIncludeSettings`), `HomeLayoutSettingsView.swift`, `SettingsView+TVHome.swift`
 - **Status:** Core
 - **Decision:** keep

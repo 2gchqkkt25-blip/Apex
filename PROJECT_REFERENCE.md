@@ -149,14 +149,14 @@ Without these keys, the app works but metadata is limited to what the IPTV provi
 | 82 | **Build 39 — Wyzie Subs + stale stream fix + subtitle parser** | ✅ **Done (Jul 14)** — Replaced OpenSubtitles with Wyzie Subs (simpler, no login, 1K req/day free). Fixed streams not recovering after provider outages (URL cache disabled). Fixed SRT parser (Windows line endings). Fixed series subtitle IMDB resolution. |
 | 83 | **macOS Live TV sidebar — grid mode selection + traffic lights** | ✅ **Done (Jul 14)** — Categories now selectable in Guide (grid) mode on macOS. Sidebar rebuilt with ScrollView + onTapGesture (List/NSOutlineView lost focus to EPG ScrollView). Top padding added to clear traffic light buttons. |
 | 84 | **tvOS — trending rows + All Channels + hidden content + search + perf** | ✅ **Done (Jul 14)** — Trending Movies/Series rows restored on tvOS (structured task fix). All Channels now shows channels on tvOS (playlist-scoped query). Hidden content filtered from Recently Added. iPhone Remote debounce 1000ms. Home launch performance regression fixed (deferred phase 2). |
-| 85 | **Build 40 — iOS guide scroll + blank-guide fix** | ✅ **Done (Jul 15)** — iOS/macOS guide: context menu instead of long-press (sticky scroll). Browse persist allowed during EPG gate; warm live cache on reload so gap-fill paints without manual Sync Now. See § Build 40. |
-| 86 | **Build 40 — Xtream default + restore auto-sync** | ✅ **Done (Jul 15)** — Preferred playlist default Xtream→M3U→Stalker→Stremio; catalog-first sync queue; tvOS presents first-time sync covers immediately. Fixes Stremio-winning-on-reinstall. |
-| 87 | **Build 40 — tvOS in-app URL Copy/Paste** | ✅ **Done (Jul 15)** — Long-press Select on Add Playlist / settings fields; `ApexTextClipboard` session store (no system pasteboard on tvOS). |
-| 88 | **Build 40 — Recently Watched type filters** | ✅ **Done (Jul 15)** — Settings → Layout → Home: include Movies / Series / Live Channels (all on by default). iOS, macOS, tvOS. Per-device prefs. |
+| 85 | **Build 41 — iOS guide scroll + blank-guide fix** | ✅ **Done (Jul 15)** — iOS/macOS guide: context menu instead of long-press (sticky scroll). Browse persist allowed during EPG gate; warm live cache on reload so gap-fill paints without manual Sync Now. See § Build 41. |
+| 86 | **Build 41 — Xtream default + restore auto-sync** | ✅ **Done (Jul 15)** — Preferred playlist default Xtream→M3U→Stalker→Stremio; catalog-first sync queue; tvOS presents first-time sync covers immediately. Fixes Stremio-winning-on-reinstall. |
+| 87 | **Build 41 — tvOS in-app URL Copy/Paste** | ✅ **Done (Jul 15)** — Long-press Select on Add Playlist / settings fields; `ApexTextClipboard` session store (no system pasteboard on tvOS). |
+| 88 | **Build 41 — Recently Watched type filters** | ✅ **Done (Jul 15)** — Settings → Layout → Home: include Movies / Series / Live Channels (all on by default). iOS, macOS, tvOS. Per-device prefs. |
 
 ---
 
-## Build 40 — iOS Guide UX, EPG Browse Persist, Playlist Default (Jul 15, 2026)
+## Build 41 — iOS Guide UX, EPG Browse Persist, Playlist Default (Jul 15, 2026)
 
 > **Context:** Tester reports: (1) iOS Live TV guide hard to scroll; (2) guide sometimes blank until manual Sync Now; (3) fresh Apple TV install with Xtream + Stremio left Stremio as default and skipped Xtream auto-sync; (4) desire to copy/paste playlist URLs on tvOS; (5) control which types appear in Recently Watched.
 
@@ -722,7 +722,7 @@ Full rules: `EPG.md` § **Stability rules (do not regress)**. Highlights:
 - [ ] All on-demand writes through `EPGListingWriter` actor
 - [ ] `programsFromStore` scoped by channel id predicate, off main thread
 - [ ] `EPGBrowseLoader`: store first; live API only when store empty for channel; warm live cache merged on reload
-- [ ] `EPGAPISync.persist` **not** gated by `EPGSyncGate` (serial writer; bundled sync preserves store — Build 40)
+- [ ] `EPGAPISync.persist` **not** gated by `EPGSyncGate` (serial writer; bundled sync preserves store — Build 41)
 - [ ] No timestamp shifting / realign on read or write
 - [ ] Bulk sync = `xmltv.php`; per-channel API for visible channels only
 - [ ] Run EPG unit tests (command above)
@@ -756,8 +756,8 @@ Full rules: `EPG.md` § **Stability rules (do not regress)**. Highlights:
 | 23–24 | EPG slow / data vanishes | Destructive `.id()`, list/guide `if/else`, guide-only store window, cache wipe |
 | 24–25 | Crash + EPG slow / half-empty categories | `syncExternalEPG` cross-feed duplicate-id SwiftData crash (unguarded on both platforms); iOS/macOS never got Build 19's tvOS-only `preserveExistingStore` fix, so every routine/background sync blanked the whole store — see § Build 25 Hotfix |
 | 25–26 | Still crashing (Guide screen specifically) + still slow | Fixing the store-wipe (row above) removed the safety net `maxListingsPerChannel` was quietly depending on — the per-channel cap only tracked one feed's own contribution, so well-covered channels grew unboundedly across syncs once the store stopped resetting. Guide renders every row as a cell (List doesn't), so this hit Guide only — see § Build 26 Hotfix |
-| 32→40 | iOS guide blank until Sync Now | Build 32 store-only browse + iOS `persist` gated by `EPGSyncGate` → `forceGuideRefresh` re-read empty store; fixed Jul 15 (persist always + warm live cache) |
-| Pre-40 | Xtream skipped after tvOS reinstall with Stremio | Empty selection used unsorted `.first`; tvOS deferred all sync covers on Home — see § Build 40 |
+| 32→41 | iOS guide blank until Sync Now | Build 32 store-only browse + iOS `persist` gated by `EPGSyncGate` → `forceGuideRefresh` re-read empty store; fixed Jul 15 (persist always + warm live cache) |
+| Pre-41 | Xtream skipped after tvOS reinstall with Stremio | Empty selection used unsorted `.first`; tvOS deferred all sync covers on Home — see § Build 41 |
 
 **Rule:** Performance passes must not edit Live TV EPG UI without running the EPG UI checklist. EPG fixes must not edit sync layer without running EPG sync checklist.
 
@@ -1548,7 +1548,7 @@ When ready for public listing (after TestFlight):
 | **Live TV queries** | Category channel query capped at `fetchLimit = 200` (view paginates at 50). Prevents jetsam on mega-categories in 17K+ playlists. |
 | **Image cache** | 128MB iOS, 64MB tvOS. NSCache evicts under pressure; purges on memory warning + deferred on background. |
 | **EPG status** | ✅ Both platforms verified (Jul 11): parallel downloads, external EPG primary, branded unified sync, instant post-sync channel cards, persists across restarts and category switches. Guide view matches list view speed. See `EPG.md`. |
-| **CloudKit UI** | Settings → iCloud Sync; foreground reconcile gated on actual imports. Live TV favorites **and** recently watched sync across devices (Jul 14). Fresh install prefers Xtream/M3U/Stalker over Stremio and auto-syncs never-synced catalogs (Jul 15 / Build 40). |
+| **CloudKit UI** | Settings → iCloud Sync; foreground reconcile gated on actual imports. Live TV favorites **and** recently watched sync across devices (Jul 14). Fresh install prefers Xtream/M3U/Stalker over Stremio and auto-syncs never-synced catalogs (Jul 15 / Build 41). |
 | **Future (if needed)** | Hybrid SQLite layer (GRDB) for catalog browse — cursor-based pagination with constant memory regardless of playlist size. Only needed if tab-unmount approach isn't sufficient. See § Build 31. |
 
 ---
@@ -1678,4 +1678,4 @@ See **What's Been Built → iOS Device — Large Library Fix** above for full de
 
 ---
 
-*Last updated: July 15, 2026 (Build 40 — iOS guide scroll + blank-guide fix; Xtream preferred default + restore auto-sync; tvOS in-app URL Copy/Paste; Recently Watched Movies/Series/Live include toggles on all platforms.)*
+*Last updated: July 15, 2026 (Build 41 — iOS guide scroll + blank-guide fix; Xtream preferred default + restore auto-sync; tvOS in-app URL Copy/Paste; Recently Watched Movies/Series/Live include toggles on all platforms.)*
