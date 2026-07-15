@@ -102,12 +102,29 @@
     /// A labelled input row. The field itself keeps the native tvOS appearance
     /// (its focus treatment is system-drawn and can't be cleanly replaced); only
     /// the small uppercase label and spacing are ours.
+    ///
+    /// Long-press Select opens Copy / Paste / Clear against `ApexTextClipboard`
+    /// (tvOS has no system pasteboard — see that type's docs).
     struct TVSettingsField: View {
         let title: LocalizedStringKey
         let placeholder: LocalizedStringKey
         @Binding var text: String
         var isSecure: Bool = false
         var contentType: UITextContentType?
+
+        @State private var showClipboardActions = false
+
+        private var canCopy: Bool {
+            !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+
+        private var canPaste: Bool {
+            ApexTextClipboard.shared.canPaste
+        }
+
+        private var canClear: Bool {
+            !text.isEmpty
+        }
 
         var body: some View {
             VStack(alignment: .leading, spacing: 8) {
@@ -128,6 +145,32 @@
                 .font(.system(size: TVSettingsMetrics.rowFontSize))
                 .textContentType(contentType)
                 .autocorrectionDisabled()
+            }
+            .onLongPressGesture(minimumDuration: 0.4) {
+                guard canCopy || canPaste || canClear else { return }
+                showClipboardActions = true
+            }
+            .confirmationDialog("Copy or Paste", isPresented: $showClipboardActions, titleVisibility: .visible) {
+                if canCopy {
+                    Button("Copy") {
+                        ApexTextClipboard.shared.copy(text)
+                    }
+                }
+                if canPaste {
+                    Button("Paste") {
+                        if let pasted = ApexTextClipboard.shared.paste() {
+                            text = pasted
+                        }
+                    }
+                }
+                if canClear {
+                    Button("Clear", role: .destructive) {
+                        text = ""
+                    }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("In-app only — Apple TV has no system clipboard.")
             }
         }
     }

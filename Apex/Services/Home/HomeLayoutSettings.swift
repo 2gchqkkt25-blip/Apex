@@ -127,3 +127,16 @@ enum HomeLayoutSettings {
         return result
     }
 }
+
+/// What content types appear inside the Home → Recently Watched row.
+/// Independent of whether the section itself is enabled (`HomeLayoutSettings`).
+/// All types are on by default (matches historical behavior).
+enum RecentlyWatchedIncludeSettings {
+    static let moviesKey = "home.recentlyWatched.includeMovies.v1"
+    static let seriesKey = "home.recentlyWatched.includeSeries.v1"
+    static let liveKey = "home.recentlyWatched.includeLive.v1"
+
+    static let moviesDefault = true
+    static let seriesDefault = true
+    static let liveDefault = true
+}

@@ -322,6 +322,11 @@ struct LoginView: View {
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, TVSettingsMetrics.rowHPadding)
 
+                    Text("Press and hold Select on a field to copy or paste.")
+                        .font(.system(size: TVSettingsMetrics.secondaryFontSize))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, TVSettingsMetrics.rowHPadding)
+
                     if let errorMessage {
                         Label(errorMessage, systemImage: "exclamationmark.circle.fill")
                             .font(.system(size: TVSettingsMetrics.secondaryFontSize))

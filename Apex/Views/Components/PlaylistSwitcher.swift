@@ -14,17 +14,53 @@ import SwiftUI
 
 enum PlaylistSelectionStore {
     /// `@AppStorage` key holding the selected playlist's `id.uuidString`.
-    /// An empty value means "no explicit choice yet" — callers fall back to the
-    /// first playlist.
+    /// An empty value means "no explicit choice yet" — callers fall back to a
+    /// preferred catalog playlist (Xtream / M3U / Stalker before Stremio).
     static let key = "apex.selectedPlaylistID"
 }
 
 extension [Playlist] {
-    /// Resolves the stored selection to a concrete playlist, falling back to the
-    /// first available playlist when the stored id is empty or no longer exists
+    /// Lower is preferred when choosing a default after CloudKit restore or
+    /// first launch with an empty `apex.selectedPlaylistID`.
+    ///
+    /// Stremio addons must not win the default slot ahead of Xtream/M3U/Stalker
+    /// — a fresh Apple TV install otherwise opens on Stremio while Live TV and
+    /// Movies look empty until the user manually selects (and syncs) Xtream.
+    static func defaultSelectionPriority(of playlist: Playlist) -> Int {
+        switch playlist.sourceType {
+        case .xtream: 0
+        case .m3u: 1
+        case .stalker: 2
+        case .stremio: 3
+        }
+    }
+
+    /// Best playlist to use when no explicit selection is stored.
+    func preferredDefault() -> Playlist? {
+        self.min { lhs, rhs in
+            let left = Self.defaultSelectionPriority(of: lhs)
+            let right = Self.defaultSelectionPriority(of: rhs)
+            if left != right { return left < right }
+            return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+        }
+    }
+
+    /// Catalog providers first, then Stremio — used for auto-sync cover order
+    /// so Xtream populates before addon sync on a multi-playlist restore.
+    func orderedForAutoSync() -> [Playlist] {
+        sorted { lhs, rhs in
+            let left = Self.defaultSelectionPriority(of: lhs)
+            let right = Self.defaultSelectionPriority(of: rhs)
+            if left != right { return left < right }
+            return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+        }
+    }
+
+    /// Resolves the stored selection to a concrete playlist, falling back to
+    /// `preferredDefault()` when the stored id is empty or no longer exists
     /// (e.g. the selected playlist was deleted).
     func active(for storedID: String) -> Playlist? {
-        first(where: { $0.id.uuidString == storedID }) ?? first
+        first(where: { $0.id.uuidString == storedID }) ?? preferredDefault()
     }
 }
 
@@ -76,7 +112,7 @@ struct PlaylistSwitcher: View {
     }
 
     /// The id that is actually in effect, accounting for the empty-default /
-    /// deleted-playlist fallback to the first playlist.
+    /// deleted-playlist fallback to the preferred catalog playlist.
     private var effectiveID: String {
         playlists.active(for: selectedPlaylistID)?.id.uuidString ?? ""
     }

@@ -240,27 +240,21 @@ enum EPGAPISync {
 
     /// Persists on-demand programmes so the guide survives process restarts.
     ///
-    /// Serialized through `EPGListingWriter` (never races another writer) and
-    /// skipped while the external XMLTV sync owns the store on iOS/macOS — that
-    /// pass clears and rebuilds `EPGListing`, so writing on-demand rows into it
-    /// at the same time is both wasted work and a cross-context unique-upsert
-    /// crash risk.
+    /// Serialized through `EPGListingWriter` (never races another writer).
+    /// Bundled / routine XMLTV sync preserves existing rows on every platform
+    /// (Build 25+), so browse gap-fill must keep writing while a sync is
+    /// running — otherwise Live TV stays blank until the user manually resyncs
+    /// (gap-fill succeeds in memory, persist was a no-op, then
+    /// `forceGuideRefresh` re-read an empty store).
     ///
-    /// On tvOS the bundled sync *preserves* existing rows (Build 19+) and only
-    /// inserts new ids — no destructive rebuild — so on-demand persists are safe
-    /// and essential: without them, data browsed while the deferred guide sync
-    /// runs is never stored, causing the "data disappears on category switch" bug.
+    /// Only an explicit Settings → Sync Now full pass still hard-replaces the
+    /// store; the serial writer + unique listing ids keep concurrent browse
+    /// upserts safe during that window too.
     static func persist(
         programsByChannel: [String: [EPGProgram]],
         container: ModelContainer,
         now: Date = Date()
     ) async {
-        #if os(tvOS)
-        // tvOS bundled sync preserves existing rows — on-demand persists are
-        // safe and keep category-switch data in the store.
-        #else
-        guard !EPGSyncGate.isActive else { return }
-        #endif
         await EPGListingWriter.shared.write(
             programsByChannel: programsByChannel,
             container: container,

@@ -123,6 +123,28 @@ actor EPGLiveLoader {
         Logger.database.info("EPG live cache cleared")
     }
 
+    /// Returns warm, non-empty live-cache hits without hitting the network.
+    ///
+    /// Used by `EPGBrowseLoader` so a `forceGuideRefresh` after gap-fill paints
+    /// from memory immediately — even if SwiftData persist is still in flight
+    /// or briefly lost a race with a sync writer.
+    func cachedPrograms(
+        for snapshots: [EPGStreamSnapshot],
+        credentials: EPGPlaylistCredentials,
+        now: Date = Date()
+    ) -> [String: [EPGProgram]] {
+        guard credentials.sourceType == .xtream else { return [:] }
+        var result: [String: [EPGProgram]] = [:]
+        for snapshot in snapshots {
+            let key = cacheKey(playlistID: credentials.id, streamId: snapshot.streamId)
+            guard let entry = cache[key] else { continue }
+            guard now.timeIntervalSince(entry.fetchedAt) < entryTTL(entry) else { continue }
+            guard !entry.programs.isEmpty else { continue }
+            result[snapshot.primaryEPGChannelId] = entry.programs
+        }
+        return result
+    }
+
     /// Full programme list per channel for the guide grid and channel cards.
     func programs(
         for snapshots: [EPGStreamSnapshot],
@@ -646,8 +668,24 @@ enum EPGBrowseLoader {
                 programs[channelId] = slots
             }
 
+            // Warm live cache next — gap-fill may already have programmes in
+            // memory while persist / store re-read is still catching up. Without
+            // this, forceGuideRefresh after a successful live fetch could still
+            // paint blank rows (EPG.md rule 531: UI already has data in memory).
+            let missingAfterStore = snapshots.filter { programs[$0.primaryEPGChannelId]?.isEmpty ?? true }
+            if !missingAfterStore.isEmpty {
+                let warm = await EPGLiveLoader.shared.cachedPrograms(
+                    for: missingAfterStore,
+                    credentials: credentials,
+                    now: now
+                )
+                for (channelId, slots) in warm {
+                    programs[channelId] = slots
+                }
+            }
+
             // Fire-and-forget: live API gap-fill runs in background for channels
-            // not in the store. The view updates when refreshGeneration bumps.
+            // not in the store or warm cache. The view updates when refreshGeneration bumps.
             let needsLive = snapshots.filter { programs[$0.primaryEPGChannelId]?.isEmpty ?? true }
             if !needsLive.isEmpty {
                 Logger.database.warning("EPG browse — store had data for \(programs.count)/\(snapshots.count) channels; \(needsLive.count) need live API")
@@ -667,6 +705,8 @@ enum EPGBrowseLoader {
                         await EPGAPISync.persist(programsByChannel: fetched, container: bgContainer, now: bgNow)
                         // Force immediate UI update — no throttle. Browse gap-fill
                         // only fires once per category, not repeatedly like sync.
+                        // Reload also pulls warm cache above, so rows appear even
+                        // if the persist round-trip is still settling.
                         await MainActor.run {
                             EPGSyncService.shared.forceGuideRefresh()
                         }

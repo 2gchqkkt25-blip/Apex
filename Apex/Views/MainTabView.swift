@@ -85,8 +85,10 @@ struct MainTabView: View {
                 handleDeepLink(url)
             }
             .task(id: playlists.map(\.id)) {
-                // On launch (and whenever a playlist is added/removed) sync any
-                // playlist that is due per the configured frequency.
+                // On launch (and whenever a playlist is added/removed) pin a
+                // preferred default if needed, then sync any playlist that is
+                // due per the configured frequency.
+                settleDefaultPlaylistSelection()
                 enqueueDueSyncs(playlists)
             }
             .onChange(of: selectedPlaylistID) {
@@ -99,8 +101,14 @@ struct MainTabView: View {
                 // Returning to the foreground re-checks staleness — for a long-lived
                 // app this is the practical equivalent of "on launch".
                 if phase == .active {
+                    settleDefaultPlaylistSelection()
                     enqueueDueSyncs(playlists)
                 }
+            }
+            .onChange(of: router.selectedTab) { _, _ in
+                // tvOS may defer refresh covers until Settings; promote when the
+                // user navigates so a queued restore sync can still start.
+                promoteNextIfIdle()
             }
             .syncCover(item: $activeSyncPlaylist, onDismiss: handleSyncCoverDismissed)
             .overlay {
@@ -257,16 +265,42 @@ struct MainTabView: View {
 
     // MARK: - Automatic sync
 
+    /// Pins `apex.selectedPlaylistID` when empty or orphaned so a CloudKit
+    /// restore that materializes Stremio before Xtream does not leave Stremio
+    /// as the lasting default (`.active(for:)` alone is non-persisting).
+    ///
+    /// Also promotes Stremio → preferred catalog playlist when that catalog
+    /// entry has never synced locally (progressive iCloud import).
+    private func settleDefaultPlaylistSelection() {
+        guard let preferred = playlists.preferredDefault() else { return }
+
+        if selectedPlaylistID.isEmpty
+            || !playlists.contains(where: { $0.id.uuidString == selectedPlaylistID }) {
+            selectedPlaylistID = preferred.id.uuidString
+            return
+        }
+
+        guard preferred.sourceType != .stremio, preferred.lastSyncDate == nil else { return }
+        guard let current = playlists.first(where: { $0.id.uuidString == selectedPlaylistID }),
+              current.sourceType == .stremio
+        else { return }
+        selectedPlaylistID = preferred.id.uuidString
+    }
+
     /// Enqueues every due playlist for a blocking, progress-visible sync and
     /// presents the first one. Covers the never-synced first launch (where
     /// `lastSyncDate == nil` makes a playlist due) as well as periodic refreshes.
+    /// Catalog playlists (Xtream / M3U / Stalker) are queued ahead of Stremio.
     private func enqueueDueSyncs(_ candidates: [Playlist]) {
         guard !isUITesting else { return }
 
-        for playlist in candidates where shouldAutoSync(playlist) {
+        for playlist in candidates.orderedForAutoSync() where shouldAutoSync(playlist) {
             autoSyncAttempted.insert(playlist.id)
-            syncQueue.append(playlist)
+            if !syncQueue.contains(where: { $0.id == playlist.id }) {
+                syncQueue.append(playlist)
+            }
         }
+        syncQueue = syncQueue.orderedForAutoSync()
         promoteNextIfIdle()
     }
 
@@ -286,13 +320,13 @@ struct MainTabView: View {
     private func promoteNextIfIdle() {
         guard activeSyncPlaylist == nil, !syncQueue.isEmpty else { return }
         #if os(tvOS)
-        // On Apple TV, don't interrupt active viewing with a sync cover.
-        // The playlist will sync on the next app launch or foreground return
-        // when nothing is playing. This prevents a phone-triggered playlist
-        // add from interrupting what's being watched on TV.
-        if router.selectedTab != .settings, scenePhase == .active {
-            // Defer — will be picked up next time the user opens Settings
-            // or returns to the app.
+        // Defer periodic *refresh* covers while browsing (don't interrupt Home).
+        // Always present first-time syncs (`lastSyncDate == nil`) so CloudKit-
+        // restored Xtream/M3U catalogs pull immediately after install. Also
+        // present when the user is already in Settings.
+        let next = syncQueue[0]
+        let isFirstTimeSync = next.lastSyncDate == nil
+        if !isFirstTimeSync, router.selectedTab != .settings, scenePhase == .active {
             return
         }
         #endif

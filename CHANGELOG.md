@@ -4,6 +4,33 @@ All notable changes to Apex Stream Player.
 
 ---
 
+## Build 40 (1.2.0) — July 15, 2026
+
+### Live TV / EPG (iOS)
+
+- **Guide sticky scrolling** — Programme cells no longer attach `onLongPressGesture` on iOS/macOS (that delayed pan recognition). Details open via context menu instead; tvOS keeps press-and-hold Select for the detail sheet.
+- **Guide blank until resync** — On-demand EPG persist is no longer skipped on iOS while `EPGSyncGate` is active (bundled sync already preserves the store since Build 25). `EPGBrowseLoader` also merges warm live-memory hits so `forceGuideRefresh` paints programmes even if the store round-trip is still settling.
+
+### Playlists / iCloud (tvOS + all platforms)
+
+- **Xtream preferred after reinstall** — Empty/orphaned `apex.selectedPlaylistID` now resolves to preferred catalog type (Xtream → M3U → Stalker → Stremio), not unsorted `playlists.first`. Progressive CloudKit import that pinned Stremio first is promoted to Xtream when a never-synced catalog playlist arrives.
+- **Auto-sync queue** — Catalog playlists enqueue ahead of Stremio. On tvOS, **first-time** syncs (`lastSyncDate == nil`) always present the sync cover (routine refreshes still defer off Settings); tab changes re-promote the queue.
+
+### tvOS Add Playlist
+
+- **In-app Copy / Paste** — Long-press Select on `TVSettingsField` (Xtream URL, Stremio manifest, M3U, Stalker, credentials) opens Copy / Paste / Clear via session `ApexTextClipboard`. Apple TV has no system pasteboard; this is Apex↔Apex only. Hint shown on Add Playlist.
+
+### Home
+
+- **Recently Watched includes** — Settings → Layout → Home: toggles for Movies, Series, and Live Channels (all on by default). Available on iOS, iPadOS, macOS, and tvOS. Per-device (`@AppStorage`); does not sync via iCloud.
+
+### Tests
+
+- `PlaylistSelectionTests` — preferred default + auto-sync ordering
+- EPG / CloudSync / SyncFrequency suites still green
+
+---
+
 ## Build 39 (1.2.0) — July 14, 2026
 
 ### Subtitles — Wyzie Subs (replaces OpenSubtitles)

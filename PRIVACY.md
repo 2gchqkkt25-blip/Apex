@@ -1,6 +1,6 @@
 # Privacy Policy
 
-**Last updated:** June 29, 2026
+**Last updated:** July 15, 2026
 
 Apex is built by StreamInfinity. This policy explains what data the app handles and how.
 
@@ -11,17 +11,19 @@ Apex is built by StreamInfinity. This policy explains what data the app handles 
 Apex does **not** collect, transmit, or sell any personal data to StreamInfinity or any third-party analytics service. Specifically:
 
 - **No analytics SDKs.** No Firebase, no Google Analytics, no Mixpanel — nothing that tracks your usage.
-- **No accounts with us.** Apex has no first-party login. Your profiles, watch history, and favorites live on your device and in your personal iCloud account.
+- **No accounts with us.** Apex has no first-party login. Your profiles, watch history, favorites, and playlist credentials live on your device and in your personal iCloud account (CloudKit private database, credentials encrypted).
 - **No ad networks.** The app contains no third-party advertisements.
 
 ## What Stays On Your Device
 
 | Data | Where it lives |
 |---|---|
-| Playlist credentials (Xtream Codes, M3U URLs, Stalker portals) | Your device (encrypted Keychain) |
+| Playlist credentials (Xtream Codes, M3U URLs, Stalker portals, Stremio) | Your device (SwiftData) + your personal iCloud (`SyncedPlaylist`, CloudKit-encrypted fields) |
 | Watch history & progress | Your device + your personal iCloud |
 | User profiles & favorites | Your device + your personal iCloud |
-| App theme & settings | Your device |
+| TV guide (EPG) listings | Your device only (not synced via iCloud) |
+| App theme & settings | Your device (+ theme via iCloud Key-Value store) |
+| Trakt tokens / parental PIN | Keychain (device-local) |
 
 ## Third-Party Services You May Choose to Use
 
@@ -29,7 +31,7 @@ Apex integrates with external services that **you** configure. When you provide 
 
 | Service | What it processes | Privacy policy |
 |---|---|---|
-| **Apple CloudKit** | Syncs your profiles, watch progress, and favorites across your devices via your iCloud account | [Apple Privacy Policy](https://www.apple.com/legal/privacy/) |
+| **Apple CloudKit** | Syncs your playlist credentials/config, profiles, watch progress, and favorites across your devices via your iCloud account (catalog content re-downloads per device) | [Apple Privacy Policy](https://www.apple.com/legal/privacy/) |
 | **TMDB** (The Movie Database) | Fetches posters, backdrops, cast info, and descriptions for movies and series | [TMDB Privacy Policy](https://www.themoviedb.org/privacy-policy) |
 | **OMDb** (Open Movie Database) | Fetches IMDb, Rotten Tomatoes, and Metacritic ratings | [OMDb Disclaimer](https://www.omdbapi.com) |
 | **Trakt** | Scrobbles watch activity if you sign in (optional) | [Trakt Privacy Policy](https://trakt.tv/privacy) |

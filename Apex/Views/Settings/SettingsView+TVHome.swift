@@ -67,6 +67,20 @@ import SwiftUI
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, TVSettingsMetrics.rowHPadding)
                     .padding(.top, 6)
+
+                TVSettingsSectionLabel("Recently Watched Includes")
+
+                VStack(spacing: 2) {
+                    TVOptionToggleRow(title: "Movies", isOn: $includeMoviesInRecentlyWatched)
+                    TVOptionToggleRow(title: "Series", isOn: $includeSeriesInRecentlyWatched)
+                    TVOptionToggleRow(title: "Live Channels", isOn: $includeLiveInRecentlyWatched)
+                }
+
+                Text("Choose which types appear in the Recently Watched row on Home.")
+                    .font(.system(size: 20))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, TVSettingsMetrics.rowHPadding)
+                    .padding(.top, 6)
             }
         }
 

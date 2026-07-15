@@ -71,8 +71,8 @@ import SwiftUI
         /// A playlist row mirroring the Profiles pane: tapping the row makes the
         /// playlist active (checkmark marks the current one); the pencil drills
         /// into its settings. The active id resolves through the same empty /
-        /// deleted fallback the content tabs use, so the first playlist reads as
-        /// active by default.
+        /// deleted fallback the content tabs use (preferred catalog playlist
+        /// when none is stored — Xtream before Stremio).
         private func tvPlaylistRow(_ playlist: Playlist) -> some View {
             let isActive = playlist.id.uuidString == effectivePlaylistID
             return HStack(spacing: 16) {
@@ -109,7 +109,7 @@ import SwiftUI
         }
 
         /// The active playlist's id, accounting for the empty-default / deleted
-        /// fallback to the first playlist (matches `[Playlist].active(for:)`).
+        /// fallback to the preferred catalog playlist (matches `[Playlist].active(for:)`).
         private var effectivePlaylistID: String {
             playlists.active(for: selectedPlaylistID)?.id.uuidString ?? ""
         }

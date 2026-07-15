@@ -56,6 +56,9 @@ struct HomeView: View {
     /// Sections the user switched off (Settings › Layout › Home). "For You" is
     /// gated by `recommendationsEnabled` instead — see `HomeLayoutSettings`.
     @AppStorage(HomeLayoutSettings.disabledSectionsKey) private var disabledSectionsRaw = ""
+    @AppStorage(RecentlyWatchedIncludeSettings.moviesKey) private var includeMoviesInRecentlyWatched = RecentlyWatchedIncludeSettings.moviesDefault
+    @AppStorage(RecentlyWatchedIncludeSettings.seriesKey) private var includeSeriesInRecentlyWatched = RecentlyWatchedIncludeSettings.seriesDefault
+    @AppStorage(RecentlyWatchedIncludeSettings.liveKey) private var includeLiveInRecentlyWatched = RecentlyWatchedIncludeSettings.liveDefault
     /// Bumped by the DEBUG "Recalculate" action in Settings (always 0 otherwise);
     /// part of the task id so the row recomputes on demand.
     @AppStorage(RecommendationSettings.manualRecalculationKey) private var recommendationsRecalcToken = 0
@@ -352,9 +355,25 @@ struct HomeView: View {
 
     private var recentlyWatched: [HomeMediaItem] {
         let hidden = Set(hiddenCategories.map(\.id))
-        let items = watchedMovies.filter { belongsToActivePlaylist($0.id) && !hidden.contains($0.categoryId ?? "") }.excludingRestricted(restriction).map(HomeMediaItem.movie)
-            + watchedSeries.filter { belongsToActivePlaylist($0.id) && !hidden.contains($0.categoryId ?? "") }.excludingRestricted(restriction).map(HomeMediaItem.series)
-            + watchedStreams.filter { belongsToActivePlaylist($0.id) && !$0.isHidden && !hidden.contains($0.categoryId ?? "") }.excludingRestricted(restriction).map(HomeMediaItem.live)
+        var items: [HomeMediaItem] = []
+        if includeMoviesInRecentlyWatched {
+            items += watchedMovies
+                .filter { belongsToActivePlaylist($0.id) && !hidden.contains($0.categoryId ?? "") }
+                .excludingRestricted(restriction)
+                .map(HomeMediaItem.movie)
+        }
+        if includeSeriesInRecentlyWatched {
+            items += watchedSeries
+                .filter { belongsToActivePlaylist($0.id) && !hidden.contains($0.categoryId ?? "") }
+                .excludingRestricted(restriction)
+                .map(HomeMediaItem.series)
+        }
+        if includeLiveInRecentlyWatched {
+            items += watchedStreams
+                .filter { belongsToActivePlaylist($0.id) && !$0.isHidden && !hidden.contains($0.categoryId ?? "") }
+                .excludingRestricted(restriction)
+                .map(HomeMediaItem.live)
+        }
         return items
             .sorted { ($0.lastWatchedDate ?? .distantPast) > ($1.lastWatchedDate ?? .distantPast) }
             .prefix(10)

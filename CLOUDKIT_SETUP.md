@@ -86,7 +86,7 @@ Do **not** skip this step — Production builds without a deployed schema fail s
 1. Archive with **Release** configuration (uses `Apex-Release.entitlements`)
 2. Install the archived build on a device (or wait for TestFlight)
 3. Settings → **iCloud Sync** → **On**, no sync error line
-4. Optional second device: same Apple ID → playlist + progress should appear after catalog sync
+4. Optional second device: same Apple ID → playlist credentials appear, then **catalog auto-sync** runs for each never-synced playlist. Default active playlist prefers **Xtream → M3U → Stalker → Stremio** (not insertion order).
 
 ---
 
@@ -100,7 +100,7 @@ Do **not** skip this step — Production builds without a deployed schema fail s
 | Sync works in Xcode Debug but not TestFlight | Production schema not deployed |
 | iCloud Sync shows **Off** | SwiftUI preview / test build only — reinstall Debug or Release from Xcode |
 | App crashes at launch in previews/tests | Expected — CloudKit is disabled for previews, unit tests, and UI tests |
-
+| Reinstall leaves **Stremio** active, Xtream empty | Fixed Build 40 — preferred catalog default + first-time sync covers. On older builds: switch playlist → Sync, or open Settings to drain the deferred queue |
 CloudKit is disabled only for **SwiftUI previews** and **automated tests**. Unsigned community sideload IPAs from GitHub Actions won’t sync (re-signing strips entitlements).
 
 ---

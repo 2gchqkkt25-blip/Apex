@@ -74,6 +74,9 @@ struct SettingsView: View {
         @AppStorage(RecommendationSettings.enabledKey) var recommendationsEnabled = RecommendationSettings.enabledDefault
         @AppStorage(HomeLayoutSettings.sectionOrderKey) var homeSectionOrderRaw = ""
         @AppStorage(HomeLayoutSettings.disabledSectionsKey) var homeDisabledSectionsRaw = ""
+        @AppStorage(RecentlyWatchedIncludeSettings.moviesKey) var includeMoviesInRecentlyWatched = RecentlyWatchedIncludeSettings.moviesDefault
+        @AppStorage(RecentlyWatchedIncludeSettings.seriesKey) var includeSeriesInRecentlyWatched = RecentlyWatchedIncludeSettings.seriesDefault
+        @AppStorage(RecentlyWatchedIncludeSettings.liveKey) var includeLiveInRecentlyWatched = RecentlyWatchedIncludeSettings.liveDefault
     #endif
 
     /// The user's ordered engine fallback list (migrates the legacy single-engine

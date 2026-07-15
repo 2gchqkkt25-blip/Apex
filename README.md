@@ -88,6 +88,7 @@ Metacritic), and your viewing activity can be scrobbled to **Trakt**.
 - Personalized dashboard with a hero carousel (iPhone) or immersive full-screen TMDB backdrop (iPad, tvOS)
 - **Immersive full-screen tvOS home** with horizontally paging TMDB backdrop and fold-based scroll snapping
 - Continue Watching, Favorites, Recently Watched, and Trending rails
+- **Recently Watched Includes** — choose Movies, Series, and/or Live Channels in Settings → Layout → Home (all platforms; all on by default)
 - **For You** rail — on-device recommendations from your watch history and favorites; thumbs-up / thumbs-down a suggestion to tune what you see next, with your votes syncing across devices via iCloud (can be turned off in Settings)
 
 #### 🔎 Discovery & organization
@@ -113,9 +114,11 @@ Metacritic), and your viewing activity can be scrobbled to **Trakt**.
 - **Parental controls**: mark profiles as child profiles, restrict categories (hidden from browsing and search), and protect them with a PIN required to leave a child profile or open Content Management
 
 #### ⚙️ Library management
-- Manage multiple playlists — **Xtream Codes**, **M3U/M3U8**, and **Stalker portals** (add / edit / delete / switch)
+- Manage multiple playlists — **Xtream Codes**, **M3U/M3U8**, **Stalker portals**, and **Stremio addons** (add / edit / delete / switch)
 - M3U support: URL-based playlists, local file import, URL-tvg EPG auto-detection
 - Stalker portal support: MAC-address authentication (with a generated default MAC), with short-lived stream URLs resolved on demand at playback time
+- Playlist credentials **sync via iCloud**; a fresh install prefers **Xtream / M3U / Stalker** as the default over Stremio and auto-syncs never-synced catalogs
+- On **Apple TV**, long-press Select on playlist URL fields for in-app Copy / Paste (no system clipboard on tvOS)
 - Server info at a glance: status, active connections, expiry
 - Background **content sync** with step-by-step progress, which **prunes stale titles** the provider has dropped so the local catalog stays in step
 - Scheduled **auto-sync** (every 6 hours, daily, every 3 days, or weekly)

@@ -508,8 +508,8 @@ private struct EPGRows: View {
 // MARK: - Programme strip
 
 /// A single channel's row of programme blocks. Programmes are buttons; gaps are
-/// inert. A quick click plays the channel; a long press opens the programme
-/// detail sheet.
+/// inert. A quick click plays the channel; programme details open via long-press
+/// on tvOS or context menu on iOS/macOS.
 private struct EPGProgramStrip: View {
     let row: EPGChannelRow
     let metrics: EPGMetrics
@@ -549,12 +549,21 @@ private struct EPGProgramStrip: View {
                         Color.clear.frame(width: cell.width, height: metrics.rowHeight)
                     }
                     .buttonStyle(EPGBlockButtonStyle(cell: cell, metrics: metrics, now: now))
-                    // Long press (press-and-hold Select on tvOS) opens the detail
-                    // sheet. The gesture takes the press once it recognizes, so a
-                    // hold doesn't also fire the button's play action.
-                    .onLongPressGesture(minimumDuration: 0.4) {
-                        onShowDetails(cell)
-                    }
+                    #if os(tvOS)
+                        // Press-and-hold Select opens the detail sheet. The
+                        // gesture takes the press once it recognizes, so a hold
+                        // doesn't also fire the button's play action.
+                        .onLongPressGesture(minimumDuration: 0.4) {
+                            onShowDetails(cell)
+                        }
+                    #else
+                        // Long-press on every programme cell fights UIKit's pan
+                        // recognizer on iOS and makes the guide feel sticky.
+                        // Context menu keeps "Show Details" without delaying scroll.
+                        .contextMenu {
+                            Button("Show Details") { onShowDetails(cell) }
+                        }
+                    #endif
                     .accessibilityLabel(Text(cell.title))
                     .accessibilityHint(Text("\(cell.start, format: .dateTime.hour().minute()) to \(cell.end, format: .dateTime.hour().minute()) on \(row.name)"))
                     .accessibilityAction(named: Text("Show Details")) { onShowDetails(cell) }

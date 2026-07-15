@@ -11,6 +11,9 @@
         @AppStorage(RecommendationSettings.enabledKey) private var recommendationsEnabled = RecommendationSettings.enabledDefault
         @AppStorage(HomeLayoutSettings.sectionOrderKey) private var sectionOrderRaw = ""
         @AppStorage(HomeLayoutSettings.disabledSectionsKey) private var disabledSectionsRaw = ""
+        @AppStorage(RecentlyWatchedIncludeSettings.moviesKey) private var includeMoviesInRecentlyWatched = RecentlyWatchedIncludeSettings.moviesDefault
+        @AppStorage(RecentlyWatchedIncludeSettings.seriesKey) private var includeSeriesInRecentlyWatched = RecentlyWatchedIncludeSettings.seriesDefault
+        @AppStorage(RecentlyWatchedIncludeSettings.liveKey) private var includeLiveInRecentlyWatched = RecentlyWatchedIncludeSettings.liveDefault
         @State private var premium = PremiumManager.shared
         @State private var showPaywall = false
 
@@ -31,6 +34,16 @@
                     Text("Sections")
                 } footer: {
                     Text("Turn sections on or off and reorder them. Each appears on Home only when it has something to show. \"For You\" is built on-device from your library and what you watch.")
+                }
+
+                Section {
+                    Toggle("Movies", isOn: $includeMoviesInRecentlyWatched)
+                    Toggle("Series", isOn: $includeSeriesInRecentlyWatched)
+                    Toggle("Live Channels", isOn: $includeLiveInRecentlyWatched)
+                } header: {
+                    Text("Recently Watched Includes")
+                } footer: {
+                    Text("Choose which types appear in the Recently Watched row on Home.")
                 }
             }
             .platformNavigationTitle("Home")
