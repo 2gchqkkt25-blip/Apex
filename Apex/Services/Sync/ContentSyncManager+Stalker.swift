@@ -70,6 +70,25 @@ extension ContentSyncManager {
         try await syncStalkerChannels(client: client, playlistId: playlistId, progress: progress)
 
         markStalkerPlaylistUpdated(playlistId)
+
+        // Deferred: preload first page of top categories in the background so
+        // Movies/Series tabs show poster cards immediately after sync. This runs
+        // AFTER the sync sheet closes — non-blocking, best-effort.
+        let bgContainer = modelContainer
+        let bgVodCats = Array(vodCategories.prefix(15))
+        let bgSeriesCats = Array(seriesCategories.prefix(15))
+        let bgPlaylistId = playlistId
+        let bgConfig = client.configuration
+        Task.detached(priority: .utility) {
+            let bgClient = StalkerClient(configuration: bgConfig)
+            let manager = ContentSyncManager(modelContainer: bgContainer)
+            await manager.preloadStalkerFirstPages(
+                client: bgClient,
+                vodCategories: bgVodCats,
+                seriesCategories: bgSeriesCats,
+                playlistId: bgPlaylistId
+            )
+        }
     }
 
     // MARK: - Categories
@@ -184,6 +203,65 @@ extension ContentSyncManager {
         }
         try? context.save()
         return imported
+    }
+
+    // MARK: - Background Preload (first page per category for poster cards)
+
+    /// Fetches just the first page (14 items) from the top categories so
+    /// Movies/Series tabs show poster cards right after sync. Non-blocking,
+    /// best-effort — failures are silently ignored.
+    func preloadStalkerFirstPages(
+        client: StalkerClient,
+        vodCategories: [StalkerCategory],
+        seriesCategories: [StalkerCategory],
+        playlistId: UUID
+    ) async {
+        let vodPrefix = "\(playlistId.uuidString)-\(CategoryType.vod.rawValue)-"
+        let seriesPrefix = "\(playlistId.uuidString)-\(CategoryType.series.rawValue)-"
+        var seenMovieIds = Set<String>()
+        var seenSeriesIds = Set<String>()
+
+        // Preload first page of VOD categories
+        for category in vodCategories where !category.id.isEmpty {
+            guard !Task.isCancelled else { return }
+            guard let result = try? await client.getOrderedList(type: "vod", categoryId: category.id, page: 1),
+                  !result.items.isEmpty else { continue }
+            autoreleasepool {
+                _ = upsertStalkerMovies(
+                    result.items, categoryId: category.id, playlistPrefix: vodPrefix,
+                    playlistId: playlistId, seenIds: &seenMovieIds
+                )
+            }
+        }
+
+        // Preload first page of Series categories
+        for category in seriesCategories where !category.id.isEmpty {
+            guard !Task.isCancelled else { return }
+            guard let result = try? await client.getOrderedList(type: "series", categoryId: category.id, page: 1),
+                  !result.items.isEmpty else { continue }
+            let context = ModelContext(modelContainer)
+            context.autosaveEnabled = false
+            for item in result.items {
+                guard let stalkerId = item.id else { continue }
+                let seriesId = Self.streamId(for: stalkerId)
+                let id = "\(playlistId.uuidString)-series-\(seriesId)"
+                guard !seenSeriesIds.contains(id) else { continue }
+                seenSeriesIds.insert(id)
+                let existing = try? context.fetch(
+                    FetchDescriptor<Series>(predicate: #Predicate { $0.id == id })
+                ).first
+                let series = existing ?? Series(id: id, seriesId: seriesId, name: "")
+                if existing == nil { context.insert(series) }
+                series.name = item.name ?? ""
+                series.cover = item.screenshot
+                series.plot = item.description
+                series.releaseDate = item.year
+                series.categoryId = seriesPrefix + category.id
+            }
+            try? context.save()
+        }
+
+        Logger.database.info("Stalker preload: \(seenMovieIds.count) movies + \(seenSeriesIds.count) series from first pages")
     }
 
     // MARK: - Series
