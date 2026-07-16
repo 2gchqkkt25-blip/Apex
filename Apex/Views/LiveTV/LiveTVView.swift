@@ -461,6 +461,9 @@ struct CategorySidebar: View {
                     }
                     .padding(.horizontal, 8)
                 }
+                #if os(macOS)
+                .contentMargins(.top, 40, for: .scrollContent)
+                #endif
             } else {
                 // Normal mode: category selection
                 ScrollView {
@@ -504,6 +507,9 @@ struct CategorySidebar: View {
                     }
                     .padding(.horizontal, 8)
                 }
+                #if os(macOS)
+                .contentMargins(.top, 40, for: .scrollContent)
+                #endif
             }
         }
         #if os(macOS)
