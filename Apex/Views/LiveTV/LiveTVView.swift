@@ -402,31 +402,24 @@ struct CategorySidebar: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Spacer to push content below macOS title bar / toolbar area
-            #if os(macOS)
-            Spacer().frame(height: 28)
-            #endif
-
-            // Edit/Done button
-            HStack {
-                Text("Categories")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Text(isEditing ? "Done" : "Edit")
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(themeManager.colors.accent)
-                    .onTapGesture {
-                        isEditing.toggle()
-                    }
-            }
-            .padding(.horizontal, 12)
-            .padding(.bottom, 6)
-
             if isEditing {
-                // Edit mode: reorder with move buttons (macOS doesn't have editMode)
+                // Edit mode: reorder with move buttons
                 ScrollView {
                     LazyVStack(spacing: 2) {
+                        // Done button at top of scroll
+                        HStack {
+                            Text("Reorder Categories")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Text("Done")
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(themeManager.colors.accent)
+                                .onTapGesture { isEditing = false }
+                        }
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 6)
+
                         ForEach(Array(reorderableSections.enumerated()), id: \.element.id) { index, section in
                             HStack(spacing: 8) {
                                 VStack(spacing: 2) {
@@ -472,6 +465,17 @@ struct CategorySidebar: View {
                 // Normal mode: category selection
                 ScrollView {
                     LazyVStack(spacing: 2) {
+                        // Edit button at top of scroll content
+                        HStack {
+                            Spacer()
+                            Text("Edit")
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(themeManager.colors.accent)
+                                .onTapGesture { isEditing = true }
+                        }
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 6)
+
                         ForEach(sections) { section in
                             let isSelected = selectedSection?.id == section.id
                             HStack(spacing: 8) {
