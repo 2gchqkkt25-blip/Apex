@@ -462,7 +462,7 @@ struct CategorySidebar: View {
                     .padding(.horizontal, 8)
                 }
                 #if os(macOS)
-                .contentMargins(.top, 40, for: .scrollContent)
+                .contentMargins(.top, 52, for: .scrollContent)
                 #endif
             } else {
                 // Normal mode: category selection
@@ -508,7 +508,7 @@ struct CategorySidebar: View {
                     .padding(.horizontal, 8)
                 }
                 #if os(macOS)
-                .contentMargins(.top, 40, for: .scrollContent)
+                .contentMargins(.top, 52, for: .scrollContent)
                 #endif
             }
         }
