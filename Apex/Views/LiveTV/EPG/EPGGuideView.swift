@@ -83,6 +83,12 @@ struct EPGGuideView: View {
                     visibleCount = min(visibleCount + LiveChannelQuery.pageSize, channels.count)
                 }
             )
+            .onAppear {
+                // Activate cached section data synchronously on appear so the
+                // first frame renders with programme cells (not blank gaps).
+                // The .task below then fills any remaining gaps from the store.
+                epgCache.activate(section: sectionToken)
+            }
             .task(id: sectionToken) {
                 epgCache.activate(section: sectionToken)
                 await loadGuide(for: visible)
