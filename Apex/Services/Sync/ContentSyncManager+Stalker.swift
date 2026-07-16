@@ -25,7 +25,11 @@ extension ContentSyncManager {
         return M3UIdentity.numericId(for: stalkerId)
     }
 
-    /// The Stalker pipeline: authenticate, then pull categories and content.
+    /// The Stalker pipeline: authenticate, then pull categories and Live TV channels.
+    /// VOD/Series content is NOT pre-fetched during sync — it loads on-demand when
+    /// the user opens a category (matching TiviMate, iSTB, and MAG box behavior).
+    /// Stalker portals with large catalogs (100+ categories × 1000+ items each)
+    /// would take hours to sync everything upfront via the paginated API.
     func performStalkerSync(playlist: Playlist, playlistId: UUID, progress: SyncProgress?, full _: Bool = false) async throws {
         let client = StalkerClient(configuration: StalkerClient.Configuration(playlist: playlist))
 
@@ -34,8 +38,7 @@ extension ContentSyncManager {
         updateStalkerPlaylistInfo(playlistId, profile: profile)
         await progress?.complete(.authenticating)
 
-        // Fetch the category/genre lists once and reuse them to both persist the
-        // categories and walk each one's content.
+        // Fetch the category/genre lists — lightweight, one request each.
         await progress?.start(.movieCategories)
         let vodCategories = await (try? client.getCategories(type: "vod")) ?? []
         try syncStalkerCategories(vodCategories, type: .vod, playlistId: playlistId)
@@ -54,10 +57,16 @@ extension ContentSyncManager {
         await progress?.update(detail: "\(genres.count) categories")
         await progress?.complete(.liveCategories)
 
-        try await syncStalkerMovies(client: client, categories: vodCategories, playlistId: playlistId, progress: progress)
-        try await Task.sleep(for: .seconds(1))
-        try await syncStalkerSeries(client: client, categories: seriesCategories, playlistId: playlistId, progress: progress)
-        try await Task.sleep(for: .seconds(1))
+        // Only sync Live TV channels upfront (one bulk call, fast).
+        // Movies and Series load on-demand when the user browses a category.
+        await progress?.start(.movies)
+        await progress?.update(detail: "On-demand")
+        await progress?.complete(.movies)
+
+        await progress?.start(.series)
+        await progress?.update(detail: "On-demand")
+        await progress?.complete(.series)
+
         try await syncStalkerChannels(client: client, playlistId: playlistId, progress: progress)
 
         markStalkerPlaylistUpdated(playlistId)
