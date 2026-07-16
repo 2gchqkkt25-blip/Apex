@@ -15,16 +15,22 @@ All notable changes to Apex Stream Player.
 ### Bug Fixes
 
 - **tvOS duplicate subtitles** — External Wyzie subtitle overlay no longer renders when the stream has embedded subtitle tracks. Checks `AVURLAsset.loadMediaSelectionGroup(for: .legible)` before fetching — if the stream ships its own tracks, external fetch is skipped entirely.
+- **Stalker sync hanging (30+ min)** — VOD/Series no longer downloaded during sync. Only Live TV channels + categories sync upfront (matches TiviMate, iSTB, MAG boxes). VOD content loads on-demand when the user opens a category. Deferred background task preloads first page of top 15 categories for poster cards (~30 sec, non-blocking).
+- **macOS sidebar clipped in fullscreen** — `.contentMargins(.top, 52)` insets the scroll content below the NavigationStack toolbar. Edit button moved inside ScrollView so it's never hidden behind the toolbar.
+- **macOS Edit button not responding** — Changed from `Button(.plain)` (swallowed by scroll gesture) to `Text` + `onTapGesture` (always fires).
+- **EPG guide slow on category switch** — `epgCache.activate(section:)` now runs synchronously on `.onAppear` so cached programme data paints on the first frame (was async in `.task`, causing one blank frame).
+- **Home launch slowdown** — TMDB trending fetch deferred 500ms when heroes already visible so first frame renders immediately.
 
 ### New Features
 
-- **macOS/iOS fullscreen channel switching** — Previous/next channel buttons (chevrons) in the player transport controls for live TV. Surf channels without leaving fullscreen. Uses the same `LiveChannelNavigator` scope as the browse section you launched from (favorites stay in favorites, category stays in category). tvOS unchanged (uses Siri Remote swipe).
-- **Video quality display** — Player controls now show stream quality below the title (e.g. "1080p · HEVC · 30fps"). Reads resolution, codec, and frame rate from KSPlayer's active video track. Shows automatically when track info is available.
+- **macOS/iOS fullscreen channel switching** — Previous/next channel buttons (chevrons) in the player transport controls for live TV. Surf channels without leaving fullscreen. Uses the same `LiveChannelNavigator` scope as the browse section you launched from. tvOS unchanged (uses Siri Remote swipe).
+- **Video quality display** — Player controls now show stream quality below the title (e.g. "1080p · HEVC · 30fps"). Reads resolution, codec, and frame rate from KSPlayer's active video track.
+- **macOS Live TV category reorder** — Edit button in the sidebar opens reorder mode with up/down chevrons to rearrange categories. Persists via `Category.customOrder` (same as iOS and Content Management).
 
 ### Improvements
 
-- **Trending load performance** — TMDB trending pages reduced 5 → 3 (faster network phase). Stale trending state cleared on playlist change. Trending rows now unconditionally apply results (was skipping empty arrays, hiding rows that should show).
-- **Profile switch safety** — `defer { isSwitching = false }` ensures the switching flag resets even if `switchProfile` throws, preventing a stuck profile state.
+- **Trending load performance** — TMDB trending pages reduced 5 → 3 (faster network phase). Stale trending state cleared on playlist change. Trending rows now unconditionally apply results.
+- **Profile switch safety** — `defer { isSwitching = false }` ensures the switching flag resets even if `switchProfile` throws.
 
 ---
 
