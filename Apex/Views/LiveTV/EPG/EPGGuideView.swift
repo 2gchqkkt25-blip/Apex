@@ -589,11 +589,16 @@ private struct EPGProgramStrip: View {
 
         init() {
             let config = ModelConfiguration(isStoredInMemoryOnly: true)
-            // swiftlint:disable:next force_try
-            let container = try! ModelContainer(
-                for: Playlist.self, Category.self, LiveStream.self, EPGListing.self,
-                configurations: config
-            )
+            let container: ModelContainer
+            do {
+                container = try ModelContainer(
+                    for: Playlist.self, Category.self, LiveStream.self, EPGListing.self,
+                    configurations: config
+                )
+            } catch {
+                assertionFailure("Failed to create EPG guide preview container: \(error)")
+                fatalError("Failed to create EPG guide preview container")
+            }
             let ctx = container.mainContext
 
             let playlist = Playlist(name: "Preview", serverURL: "http://example.com", username: "u", password: "p")

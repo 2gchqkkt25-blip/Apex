@@ -153,6 +153,10 @@ Without these keys, the app works but metadata is limited to what the IPTV provi
 | 86 | **Build 41 — Xtream default + restore auto-sync** | ✅ **Done (Jul 15)** — Preferred playlist default Xtream→M3U→Stalker→Stremio; catalog-first sync queue; tvOS presents first-time sync covers immediately. Fixes Stremio-winning-on-reinstall. |
 | 87 | **Build 41 — tvOS in-app URL Copy/Paste** | ✅ **Done (Jul 15)** — Long-press Select on Add Playlist / settings fields; `ApexTextClipboard` session store (no system pasteboard on tvOS). |
 | 88 | **Build 41 — Recently Watched type filters** | ✅ **Done (Jul 15)** — Settings → Layout → Home: include Movies / Series / Live Channels (all on by default). iOS, macOS, tvOS. Per-device prefs. |
+| 89 | **tvOS duplicate subtitles fix** | ✅ **Done (Jul 16)** — External Wyzie overlay skipped when stream has embedded legible tracks (AVURLAsset check). Prevents double subtitles on tvOS. |
+| 90 | **macOS/iOS fullscreen channel switching** | ✅ **Done (Jul 16)** — Prev/next chevron buttons in player transport for live TV. Same surf scope as browse section. tvOS unchanged (Siri Remote). |
+| 91 | **Video quality display** | ✅ **Done (Jul 16)** — Player controls show "1080p · HEVC · 30fps" below title. Reads from KSPlayer active video track. |
+| 92 | **Trending load performance** | ✅ **Done (Jul 16)** — TMDB pages 5→3; stale state cleared on playlist change; empty rows no longer suppressed. |
 
 ---
 
@@ -1678,4 +1682,4 @@ See **What's Been Built → iOS Device — Large Library Fix** above for full de
 
 ---
 
-*Last updated: July 15, 2026 (Build 41 — iOS guide scroll + blank-guide fix; Xtream preferred default + restore auto-sync; tvOS in-app URL Copy/Paste; Recently Watched Movies/Series/Live include toggles on all platforms.)*
+*Last updated: July 16, 2026 (tvOS duplicate subtitles fix, macOS/iOS channel switching, video quality display, trending performance, profile switch safety, engineering cleanup.)*

@@ -245,6 +245,17 @@ struct FullScreenPlayerView: View {
             try? await Task.sleep(for: .seconds(3))
             guard !Task.isCancelled else { return }
 
+            // Skip external subtitles when the stream has embedded legible tracks.
+            // This prevents duplicate subtitles on tvOS where KSPlayer renders its
+            // own selected track AND the external overlay would render on top.
+            let asset = AVURLAsset(url: activeMedia.url)
+            if let legible = try? await asset.loadMediaSelectionGroup(for: .legible),
+               !(legible.options.isEmpty)
+            {
+                Logger.player.info("[Subtitles] Stream has \(legible.options.count) embedded tracks — skipping external fetch")
+                return
+            }
+
             // Resolve IMDB ID from the content reference
             let imdbId: String?
             let season: Int?
@@ -387,7 +398,8 @@ struct FullScreenPlayerView: View {
                 nextUpMedia: nextUpMedia,
                 fallbackAvailable: hasFallbackEngine,
                 onPlaybackFailed: fallBackToNextEngine,
-                onSelectMedia: switchMedia
+                onSelectMedia: switchMedia,
+                onSwitchChannel: media.isLive ? switchLiveChannelAction : nil
             )
             .id(engineAttempt)
         case .vlcKit:
@@ -529,6 +541,31 @@ struct FullScreenPlayerView: View {
             try? session.setActive(true, options: [])
         #endif
     }
+
+    /// Navigate to the previous or next live channel without leaving fullscreen.
+    /// macOS and iOS only — tvOS uses the Siri Remote's onMoveCommand instead.
+    #if !os(tvOS)
+    private var switchLiveChannelAction: ((Int) -> Void)? {
+        { [self] offset in switchLiveChannel(offset: offset) }
+    }
+
+    private func switchLiveChannel(offset: Int) {
+        guard activeMedia.isLive else { return }
+        let sort = ContentSortOption(
+            rawValue: UserDefaults.standard.string(forKey: SortStorageKey.liveContent) ?? ""
+        ) ?? .playlist
+        guard let target = LiveChannelNavigator.adjacentMedia(
+            for: activeMedia,
+            offset: offset,
+            sort: sort,
+            scope: LiveChannelNavigator.activeSurfScope,
+            in: modelContext
+        ) else { return }
+        switchMedia(to: target)
+    }
+    #else
+    private var switchLiveChannelAction: ((Int) -> Void)? { nil }
+    #endif
 
     private func releaseAudioSession() {
         #if os(iOS)

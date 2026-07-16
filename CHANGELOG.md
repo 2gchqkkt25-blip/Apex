@@ -4,6 +4,30 @@ All notable changes to Apex Stream Player.
 
 ---
 
+## Unreleased — July 16, 2026
+
+### Engineering Cleanup
+
+- **Watch-progress reconciliation safety** — Launch-time recovery of buffered watch progress now runs through a main-actor-safe reconciliation path before flushing to SwiftData.
+- **Preview and seed hardening** — Preview-only sample data and UI-testing seed writes now use explicit guarded error handling instead of silent force unwrap / `try?` patterns.
+- **Docs updated** — Feature inventory and release notes now reflect the cleanup pass so future warning work has a paper trail.
+
+### Bug Fixes
+
+- **tvOS duplicate subtitles** — External Wyzie subtitle overlay no longer renders when the stream has embedded subtitle tracks. Checks `AVURLAsset.loadMediaSelectionGroup(for: .legible)` before fetching — if the stream ships its own tracks, external fetch is skipped entirely.
+
+### New Features
+
+- **macOS/iOS fullscreen channel switching** — Previous/next channel buttons (chevrons) in the player transport controls for live TV. Surf channels without leaving fullscreen. Uses the same `LiveChannelNavigator` scope as the browse section you launched from (favorites stay in favorites, category stays in category). tvOS unchanged (uses Siri Remote swipe).
+- **Video quality display** — Player controls now show stream quality below the title (e.g. "1080p · HEVC · 30fps"). Reads resolution, codec, and frame rate from KSPlayer's active video track. Shows automatically when track info is available.
+
+### Improvements
+
+- **Trending load performance** — TMDB trending pages reduced 5 → 3 (faster network phase). Stale trending state cleared on playlist change. Trending rows now unconditionally apply results (was skipping empty arrays, hiding rows that should show).
+- **Profile switch safety** — `defer { isSwitching = false }` ensures the switching flag resets even if `switchProfile` throws, preventing a stuck profile state.
+
+---
+
 ## Build 41 (1.2.0) — July 15, 2026
 
 ### Live TV / EPG (iOS)

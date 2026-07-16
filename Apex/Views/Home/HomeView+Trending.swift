@@ -17,9 +17,20 @@ extension HomeView {
     func loadTrending() async {
         let client = TMDBClient.shared
         let playlistStamp = activePlaylist?.lastSyncDate?.timeIntervalSince1970 ?? 0
+        let playlistChanged = lastTrendingPlaylistStamp != playlistStamp
+
+        if playlistChanged {
+            trendingState = .loading
+            heroItems = []
+            trendingMovies = []
+            trendingSeries = []
+        }
 
         // Skip re-fetch when we already have a settled carousel for this playlist.
-        if trendingState == .loaded, !heroItems.isEmpty, !trendingMovies.isEmpty, lastTrendingPlaylistStamp == playlistStamp {
+        if trendingState == .loaded,
+           lastTrendingPlaylistStamp == playlistStamp,
+           (!heroItems.isEmpty || !trendingMovies.isEmpty || !trendingSeries.isEmpty)
+        {
             return
         }
 
@@ -107,12 +118,8 @@ extension HomeView {
             $0.media == .series ? $0.catalogID : nil
         }))
 
-        if !match.movieIDs.isEmpty {
-            trendingMovies = match.movieIDs.compactMap { movieLookup[$0].map(HomeMediaItem.movie) }
-        }
-        if !match.seriesIDs.isEmpty {
-            trendingSeries = match.seriesIDs.compactMap { seriesLookup[$0].map(HomeMediaItem.series) }
-        }
+        trendingMovies = match.movieIDs.compactMap { movieLookup[$0].map(HomeMediaItem.movie) }
+        trendingSeries = match.seriesIDs.compactMap { seriesLookup[$0].map(HomeMediaItem.series) }
 
         let trendingHeroes = match.heroSlots.compactMap { slot -> HeroItem? in
             switch slot.media {

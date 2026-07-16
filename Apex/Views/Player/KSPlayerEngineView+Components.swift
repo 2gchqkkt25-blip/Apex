@@ -19,11 +19,15 @@ import SwiftUI
     }
 #endif
 
+private enum KSPlayerEngineViewPreviewData {
+    static let sampleURL = URL(string: "https://example.com/stream.m3u8") ?? URL(fileURLWithPath: "/")
+}
+
 #Preview("Fallback") {
     KSPlayerEngineView(
         media: PlayableMedia(
             id: "preview",
-            url: URL(string: "https://example.com/stream.m3u8")!,
+            url: KSPlayerEngineViewPreviewData.sampleURL,
             title: "Sample Video",
             subtitle: nil,
             posterURL: nil,

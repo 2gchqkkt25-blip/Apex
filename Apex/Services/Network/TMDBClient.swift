@@ -122,7 +122,7 @@ nonisolated struct TMDBClient {
     /// Fetches up to `pages` pages (20 titles each) so the home screen has a
     /// larger pool to match against the active playlist — the trending row only
     /// shows titles already in the library, so a wider net surfaces more of them.
-    func trending(_ media: MediaType, timeWindow: TimeWindow = .week, pages: Int = 5) async throws -> [TrendingTitle] {
+    func trending(_ media: MediaType, timeWindow: TimeWindow = .week, pages: Int = 3) async throws -> [TrendingTitle] {
         let basePath = "/trending/\(media.rawValue)/\(timeWindow.rawValue)"
 
         // Fetch the first page up front so we learn the real page count and

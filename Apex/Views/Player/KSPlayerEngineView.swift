@@ -39,6 +39,8 @@ struct KSPlayerEngineView: View {
     /// live channel via the Siri remote) from the in-player overlay. The host
     /// swaps `media` in response. tvOS only.
     var onSelectMedia: ((PlayableMedia) -> Void)?
+    /// Channel switching for live TV (iOS/macOS). Offset: +1 next, -1 previous.
+    var onSwitchChannel: ((Int) -> Void)?
 
     @StateObject var coordinator = KSVideoPlayer.Coordinator()
     /// Drives bounded backoff reconnects when the stream drops (see
@@ -495,7 +497,8 @@ struct KSPlayerEngineView: View {
                 onClose: { closePlayer() },
                 onTogglePlay: { togglePlay() },
                 onResetHideTimer: { resetHideTimer() },
-                onScheduleHide: { scheduleHide() }
+                onScheduleHide: { scheduleHide() },
+                onSwitchChannel: onSwitchChannel
             )
         }
 

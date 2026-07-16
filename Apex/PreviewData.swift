@@ -9,7 +9,10 @@ enum PreviewData {
 
     static var samplePlaylist: Playlist {
         let playlist = Playlist(name: "My IPTV", serverURL: "http://example.com:8080", username: "demo", password: "\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}")
-        playlist.id = UUID(uuidString: samplePlaylistID)!
+        guard let playlistID = UUID(uuidString: samplePlaylistID) else {
+            fatalError("Invalid sample playlist UUID")
+        }
+        playlist.id = playlistID
         playlist.userStatus = "Active"
         playlist.expDate = "1893456000"
         playlist.maxConnections = "1"
@@ -71,11 +74,17 @@ enum PreviewData {
 
 func previewContainer() -> ModelContainer {
     let config = ModelConfiguration(isStoredInMemoryOnly: true)
-    guard let container = try? ModelContainer(
-        for: Playlist.self, Movie.self, Series.self, LiveStream.self,
-        Category.self, Episode.self, CastMember.self,
-        configurations: config
-    ) else { fatalError("Failed to create ModelContainer") }
+    let container: ModelContainer
+    do {
+        container = try ModelContainer(
+            for: Playlist.self, Movie.self, Series.self, LiveStream.self,
+            Category.self, Episode.self, CastMember.self,
+            configurations: config
+        )
+    } catch {
+        assertionFailure("Failed to create preview ModelContainer: \(error)")
+        fatalError("Failed to create ModelContainer")
+    }
 
     let playlist = PreviewData.samplePlaylist
     container.mainContext.insert(playlist)
@@ -94,7 +103,11 @@ func previewContainer() -> ModelContainer {
     insertSeries(into: container, categories: categories)
     insertLiveStreams(into: container, categories: categories)
 
-    try? container.mainContext.save()
+    do {
+        try container.mainContext.save()
+    } catch {
+        assertionFailure("Failed to save preview seed data: \(error)")
+    }
     return container
 }
 

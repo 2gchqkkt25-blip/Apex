@@ -177,6 +177,7 @@ Value-type description of anything playable, independent of SwiftData. Prioritiz
 Buffers progress during playback to UserDefaults (avoids SwiftData hitches), flushes at safe boundaries. Recovers unflushed progress after crash.
 - **Files:** `WatchProgressBuffer.swift`, `WatchProgressWriter.swift`
 - **Status:** Core — **Decision:** ✅ Keep
+- **Cleanup note:** launch-time reconciliation now runs through a main-actor-safe path before replaying any buffered progress into SwiftData.
 
 ### 5.7 Autoplay Next Episode
 Automatically starts next episode when current one finishes. **Currently premium-gated.**

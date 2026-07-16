@@ -1,3 +1,4 @@
+import AVFoundation
 import KSPlayer
 import SwiftData
 import SwiftUI
@@ -26,6 +27,8 @@ import SwiftUI
         var onTogglePlay: () -> Void
         var onResetHideTimer: () -> Void
         var onScheduleHide: () -> Void
+        /// Channel switching callback for live TV (iOS/macOS). Positive = next, negative = previous.
+        var onSwitchChannel: ((Int) -> Void)?
 
         @Environment(\.modelContext) private var modelContext
         /// Mirrors the backing model's favorite flag; refreshed when the media
@@ -112,6 +115,17 @@ import SwiftUI
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Skip back 15 seconds")
+                } else {
+                    #if !os(tvOS)
+                    Button {
+                        onSwitchChannel?(-1)
+                        onResetHideTimer()
+                    } label: {
+                        circleGlyph("chevron.left", size: 20, diameter: 60)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Previous channel")
+                    #endif
                 }
 
                 Button(action: onTogglePlay) {
@@ -133,6 +147,17 @@ import SwiftUI
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Skip forward 15 seconds")
+                } else {
+                    #if !os(tvOS)
+                    Button {
+                        onSwitchChannel?(1)
+                        onResetHideTimer()
+                    } label: {
+                        circleGlyph("chevron.right", size: 20, diameter: 60)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Next channel")
+                    #endif
                 }
             }
         }
@@ -170,8 +195,55 @@ import SwiftUI
                     .font(.title3.weight(.bold))
                     .foregroundStyle(.white)
                     .lineLimit(1)
+                if let quality = videoQualityCaption {
+                    Text(quality)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.white.opacity(0.6))
+                        .lineLimit(1)
+                }
             }
             .shadow(color: .black.opacity(0.35), radius: 4, y: 1)
+        }
+
+        /// Derives a quality string from the active video track (e.g. "1080p · HEVC · 30fps").
+        private var videoQualityCaption: String? {
+            guard let player = coordinator.playerLayer?.player else { return nil }
+            let tracks = player.tracks(mediaType: .video)
+            guard let track = tracks.first(where: { $0.isEnabled }) ?? tracks.first else { return nil }
+            var parts: [String] = []
+            // Resolution label
+            let size = track.naturalSize
+            let height = Int(size.height)
+            if height > 0 {
+                if height >= 2160 { parts.append("4K") }
+                else if height >= 1080 { parts.append("1080p") }
+                else if height >= 720 { parts.append("720p") }
+                else if height >= 480 { parts.append("480p") }
+                else { parts.append("\(height)p") }
+            }
+            // Codec
+            let codec = track.codecType.string
+            if !codec.isEmpty {
+                let short: String
+                switch codec {
+                case "avc1", "avc3": short = "H.264"
+                case "hvc1", "hev1": short = "HEVC"
+                case "av01": short = "AV1"
+                case "vp09": short = "VP9"
+                case "dvhe": short = "Dolby Vision"
+                default: short = codec.uppercased()
+                }
+                parts.append(short)
+            }
+            // FPS
+            let fps = track.nominalFrameRate
+            if fps > 0 {
+                if fps > 29 && fps < 31 { parts.append("30fps") }
+                else if fps > 59 && fps < 61 { parts.append("60fps") }
+                else if fps > 23 && fps < 25 { parts.append("24fps") }
+                else { parts.append("\(Int(fps))fps") }
+            }
+            return parts.isEmpty ? nil : parts.joined(separator: "  ·  ")
         }
 
         private var liveIndicator: some View {

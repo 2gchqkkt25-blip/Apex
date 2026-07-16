@@ -34,6 +34,7 @@ actor WatchProgressWriter {
     /// Commit any progress left in `WatchProgressBuffer` by a crashed/killed
     /// session into SwiftData. Runs once at launch, off the main thread, so the
     /// one resulting store merge happens before playback ever starts.
+    @MainActor
     static func reconcilePending(container: ModelContainer) async {
         let entries = WatchProgressBuffer.drain()
         guard !entries.isEmpty else { return }

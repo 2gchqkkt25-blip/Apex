@@ -1,3 +1,4 @@
+import OSLog
 import SwiftData
 import SwiftUI
 
@@ -94,7 +95,11 @@ struct ContentView: View {
         modelContext.insert(playlist)
         // Persist immediately so a separate ModelContext (e.g. the sync actor)
         // can see the seeded playlist without waiting for autosave.
-        try? modelContext.save()
+        do {
+            try modelContext.save()
+        } catch {
+            Logger.sync.error("Failed to seed UI-testing playlist: \(error.localizedDescription, privacy: .public)")
+        }
     }
 }
 
