@@ -401,21 +401,20 @@ struct CategorySidebar: View {
     }
 
     var body: some View {
-        GeometryReader { geo in
-            VStack(spacing: 0) {
-                // Edit/Done button at the top
-                HStack {
-                    Spacer()
-                    Button(isEditing ? "Done" : "Edit") {
-                        isEditing.toggle()
-                    }
-                    .font(.caption.weight(.medium))
-                    .buttonStyle(.plain)
-                    .foregroundStyle(themeManager.colors.accent)
+        VStack(spacing: 0) {
+            // Edit/Done button at the top
+            HStack {
+                Spacer()
+                Button(isEditing ? "Done" : "Edit") {
+                    isEditing.toggle()
                 }
-                .padding(.top, max(geo.safeAreaInsets.top, 8))
-                .padding(.horizontal, 12)
-                .padding(.bottom, 4)
+                .font(.caption.weight(.medium))
+                .buttonStyle(.plain)
+                .foregroundStyle(themeManager.colors.accent)
+            }
+            .padding(.top, 8)
+            .padding(.horizontal, 12)
+            .padding(.bottom, 4)
 
             if isEditing {
                 // Edit mode: reorder with move buttons (macOS doesn't have editMode)
@@ -496,8 +495,6 @@ struct CategorySidebar: View {
                 }
             }
         }
-        }
-        .ignoresSafeArea(edges: .top)
         #if os(macOS)
         .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
         #endif
