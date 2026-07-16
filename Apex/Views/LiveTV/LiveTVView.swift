@@ -413,7 +413,7 @@ struct CategorySidebar: View {
                 .foregroundStyle(themeManager.colors.accent)
             }
             #if os(macOS)
-            .padding(.top, 52) // Clear macOS title bar + traffic lights in both windowed and fullscreen
+            .padding(.top, 36) // Align with the guide's time header row
             #endif
             .padding(.horizontal, 12)
             .padding(.bottom, 4)
