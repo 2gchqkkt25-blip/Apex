@@ -402,19 +402,26 @@ struct CategorySidebar: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Edit/Done button at the top
+            // Spacer to push content below macOS title bar / toolbar area
+            #if os(macOS)
+            Spacer().frame(height: 28)
+            #endif
+
+            // Edit/Done button
             HStack {
+                Text("Categories")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
                 Spacer()
-                Button(isEditing ? "Done" : "Edit") {
-                    isEditing.toggle()
-                }
-                .font(.caption.weight(.medium))
-                .buttonStyle(.plain)
-                .foregroundStyle(themeManager.colors.accent)
+                Text(isEditing ? "Done" : "Edit")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(themeManager.colors.accent)
+                    .onTapGesture {
+                        isEditing.toggle()
+                    }
             }
-            .padding(.top, 8)
             .padding(.horizontal, 12)
-            .padding(.bottom, 4)
+            .padding(.bottom, 6)
 
             if isEditing {
                 // Edit mode: reorder with move buttons (macOS doesn't have editMode)
