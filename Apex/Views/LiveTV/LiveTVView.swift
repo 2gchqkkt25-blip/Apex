@@ -392,44 +392,142 @@ struct CategorySidebar: View {
     let sections: [LiveTVSection]
     @Binding var selectedSection: LiveTVSection?
     @Environment(ThemeManager.self) private var themeManager
+    @Environment(\.modelContext) private var modelContext
+    @State private var isEditing = false
+
+    /// Only category sections (not virtual Favorites/Recently Watched/All) are reorderable.
+    private var reorderableSections: [LiveTVSection] {
+        sections.filter { if case .category = $0 { return true } else { return false } }
+    }
 
     var body: some View {
-        ScrollView {
-            LazyVStack(spacing: 2) {
-                ForEach(sections) { section in
-                    let isSelected = selectedSection?.id == section.id
-                    HStack(spacing: 8) {
-                        if let icon = section.icon {
-                            Image(systemName: icon)
-                                .font(.subheadline)
-                                .foregroundStyle(isSelected ? themeManager.colors.accent : Color.secondary)
-                        }
-                        Text(section.title)
-                            .font(.headline)
-                            .foregroundStyle(isSelected ? themeManager.colors.accent : Color.primary)
-                            .lineLimit(1)
-                        Spacer()
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill(isSelected ? themeManager.colors.accent.opacity(0.15) : Color.clear)
-                    )
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        selectedSection = section
-                    }
+        VStack(spacing: 0) {
+            // Edit/Done button at the top
+            HStack {
+                Spacer()
+                Button(isEditing ? "Done" : "Edit") {
+                    isEditing.toggle()
                 }
+                .font(.caption.weight(.medium))
+                .buttonStyle(.plain)
+                .foregroundStyle(themeManager.colors.accent)
             }
             #if os(macOS)
-            .padding(.top, 38) // Clear macOS traffic light buttons
+            .padding(.top, 52) // Clear macOS title bar + traffic lights in both windowed and fullscreen
             #endif
-            .padding(.horizontal, 8)
+            .padding(.horizontal, 12)
+            .padding(.bottom, 4)
+
+            if isEditing {
+                // Edit mode: reorder with move buttons (macOS doesn't have editMode)
+                ScrollView {
+                    LazyVStack(spacing: 2) {
+                        ForEach(Array(reorderableSections.enumerated()), id: \.element.id) { index, section in
+                            HStack(spacing: 8) {
+                                VStack(spacing: 2) {
+                                    Button {
+                                        guard index > 0 else { return }
+                                        moveCategoryAt(index, to: index - 1)
+                                    } label: {
+                                        Image(systemName: "chevron.up")
+                                            .font(.caption2.weight(.bold))
+                                    }
+                                    .buttonStyle(.plain)
+                                    .disabled(index == 0)
+
+                                    Button {
+                                        guard index < reorderableSections.count - 1 else { return }
+                                        moveCategoryAt(index, to: index + 1)
+                                    } label: {
+                                        Image(systemName: "chevron.down")
+                                            .font(.caption2.weight(.bold))
+                                    }
+                                    .buttonStyle(.plain)
+                                    .disabled(index == reorderableSections.count - 1)
+                                }
+                                .foregroundStyle(.secondary)
+
+                                if let icon = section.icon {
+                                    Image(systemName: icon)
+                                        .font(.subheadline)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Text(section.title)
+                                    .font(.headline)
+                                    .lineLimit(1)
+                                Spacer()
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                        }
+                    }
+                    .padding(.horizontal, 8)
+                }
+            } else {
+                // Normal mode: category selection
+                ScrollView {
+                    LazyVStack(spacing: 2) {
+                        ForEach(sections) { section in
+                            let isSelected = selectedSection?.id == section.id
+                            HStack(spacing: 8) {
+                                if let icon = section.icon {
+                                    Image(systemName: icon)
+                                        .font(.subheadline)
+                                        .foregroundStyle(isSelected ? themeManager.colors.accent : Color.secondary)
+                                }
+                                Text(section.title)
+                                    .font(.headline)
+                                    .foregroundStyle(isSelected ? themeManager.colors.accent : Color.primary)
+                                    .lineLimit(1)
+                                Spacer()
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(
+                                RoundedRectangle(cornerRadius: 6)
+                                    .fill(isSelected ? themeManager.colors.accent.opacity(0.15) : Color.clear)
+                            )
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                selectedSection = section
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 8)
+                }
+            }
         }
         #if os(macOS)
         .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
         #endif
+    }
+
+    private func moveCategories(from source: IndexSet, to destination: Int) {
+        var ordered = reorderableSections
+        ordered.move(fromOffsets: source, toOffset: destination)
+        persistCategoryOrder(ordered)
+    }
+
+    private func moveCategoryAt(_ fromIndex: Int, to toIndex: Int) {
+        var ordered = reorderableSections
+        let item = ordered.remove(at: fromIndex)
+        ordered.insert(item, at: toIndex)
+        persistCategoryOrder(ordered)
+    }
+
+    private func persistCategoryOrder(_ ordered: [LiveTVSection]) {
+        for (index, section) in ordered.enumerated() {
+            if case let .category(cat) = section {
+                let categoryId = cat.id
+                let descriptor = FetchDescriptor<Category>(
+                    predicate: #Predicate { $0.id == categoryId }
+                )
+                if let found = try? modelContext.fetch(descriptor).first {
+                    found.customOrder = index
+                }
+            }
+        }
+        try? modelContext.save()
     }
 }
 
