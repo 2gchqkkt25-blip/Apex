@@ -319,17 +319,21 @@ class StalkerClient {
     }
 
     /// Walks every page of an ordered list and returns the combined items.
-    /// `maxItems` caps the walk so a runaway `total_items` can't loop forever.
+    /// `maxPages` limits the walk per category to prevent hour-long syncs on
+    /// providers with thousands of items. Most portals serve 14 items/page —
+    /// a cap of 20 pages (280 items per category) keeps sync under 2 minutes
+    /// for a 100-category library while still surfacing the latest content.
     func getAllOrderedItems(
         type: String,
         categoryId: String,
         movieId: String? = nil,
-        maxItems: Int = 20000
+        maxItems: Int = 20000,
+        maxPages: Int = 20
     ) async throws -> [StalkerVODItem] {
         var all: [StalkerVODItem] = []
         var page = 1
         var pageSize = 14
-        while all.count < maxItems {
+        while all.count < maxItems, page <= maxPages {
             let result = try await getOrderedList(type: type, categoryId: categoryId, page: page, movieId: movieId)
             if let size = result.pageSize, size > 0 { pageSize = size }
             all.append(contentsOf: result.items)
