@@ -157,6 +157,9 @@ Without these keys, the app works but metadata is limited to what the IPTV provi
 | 90 | **macOS/iOS fullscreen channel switching** | ✅ **Done (Jul 16)** — Prev/next chevron buttons in player transport for live TV. Same surf scope as browse section. tvOS unchanged (Siri Remote). |
 | 91 | **Video quality display** | ✅ **Done (Jul 16)** — Player controls show "1080p · HEVC · 30fps" below title. Reads from KSPlayer active video track. |
 | 92 | **Trending load performance** | ✅ **Done (Jul 16)** — TMDB pages 5→3; stale state cleared on playlist change; empty rows no longer suppressed. |
+| 93 | **Stalker sync — on-demand VOD/Series + deferred preload** | ✅ **Done (Jul 16)** — Only Live TV + categories sync upfront (matches TiviMate/iSTB). VOD/Series load on-demand when browsed. Background preload fetches first page of top 15 categories for poster cards. Sync: seconds instead of 30+ min. |
+| 94 | **macOS sidebar — content margins + reorder** | ✅ **Done (Jul 16)** — `.contentMargins(.top, 52)` clears toolbar in fullscreen. Edit button inside ScrollView (always visible). Category reorder with up/down chevrons. |
+| 95 | **EPG guide — instant cache on category switch** | ✅ **Done (Jul 16)** — `epgCache.activate(section:)` runs on `.onAppear` (synchronous first frame) so cached programme data paints immediately. |
 
 ---
 
@@ -1682,4 +1685,4 @@ See **What's Been Built → iOS Device — Large Library Fix** above for full de
 
 ---
 
-*Last updated: July 16, 2026 (tvOS duplicate subtitles fix, macOS/iOS channel switching, video quality display, trending performance, profile switch safety, engineering cleanup.)*
+*Last updated: July 16, 2026 (Build 42+ — tvOS subtitle dedup, macOS/iOS channel switching, video quality display, trending perf, Stalker on-demand sync, macOS sidebar fixes, EPG cache instant paint, engineering cleanup.)*
