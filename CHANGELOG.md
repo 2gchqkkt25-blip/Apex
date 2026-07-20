@@ -4,33 +4,38 @@ All notable changes to Apex Stream Player.
 
 ---
 
-## Unreleased — July 16, 2026
-
-### Engineering Cleanup
-
-- **Watch-progress reconciliation safety** — Launch-time recovery of buffered watch progress now runs through a main-actor-safe reconciliation path before flushing to SwiftData.
-- **Preview and seed hardening** — Preview-only sample data and UI-testing seed writes now use explicit guarded error handling instead of silent force unwrap / `try?` patterns.
-- **Docs updated** — Feature inventory and release notes now reflect the cleanup pass so future warning work has a paper trail.
+## Build 45 (1.2.0) — July 20, 2026
 
 ### Bug Fixes
 
-- **tvOS duplicate subtitles** — External Wyzie subtitle overlay no longer renders when the stream has embedded subtitle tracks. Checks `AVURLAsset.loadMediaSelectionGroup(for: .legible)` before fetching — if the stream ships its own tracks, external fetch is skipped entirely.
-- **Stalker sync hanging (30+ min)** — VOD/Series no longer downloaded during sync. Only Live TV channels + categories sync upfront (matches TiviMate, iSTB, MAG boxes). VOD content loads on-demand when the user opens a category. Deferred background task preloads first page of top 15 categories for poster cards (~30 sec, non-blocking).
-- **macOS sidebar clipped in fullscreen** — `.contentMargins(.top, 52)` insets the scroll content below the NavigationStack toolbar. Edit button moved inside ScrollView so it's never hidden behind the toolbar.
-- **macOS Edit button not responding** — Changed from `Button(.plain)` (swallowed by scroll gesture) to `Text` + `onTapGesture` (always fires).
-- **EPG guide slow on category switch** — `epgCache.activate(section:)` now runs synchronously on `.onAppear` so cached programme data paints on the first frame (was async in `.task`, causing one blank frame).
-- **Home launch slowdown** — TMDB trending fetch deferred 500ms when heroes already visible so first frame renders immediately.
+- **Favorite poster badges visible everywhere** — The filled red heart now receives the live favorite state in every movie/series poster implementation, including category grids, Home rails, Favorites/Recently Watched rows, similar-title strips, and tvOS recommendation rails. The shared top-left badge uses a high-contrast dark plate and stays separate from the top-right TMDB/IMDb rating badge. Live TV continues to show an inline red heart beside favorited channel names.
+- **Subtitle placement refined by platform** — Bottom subtitles now respect the video safe area and animate above visible playback controls, returning to the lower resting position when controls hide. iOS/iPadOS uses orientation-aware clearance (120 pt landscape / 150 pt portrait), macOS uses 140 pt, and tvOS uses the larger of 300 pt or 30% of player height. The Center option remains geometrically centered and does not move with the controls. Shared placement applies to external subtitle overlays, KSPlayer embedded subtitles, and the custom macOS AVPlayer subtitle overlay; control visibility is reported by KSPlayer, VLCKit, and AVPlayer.
+
+- **Stalker live TV not playing** — Two root causes fixed:
+  - `candidateEndpoints()` now tests PHP middleware endpoints under the user's URL path prefix (e.g. `/c/portal.php`) before falling back to root-level paths. Portals that only serve the API under a subpath were unreachable.
+  - `resolveStreamURL()` detects when a channel's `cmd` already contains a pre-tokenized playable URL and returns it directly, instead of re-resolving through `create_link` — which strips the stream parameter on some portals.
+- **Stalker movies not playing** — `resolvedURL(from:)` no longer accepts strings without `http(s)://` as valid URLs. Previously `URL(string:)` accepted base64 JSON and other non-URL strings, causing the pre-built URL fast path to skip `create_link`. Base64-encoded VOD commands now correctly fall through to a working `create_link` call.
+- **Stalker series: no episodes** — Three fixes:
+  - `streamId(for:)` now splits on `:` and parses just the numeric prefix, so series IDs like `"50782:50782"` are stored correctly instead of being hashed.
+  - `fetchStalkerEpisodes()` generates per-episode `cmd` values with `stream_id = series_id:season:episode` and `target_container: ["mp4"]` (matching the portal's movie format), so `create_link` returns a proper playable URL.
+  - `performStalkerSync()` now syncs the first page of all movie and series categories during sync (1 page/category, ~1 min total) instead of only preloading the top 15 categories in the background. All categories show poster cards immediately.
+- **Channel switching crossed playlists** — `LiveChannelNavigator.adjacentMedia()` now filters by the active stream's owning playlist UUID prefix for `.all`, `.favorites`, and `.recentlyWatched` scopes. Previously channel surfing could jump into channels from a different playlist.
+- **VLC/AVPlayer missing channel switching buttons** — iOS/macOS player transport controls for VLCKit and AVPlayer engines now include previous/next channel chevron buttons for live TV, matching the KSPlayer engine. `FullScreenPlayerView` wires `switchLiveChannelAction` to all three engines.
 
 ### New Features
 
-- **macOS/iOS fullscreen channel switching** — Previous/next channel buttons (chevrons) in the player transport controls for live TV. Surf channels without leaving fullscreen. Uses the same `LiveChannelNavigator` scope as the browse section you launched from. tvOS unchanged (uses Siri Remote swipe).
-- **Video quality display** — Player controls now show stream quality below the title (e.g. "1080p · HEVC · 30fps"). Reads resolution, codec, and frame rate from KSPlayer's active video track.
-- **macOS Live TV category reorder** — Edit button in the sidebar opens reorder mode with up/down chevrons to rearrange categories. Persists via `Category.customOrder` (same as iOS and Content Management).
+- **Start from Beginning** — Movies with saved progress offer a secondary button on the detail screen; episodes with saved progress offer the same action in their context menu. Starting over ignores the saved resume offset for that playback launch without changing the normal Resume action. Available on iOS, macOS, and tvOS.
+- **Favorite heart badges** — Favorited movie and series posters show a filled red heart at top-left; favorited Live TV channels show an inline heart beside the channel name. Rating badges remain at top-right with no overlap.
+- **Content counts** — Browse tabs show playlist-scoped totals at the top: Movies, Series, and Live TV channels. Hidden or restricted content is excluded where applicable.
+- **Subtitle appearance customization** — Settings → Subtitles → Appearance: choose Bottom or Center placement and control font size (14–48 pt), text color, background opacity (0–100%), and bottom offset (0–120 pt). Settings apply to all custom subtitle overlays (KSPlayer embedded, external SRT, AVPlayer macOS). Platform-aware defaults (tvOS starts at 28 pt / 60 pt offset). macOS includes a live preview. tvOS uses pill-style pickers for focus-friendly navigation.
+- **Stream resolution timeout** — Stalker `create_link` resolution is wrapped in a 45-second timeout. Unresponsive portals show an error instead of an infinite spinner.
 
 ### Improvements
 
-- **Trending load performance** — TMDB trending pages reduced 5 → 3 (faster network phase). Stale trending state cleared on playlist change. Trending rows now unconditionally apply results.
-- **Profile switch safety** — `defer { isSwitching = false }` ensures the switching flag resets even if `switchProfile` throws.
+- **One-tap iOS category reorder** — The up/down sort button on the Live TV category bar opens the category picker directly in reorder mode, while the category title still opens normal selection.
+- **Stalker background catalog loading** — Sync imports page 1 of every VOD and series category so posters appear immediately, then a detached utility task fills pages 2–20 for all categories without keeping the sync sheet open. Background failures are best-effort and do not block browsing.
+- **Stalker resolution logging** — `StalkerClient` and `StalkerStreamResolver` now log at each stage (handshake candidates, `create_link` request/response, resolved URL) with `Logger.network` / `Logger.player` for easier debugging.
+- **Channel switching scoped to playlist** — `LiveChannelNavigator` now isolates channel surfing to the active playlist across all browsing scopes.
 
 ---
 
