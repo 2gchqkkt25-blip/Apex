@@ -20,6 +20,9 @@ import SwiftUI
 @available(iOS 16.0, macOS 13.0, tvOS 16.0, *)
 struct KSPlayerSubtitleOverlay: View {
     @ObservedObject var model: SubtitleModel
+    var controlsVisible = false
+
+    private let appearance = SubtitleAppearance.current
 
     var body: some View {
         ZStack {
@@ -30,7 +33,6 @@ struct KSPlayerSubtitleOverlay: View {
         .allowsHitTesting(false)
     }
 
-    @ViewBuilder
     private func partView(_ part: SubtitlePart) -> some View {
         VStack {
             if let image = part.image {
@@ -38,24 +40,19 @@ struct KSPlayerSubtitleOverlay: View {
                 subtitleImage(image)
                     .padding()
             } else if let text = part.text {
-                let position = part.textPosition ?? SubtitleModel.textPosition
-                if position.verticalAlign == .bottom || position.verticalAlign == .center {
-                    Spacer()
-                }
-                Text(AttributedString(text))
-                    .font(Font(SubtitleModel.textFont))
-                    .shadow(color: .black.opacity(0.9), radius: 1, x: 1, y: 1)
-                    .foregroundStyle(SubtitleModel.textColor)
-                    .italic(SubtitleModel.textItalic)
-                    .background(SubtitleModel.textBackgroundColor)
-                    .multilineTextAlignment(.center)
-                    .alignmentGuide(position.horizontalAlign) { $0[.leading] }
-                    .padding(position.edgeInsets)
-                #if !os(tvOS)
-                    .textSelection(.enabled)
-                #endif
-                if position.verticalAlign == .top || position.verticalAlign == .center {
-                    Spacer()
+                SubtitleOverlayLayout(appearance: appearance, controlsVisible: controlsVisible) {
+                    Text(AttributedString(text))
+                        .font(.system(size: appearance.fontSize, weight: .medium))
+                        .shadow(color: .black.opacity(0.9), radius: 2, x: 1, y: 1)
+                        .foregroundStyle(appearance.textColor)
+                        .italic(SubtitleModel.textItalic)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 24)
+                        .padding(.vertical, 8)
+                        .background(.black.opacity(appearance.backgroundOpacity), in: RoundedRectangle(cornerRadius: 6))
+                    #if !os(tvOS)
+                        .textSelection(.enabled)
+                    #endif
                 }
             } else {
                 Text("")

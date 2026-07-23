@@ -345,9 +345,10 @@ struct SimilarRow: View {
                             DetailPosterCard(
                                 title: item.title,
                                 imageURL: item.imageURL,
-                                rating: item.posterRating
+                                rating: item.posterRating,
+                                isFavorite: movie.isFavorite
                             )
-                                .matchedTransitionSourceIfAvailable(id: movie.id, in: animationNamespace)
+                            .matchedTransitionSourceIfAvailable(id: movie.id, in: animationNamespace)
                         }
                         .buttonStyle(.plain)
                     case let .series(series):
@@ -355,9 +356,10 @@ struct SimilarRow: View {
                             DetailPosterCard(
                                 title: item.title,
                                 imageURL: item.imageURL,
-                                rating: item.posterRating
+                                rating: item.posterRating,
+                                isFavorite: series.isFavorite
                             )
-                                .matchedTransitionSourceIfAvailable(id: series.id, in: animationNamespace)
+                            .matchedTransitionSourceIfAvailable(id: series.id, in: animationNamespace)
                         }
                         .buttonStyle(.plain)
                     case .live:
@@ -375,6 +377,7 @@ struct DetailPosterCard: View {
     let title: String
     let imageURL: URL?
     var rating: PosterRatingDisplay?
+    var isFavorite = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -397,6 +400,7 @@ struct DetailPosterCard: View {
             }
             .frame(width: 120, height: 180)
             .posterRatingOverlay(rating)
+            .posterFavoriteOverlay(isFavorite)
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .shadow(radius: 2)
 

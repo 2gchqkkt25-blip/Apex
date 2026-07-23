@@ -101,17 +101,25 @@ nonisolated enum StalkerLink {
     /// Extracts a playable URL from a `create_link` `cmd` response. Portals
     /// commonly prefix the URL with an engine token (`ffmpeg `, `auto `) and may
     /// append params, so we take the first `http(s)` token rather than trusting
-    /// the whole string.
+    /// the whole string. Also strips trailing dots from path segments (some
+    /// portals append a dot before query param separators in series episode URLs).
+    ///
+    /// Returns `nil` when the string doesn't contain an `http(s)://` URL — the
+    /// caller should then try `create_link`. This is stricter than `URL(string:)`
+    /// which accepts nearly any string (including base64 JSON) as a "valid" URL.
     static func resolvedURL(from raw: String) -> URL? {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let range = trimmed.range(of: "https?://", options: .regularExpression) else {
-            return URL(string: trimmed)
+            return nil
         }
         let urlPart = String(trimmed[range.lowerBound...])
         // The URL runs to the next whitespace (params after a space aren't part
         // of the URL).
         let urlString = urlPart.split(whereSeparator: { $0 == " " }).first.map(String.init) ?? urlPart
-        return URL(string: urlString)
+        // Strip trailing dots that portals sometimes append before `&` separators
+        // in series episode URLs (e.g. `stream=50782:1:1.&play_token=...`).
+        let sanitized = urlString.replacingOccurrences(of: ".&", with: "&")
+        return URL(string: sanitized)
     }
 }
 

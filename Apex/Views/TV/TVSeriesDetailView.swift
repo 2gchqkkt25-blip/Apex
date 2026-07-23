@@ -224,6 +224,7 @@
                                 TVEpisodeCard(
                                     episode: episode,
                                     onPlay: { playEpisode(episode) },
+                                    onPlayFromBeginning: { playEpisodeFromBeginning(episode) },
                                     onToggleWatched: { toggleWatched(episode) },
                                     onMarkPreviousWatched: { markPreviousWatched(episode) },
                                     onMarkFollowingUnwatched: { markFollowingUnwatched(episode) }
@@ -328,12 +329,12 @@
             switch item {
             case let .movie(movie):
                 NavigationLink(value: movie) {
-                    TVPosterCard(title: item.title, imageURL: item.imageURL, rating: item.posterRating)
+                    TVPosterCard(title: item.title, imageURL: item.imageURL, rating: item.posterRating, isFavorite: movie.isFavorite)
                 }
                 .buttonStyle(TVCardButtonStyle())
             case let .series(series):
                 NavigationLink(value: series) {
-                    TVPosterCard(title: item.title, imageURL: item.imageURL, rating: item.posterRating)
+                    TVPosterCard(title: item.title, imageURL: item.imageURL, rating: item.posterRating, isFavorite: series.isFavorite)
                 }
                 .buttonStyle(TVCardButtonStyle())
             case .live:
@@ -539,6 +540,13 @@
         func playEpisode(_ episode: Episode) {
             guard let playlist = seriesPlaylist,
                   let media = PlayableMedia.from(episode: episode, playlist: playlist) else { return }
+            if ExternalPlayback.open(media) { return }
+            playingMedia = media
+        }
+
+        func playEpisodeFromBeginning(_ episode: Episode) {
+            guard let playlist = seriesPlaylist,
+                  let media = PlayableMedia.from(episode: episode, playlist: playlist, resumeFromProgress: false) else { return }
             if ExternalPlayback.open(media) { return }
             playingMedia = media
         }

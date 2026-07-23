@@ -34,6 +34,9 @@ enum LiveChannelNavigator {
     ///
     /// When `scope` is `.favorites`, surfs through the user's favorited channels
     /// instead of the category list — matching what the viewer was browsing.
+    ///
+    /// All scopes filter to the current stream's owning playlist so channel
+    /// surfing never crosses into a different playlist's channels.
     static func adjacentMedia(
         for media: PlayableMedia,
         offset: Int,
@@ -46,20 +49,24 @@ enum LiveChannelNavigator {
         currentDescriptor.fetchLimit = 1
         guard let current = try? context.fetch(currentDescriptor).first else { return nil }
 
+        // Extract the owning playlist's UUID prefix from the stream id
+        // (all stream ids are formatted "<playlistUUID>-live-<streamId>").
+        let playlistPrefix = String(current.id.prefix(36)) + "-"
+
         let streams: [LiveStream]
 
         if let scope, case .all = scope {
-            // Surf within all channels
+            // Surf within all channels of the same playlist
             var descriptor = FetchDescriptor<LiveStream>(
-                predicate: #Predicate { $0.isHidden == false },
+                predicate: #Predicate { $0.isHidden == false && $0.id.starts(with: playlistPrefix) },
                 sortBy: sort.liveStreamDescriptors
             )
             descriptor.fetchLimit = 200
             streams = (try? context.fetch(descriptor)) ?? []
         } else if let scope, case .favorites = scope {
-            // Surf within favorites only
+            // Surf within favorites of the same playlist
             let descriptor = FetchDescriptor<LiveStream>(
-                predicate: #Predicate { $0.isFavorite && $0.isHidden == false },
+                predicate: #Predicate { $0.isFavorite && $0.isHidden == false && $0.id.starts(with: playlistPrefix) },
                 sortBy: [
                     SortDescriptor(\LiveStream.favoriteOrder),
                     SortDescriptor(\LiveStream.num),
@@ -68,15 +75,15 @@ enum LiveChannelNavigator {
             )
             streams = (try? context.fetch(descriptor)) ?? []
         } else if let scope, case .recentlyWatched = scope {
-            // Surf within recently watched
+            // Surf within recently watched of the same playlist
             var descriptor = FetchDescriptor<LiveStream>(
-                predicate: #Predicate { $0.lastWatchedDate != nil && $0.isHidden == false },
+                predicate: #Predicate { $0.lastWatchedDate != nil && $0.isHidden == false && $0.id.starts(with: playlistPrefix) },
                 sortBy: [SortDescriptor(\LiveStream.lastWatchedDate, order: .reverse)]
             )
             descriptor.fetchLimit = 50
             streams = (try? context.fetch(descriptor)) ?? []
         } else {
-            // Default: surf within the same category
+            // Default: surf within the same category (already playlist-scoped via categoryId prefix)
             guard let categoryId = current.categoryId else { return nil }
             let descriptor = FetchDescriptor<LiveStream>(
                 predicate: #Predicate { $0.categoryId == categoryId },

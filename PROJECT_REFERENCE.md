@@ -160,6 +160,8 @@ Without these keys, the app works but metadata is limited to what the IPTV provi
 | 93 | **Stalker sync — on-demand VOD/Series + deferred preload** | ✅ **Done (Jul 16)** — Only Live TV + categories sync upfront (matches TiviMate/iSTB). VOD/Series load on-demand when browsed. Background preload fetches first page of top 15 categories for poster cards. Sync: seconds instead of 30+ min. |
 | 94 | **macOS sidebar — content margins + reorder** | ✅ **Done (Jul 16)** — `.contentMargins(.top, 52)` clears toolbar in fullscreen. Edit button inside ScrollView (always visible). Category reorder with up/down chevrons. |
 | 95 | **EPG guide — instant cache on category switch** | ✅ **Done (Jul 16)** — `epgCache.activate(section:)` runs on `.onAppear` (synchronous first frame) so cached programme data paints immediately. |
+| 96 | **Build 45 — playback, browse badges/counts, subtitles, and Stalker completion** | ✅ **Done (Jul 20)** — Added Start from Beginning for resumed movies and episode context menus; playlist-scoped Movies/Series/channel totals; one-tap iOS category reorder; Stalker page-1 foreground import plus pages 2–20 background fill for all VOD/series categories. Corrected favorite hearts across every movie/series poster variant (with non-overlapping top-right ratings) and inline Live TV hearts. Refined Bottom subtitles to clear safe areas and visible controls per platform while Center remains geometrically fixed. |
+| 97 | **Build 46 — final playback, subtitle, and tvOS performance hardening** | ✅ **Done (Jul 20)** — Restored end-of-playback signaling for KSPlayer, VLCKit, and AVPlayer so Next Episode and Auto Play Next work consistently. Fixed Skip Intro/Recap looping, kept the macOS Next Episode button reachable when pointer movement reveals controls, and removed duplicate macOS subtitles using engine-reported embedded-track availability. Replaced unbounded browse-count queries and reduced Stalker background-save churn for responsive large Xtream/Stalker libraries on tvOS. Hardened the Stalker resolution timeout, aligned the app and Top Shelf build number, and corrected the macOS Retina icon asset. |
 
 ---
 
@@ -1632,6 +1634,7 @@ See **What's Been Built → iOS Device — Large Library Fix** above for full de
 | Feature | Difficulty | Description |
 |---------|-----------|-------------|
 | **EPG external feed gap-fill** | Low (~1 day) | After provider xmltv.php sync, check which channels got 0 programmes. Fill those gaps from epgshare01 feeds. Keeps speed while improving accuracy for providers with incomplete guides. |
+| **In-player EPG mini-guide overlay** | Medium (~2-3 days) | Compact programme guide overlaid on the video while watching a live channel, without exiting playback. Multi-channel scrollable timeline reusing existing EPG components (`EPGComponents`, `EPGGridBuilder`, `LiveTVSectionEPGCache`). Tapping a programme switches channel via `LiveChannelNavigator`. Added as a "Guide" tab pill in the tvOS player overlay alongside Episodes / Recent / Info, and as an expandable panel on iOS/macOS. Stream continues playing behind the overlay. See [Issue #1](https://github.com/2gchqkkt25-blip/Apex/issues/1). |
 | **Live TV mini preview** | Medium (~2-3 days) | Small floating video window in the corner while browsing Live TV channels. Tap a channel → preview plays in the corner while you keep scrolling. Tap preview to go fullscreen or pick another channel to switch it. Lightweight AVPlayer overlay, not the full engine stack. Wi-Fi only (uses a concurrent connection). |
 | **Stream quality picker for Xtream** | Low (~1 day) | Let user choose stream format (m3u8/ts/original) per playlist or globally. Some providers serve better quality in one format. |
 | **Multi-audio track selection** | Low (~1 day) | Surface audio track picker in player controls (some streams have English + Spanish + commentary tracks). |
@@ -1685,4 +1688,4 @@ See **What's Been Built → iOS Device — Large Library Fix** above for full de
 
 ---
 
-*Last updated: July 16, 2026 (Build 42+ — tvOS subtitle dedup, macOS/iOS channel switching, video quality display, trending perf, Stalker on-demand sync, macOS sidebar fixes, EPG cache instant paint, engineering cleanup.)*
+*Last updated: July 20, 2026 (Build 46 — playback completion/autoplay reliability, Skip Intro stability, macOS subtitle and Next Episode refinements, tvOS large-library responsiveness, and release packaging hardening.)*

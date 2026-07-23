@@ -36,9 +36,17 @@ struct AVPlayerEngineView: View {
     /// Invoked when this engine can't start the stream and a fallback engine is
     /// available. The host advances to the next engine in the priority list.
     var onPlaybackFailed: (() -> Void)?
+    /// Invoked when the engine confirms this on-demand item reached its end.
+    var onPlaybackEnded: ((String) -> Void)?
+    /// Invoked when AVFoundation exposes at least one embedded subtitle track.
+    var onEmbeddedSubtitlesAvailable: (() -> Void)?
     /// Invoked when the viewer picks a different stream (another episode, or a
     /// live channel via the Siri remote) from the in-player overlay.
     var onSelectMedia: ((PlayableMedia) -> Void)?
+    /// Channel switching for live TV (iOS/macOS). Offset: +1 next, -1 previous.
+    var onSwitchChannel: ((Int) -> Void)?
+    /// Mirrors the auto-hiding controls state to host-level subtitle overlays.
+    var onControlsVisibilityChanged: ((Bool) -> Void)?
 
     @StateObject private var coordinator = AVPlayerCoordinator()
     @State private var isControlsVisible = true
@@ -96,17 +104,17 @@ struct AVPlayerEngineView: View {
 
             #if os(macOS)
                 if let subtitle = coordinator.legibleSubtitle {
-                    VStack {
-                        Spacer()
+                    let appearance = SubtitleAppearance.current
+                    SubtitleOverlayLayout(appearance: appearance, controlsVisible: isControlsVisible) {
                         Text(subtitle)
-                            .font(.title3.weight(.semibold))
+                            .font(.system(size: appearance.fontSize, weight: .semibold))
                             .multilineTextAlignment(.center)
-                            .foregroundStyle(.white)
+                            .foregroundStyle(appearance.textColor)
                             .shadow(color: .black.opacity(0.9), radius: 2, x: 1, y: 1)
                             .padding(.horizontal, 24)
-                            .padding(.bottom, 48)
+                            .padding(.vertical, 8)
+                            .background(.black.opacity(appearance.backgroundOpacity), in: RoundedRectangle(cornerRadius: 6))
                     }
-                    .allowsHitTesting(false)
                 }
             #endif
 
@@ -148,6 +156,8 @@ struct AVPlayerEngineView: View {
                 if total.isFinite, total > 0 { clock.duration = total }
             }
             coordinator.onPlaybackFailure = { reportFailure() }
+            coordinator.onPlaybackEnded = { onPlaybackEnded?(media.id) }
+            coordinator.onEmbeddedSubtitlesAvailable = onEmbeddedSubtitlesAvailable
             coordinator.startupTimeout = fallbackAvailable ? fallbackStartupTimeout : startupTimeout
             coordinator.configure(media: media)
             seekBridge.seekTo = { [coordinator] time in coordinator.seek(to: time) }
@@ -177,14 +187,17 @@ struct AVPlayerEngineView: View {
             seekPosition = 0
             isPanelOpen = false
             loadFailed = false
+            coordinator.onPlaybackEnded = { onPlaybackEnded?(newMedia.id) }
             coordinator.reload(media: newMedia)
             resetHideTimer()
         }
         .onChange(of: isControlsVisible) { _, visible in
+            onControlsVisibilityChanged?(visible)
             #if os(tvOS)
                 if !visible { Task { @MainActor in catcherFocused = true } }
             #endif
         }
+        .onAppear { onControlsVisibilityChanged?(isControlsVisible) }
         .onMenuPress { handleMenuPress() }
         .onPlayPausePress { togglePlay() }
         #if os(macOS)
@@ -270,7 +283,8 @@ struct AVPlayerEngineView: View {
                 onClose: { closePlayer() },
                 onTogglePlay: { togglePlay() },
                 onResetHideTimer: { resetHideTimer() },
-                onScheduleHide: { scheduleHide() }
+                onScheduleHide: { scheduleHide() },
+                onSwitchChannel: onSwitchChannel
             )
         #endif
     }

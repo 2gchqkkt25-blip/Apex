@@ -5,6 +5,14 @@ import SwiftUI
 
 @available(iOS 16.0, macOS 13.0, tvOS 16.0, *)
 extension KSPlayerEngineView {
+    /// Use KSPlayer's terminal state as a duration-independent autoplay
+    /// fallback. IPTV manifests often over-report duration, so the clock may
+    /// never enter the final three-second window used by the visual overlay.
+    func reportPlaybackEndIfNeeded(_ state: KSPlayerState) {
+        guard state == .playedToTheEnd, !media.isLive else { return }
+        onPlaybackEnded?(media.id)
+    }
+
     // MARK: - Loading state
 
     /// Drive the loading indicator + initial controls gate off KSPlayer's state.

@@ -22,6 +22,8 @@ import SwiftUI
         var onTogglePlay: () -> Void
         var onResetHideTimer: () -> Void
         var onScheduleHide: () -> Void
+        /// Channel switching callback for live TV (iOS/macOS). Positive = next, negative = previous.
+        var onSwitchChannel: ((Int) -> Void)?
 
         @Environment(\.modelContext) private var modelContext
         /// Mirrors the backing model's favorite flag; refreshed when the media
@@ -111,6 +113,15 @@ import SwiftUI
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Skip back 15 seconds")
+                } else {
+                    Button {
+                        onSwitchChannel?(-1)
+                        onResetHideTimer()
+                    } label: {
+                        circleGlyph("chevron.left", size: 20, diameter: 60)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Previous channel")
                 }
 
                 Button(action: onTogglePlay) {
@@ -132,6 +143,15 @@ import SwiftUI
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Skip forward 15 seconds")
+                } else {
+                    Button {
+                        onSwitchChannel?(1)
+                        onResetHideTimer()
+                    } label: {
+                        circleGlyph("chevron.right", size: 20, diameter: 60)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Next channel")
                 }
             }
         }

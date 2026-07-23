@@ -27,9 +27,16 @@ struct LiveStreamCardView: View {
                 .id("\(stream.id)-\(stream.streamIcon ?? "")")
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(stream.name)
-                    .font(.headline)
-                    .lineLimit(1)
+                HStack(spacing: 4) {
+                    Text(stream.name)
+                        .font(.headline)
+                        .lineLimit(1)
+                    if stream.isFavorite {
+                        Image(systemName: "heart.fill")
+                            .font(.caption2)
+                            .foregroundStyle(.red)
+                    }
+                }
 
                 if let current = currentEPG {
                     Text(current.title)

@@ -83,6 +83,11 @@ final class AVPlayerCoordinator: NSObject, ObservableObject {
 
     var onTime: ((TimeInterval) -> Void)?
     var onDuration: ((TimeInterval) -> Void)?
+    /// Fired once AVFoundation confirms that the current on-demand item ended.
+    /// This is more reliable than inferring completion from the reported
+    /// duration, which is frequently inaccurate for provider-hosted episodes.
+    var onPlaybackEnded: (() -> Void)?
+    var onEmbeddedSubtitlesAvailable: (() -> Void)?
 
     let player = AVPlayer()
 
@@ -114,6 +119,7 @@ final class AVPlayerCoordinator: NSObject, ObservableObject {
     private var durationObservation: NSKeyValueObservation?
     private var timeControlObservation: NSKeyValueObservation?
     private var presentationSizeObservation: NSKeyValueObservation?
+    private var playbackEndObserver: NSObjectProtocol?
     private var trackLoadTask: Task<Void, Never>?
 
     #if os(macOS)
@@ -265,6 +271,10 @@ final class AVPlayerCoordinator: NSObject, ObservableObject {
 
     /// Seek to an absolute time (in seconds).
     func seek(to seconds: TimeInterval) {
+        // A user-initiated skip supersedes the one-shot resume seek. Otherwise
+        // a late ready callback can immediately pull playback back to startTime.
+        needsResume = false
+        didSeekResume = true
         let time = CMTime(seconds: seconds, preferredTimescale: 600)
         player.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero)
     }
@@ -348,6 +358,7 @@ final class AVPlayerCoordinator: NSObject, ObservableObject {
         }
 
         if let legibleGroup, !legibleOptions.isEmpty {
+            onEmbeddedSubtitlesAvailable?()
             let selected = selection.selectedMediaOption(in: legibleGroup)
             textTrackOptions = legibleOptions.enumerated().map { index, option in
                 PlayerTrackOption(id: String(index), label: option.displayName, isSelected: option == selected)
@@ -366,6 +377,17 @@ final class AVPlayerCoordinator: NSObject, ObservableObject {
     // MARK: - Observers
 
     private func attachItemObservers(to item: AVPlayerItem) {
+        playbackEndObserver = NotificationCenter.default.addObserver(
+            forName: AVPlayerItem.didPlayToEndTimeNotification,
+            object: item,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, !self.isLive else { return }
+                self.onPlaybackEnded?()
+            }
+        }
+
         let interval = CMTime(seconds: 0.5, preferredTimescale: 600)
         timeObserver = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
             guard let self else { return }
@@ -414,6 +436,10 @@ final class AVPlayerCoordinator: NSObject, ObservableObject {
     }
 
     private func teardownItemObservers() {
+        if let playbackEndObserver {
+            NotificationCenter.default.removeObserver(playbackEndObserver)
+            self.playbackEndObserver = nil
+        }
         if let timeObserver {
             player.removeTimeObserver(timeObserver)
             self.timeObserver = nil

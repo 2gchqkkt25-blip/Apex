@@ -185,25 +185,36 @@
                 metaItems: heroMetaItems,
                 fallbackSymbol: "film"
             ) {
-                TVPlayButton(
-                    title: movie.watchProgress > 1 ? "Resume" : "Play",
-                    isEnabled: moviePlaylist != nil,
-                    action: startPlayback
-                )
-                .focused($focus, equals: .play)
-
-                HStack(spacing: 18) {
-                    TVSecondaryActionButton(
-                        title: movie.isFavorite ? "Remove from Favorites" : "Add to Favorites",
-                        systemImage: movie.isFavorite ? "heart.fill" : "heart",
-                        action: toggleFavorite
+                VStack(spacing: 16) {
+                    TVPlayButton(
+                        title: movie.watchProgress > 1 ? "Resume" : "Play",
+                        isEnabled: moviePlaylist != nil,
+                        action: startPlayback
                     )
+                    .focused($focus, equals: .play)
 
-                    TVSecondaryActionButton(
-                        title: movie.isWatched ? "Mark as Unwatched" : "Mark as Watched",
-                        systemImage: movie.isWatched ? "checkmark.circle.fill" : "checkmark.circle",
-                        action: toggleWatched
-                    )
+                    if movie.watchProgress > 1 {
+                        TVPlayButton(
+                            title: "Start from Beginning",
+                            systemImage: "gobackward",
+                            isEnabled: moviePlaylist != nil,
+                            action: startPlaybackFromBeginning
+                        )
+                    }
+
+                    HStack(spacing: 18) {
+                        TVSecondaryActionButton(
+                            title: movie.isFavorite ? "Remove from Favorites" : "Add to Favorites",
+                            systemImage: movie.isFavorite ? "heart.fill" : "heart",
+                            action: toggleFavorite
+                        )
+
+                        TVSecondaryActionButton(
+                            title: movie.isWatched ? "Mark as Unwatched" : "Mark as Watched",
+                            systemImage: movie.isWatched ? "checkmark.circle.fill" : "checkmark.circle",
+                            action: toggleWatched
+                        )
+                    }
                 }
             }
         }
@@ -245,12 +256,12 @@
             switch item {
             case let .movie(movie):
                 NavigationLink(value: movie) {
-                    TVPosterCard(title: item.title, imageURL: item.imageURL, rating: item.posterRating)
+                    TVPosterCard(title: item.title, imageURL: item.imageURL, rating: item.posterRating, isFavorite: movie.isFavorite)
                 }
                 .buttonStyle(TVCardButtonStyle())
             case let .series(series):
                 NavigationLink(value: series) {
-                    TVPosterCard(title: item.title, imageURL: item.imageURL, rating: item.posterRating)
+                    TVPosterCard(title: item.title, imageURL: item.imageURL, rating: item.posterRating, isFavorite: series.isFavorite)
                 }
                 .buttonStyle(TVCardButtonStyle())
             case .live:
@@ -432,6 +443,13 @@
         private func startPlayback() {
             guard let playlist = moviePlaylist,
                   let media = PlayableMedia.from(movie: movie, playlist: playlist) else { return }
+            if ExternalPlayback.open(media) { return }
+            playingMedia = media
+        }
+
+        private func startPlaybackFromBeginning() {
+            guard let playlist = moviePlaylist,
+                  let media = PlayableMedia.from(movie: movie, playlist: playlist, resumeFromProgress: false) else { return }
             if ExternalPlayback.open(media) { return }
             playingMedia = media
         }

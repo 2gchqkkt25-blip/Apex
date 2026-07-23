@@ -52,7 +52,7 @@ enum AppTheme: String, CaseIterable, Codable {
 
 // MARK: - Semantic colour tokens
 
-struct ThemeColors: Sendable {
+struct ThemeColors {
     /// Primary brand colour — buttons, links, toggles, active states.
     let accent: Color
     /// Main screen background.
@@ -158,11 +158,30 @@ extension Color {
         let hex = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
         var int: UInt64 = 0
         Scanner(string: hex).scanHexInt64(&int)
-        let r = Double((int >> 16) & 0xFF) / 255
-        let g = Double((int >> 8) & 0xFF) / 255
-        let b = Double(int & 0xFF) / 255
-        self.init(red: r, green: g, blue: b)
+        let red = Double((int >> 16) & 0xFF) / 255
+        let green = Double((int >> 8) & 0xFF) / 255
+        let blue = Double(int & 0xFF) / 255
+        self.init(red: red, green: green, blue: blue)
     }
+
+    #if canImport(UIKit)
+        var hexString: String {
+            guard let components = UIColor(self).cgColor.components, components.count >= 3 else { return "FFFFFF" }
+            let red = Int(components[0] * 255)
+            let green = Int(components[1] * 255)
+            let blue = Int(components[2] * 255)
+            return String(format: "%02X%02X%02X", red, green, blue)
+        }
+
+    #elseif canImport(AppKit)
+        var hexString: String {
+            guard let rgbColor = NSColor(self).usingColorSpace(.deviceRGB) else { return "FFFFFF" }
+            let red = Int(rgbColor.redComponent * 255)
+            let green = Int(rgbColor.greenComponent * 255)
+            let blue = Int(rgbColor.blueComponent * 255)
+            return String(format: "%02X%02X%02X", red, green, blue)
+        }
+    #endif
 
     /// A visible accent colour for the current platform.  On iOS / macOS /
     /// tvOS we use the standard system blue so selection indicators, tab bars,
@@ -179,9 +198,9 @@ extension Color {
 extension View {
     /// Applies the active theme's background — glass material when the Frosted Glass
     /// theme is active, solid colour otherwise.  Use this for full‑screen backgrounds.
-    @ViewBuilder
     /// Applies the active theme's background colour, extending under the safe
     /// area so the entire screen is filled.
+    @ViewBuilder
     func themeBackground() -> some View {
         let fill = ThemeManager.shared.colors.prefersGlass
             ? Color.clear

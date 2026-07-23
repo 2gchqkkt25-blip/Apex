@@ -60,6 +60,9 @@ final class VLCPlayerCoordinator: NSObject, ObservableObject {
 
     var onTime: ((TimeInterval) -> Void)?
     var onDuration: ((TimeInterval) -> Void)?
+    /// Fired once VLCKit confirms that the current on-demand item ended.
+    var onPlaybackEnded: (() -> Void)?
+    var onEmbeddedSubtitlesAvailable: (() -> Void)?
 
     let mediaPlayer = VLCMediaPlayer()
 
@@ -107,6 +110,9 @@ final class VLCPlayerCoordinator: NSObject, ObservableObject {
     private var startupWatchdog: Task<Void, Never>?
     /// Guards `onPlaybackFailure` so a failure is reported at most once per load.
     private var didReportFailure = false
+    /// VLC may repeat `.ended` delegate notifications while tearing down an
+    /// item. Keep auto-advance idempotent for each configured media item.
+    private var didReportPlaybackEnd = false
 
     // MARK: - Setup
 
@@ -139,6 +145,7 @@ final class VLCPlayerCoordinator: NSObject, ObservableObject {
         retry.reset()
         hasStartedPlayback = false
         didReportFailure = false
+        didReportPlaybackEnd = false
         lastTextTrackCount = 0
         lastAudioTrackCount = 0
         startStartupWatchdog()
@@ -190,6 +197,9 @@ final class VLCPlayerCoordinator: NSObject, ObservableObject {
     /// player or its render surface. Used by the tvOS overlay to start a new
     /// episode picked from the in-player episode rail.
     func reload(media: PlayableMedia) {
+        // Replacing VLCMedia emits a trailing `.stopped` for the outgoing item.
+        // Suppress that event so it cannot be mistaken for a natural episode end.
+        isReloading = true
         isLive = media.isLive
         startTime = media.startTime
         needsResume = !media.isLive && media.startTime > 1
@@ -202,6 +212,7 @@ final class VLCPlayerCoordinator: NSObject, ObservableObject {
         retry.reset()
         hasStartedPlayback = false
         didReportFailure = false
+        didReportPlaybackEnd = false
         lastTextTrackCount = 0
         lastAudioTrackCount = 0
         startStartupWatchdog()
@@ -288,6 +299,7 @@ final class VLCPlayerCoordinator: NSObject, ObservableObject {
     /// Resets the failure gates and reconnect budget and rebuilds in place.
     func retryAfterFailure() {
         guard let mediaURL else { return }
+        isReloading = true
         hasStartedPlayback = false
         didReportFailure = false
         retry.reset()
@@ -415,6 +427,10 @@ final class VLCPlayerCoordinator: NSObject, ObservableObject {
 
     /// Seek to an absolute time (in seconds).
     func seek(to seconds: TimeInterval) {
+        // A user-initiated skip supersedes the pending resume seek.
+        needsResume = false
+        didSeekResume = true
+        resumeLanded = true
         let millis = Int32((seconds * 1000).rounded())
         mediaPlayer.time = VLCTime(int: millis)
     }
@@ -462,6 +478,7 @@ final class VLCPlayerCoordinator: NSObject, ObservableObject {
         guard textCount != lastTextTrackCount || audioCount != lastAudioTrackCount else { return }
         lastTextTrackCount = textCount
         lastAudioTrackCount = audioCount
+        if textCount > 0 { onEmbeddedSubtitlesAvailable?() }
         objectWillChange.send()
     }
 }
@@ -476,6 +493,19 @@ extension VLCPlayerCoordinator: VLCMediaPlayerDelegate {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             logStateChange()
+            // VLCKit 4 exposes a natural end as `.stopped` (there is no
+            // separate public `ended` state). Reloads are explicitly marked,
+            // and tearDown removes the delegate before stopping, so this is a
+            // clean end-of-item signal for an on-demand stream that played.
+            if mediaPlayer.state == .stopped,
+               !isLive,
+               hasStartedPlayback,
+               !isReloading,
+               !didReportPlaybackEnd
+            {
+                didReportPlaybackEnd = true
+                onPlaybackEnded?()
+            }
             handleRetry(for: mediaPlayer.state)
             seekToResumeIfNeeded()
             isPlaying = mediaPlayer.isPlaying

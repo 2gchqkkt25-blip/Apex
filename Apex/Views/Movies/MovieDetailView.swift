@@ -45,7 +45,7 @@ struct MovieDetailView: View {
     init(movie: Movie, animationNamespace: Namespace.ID? = nil) {
         self.movie = movie
         self.animationNamespace = animationNamespace
-        let needsFetch: Bool = if TMDBClient.shared.isConfigured {
+        let needsFetch = if TMDBClient.shared.isConfigured {
             if let enrichedAt = movie.tmdbEnrichedAt,
                Date().timeIntervalSince(enrichedAt) < 14 * 24 * 3600
             {
@@ -215,11 +215,22 @@ struct MovieDetailView: View {
     }
 
     private var actions: some View {
-        PrimaryPlayButton(
-            title: movie.watchProgress > 1 ? "Resume" : "Play",
-            isEnabled: moviePlaylist != nil,
-            action: startPlayback
-        )
+        VStack(spacing: 12) {
+            PrimaryPlayButton(
+                title: movie.watchProgress > 1 ? "Resume" : "Play",
+                isEnabled: moviePlaylist != nil,
+                action: startPlayback
+            )
+            if movie.watchProgress > 1 {
+                Button {
+                    startPlaybackFromBeginning()
+                } label: {
+                    Label("Start from Beginning", systemImage: "gobackward")
+                        .font(.body.weight(.medium))
+                }
+                .buttonStyle(.borderless)
+            }
+        }
     }
 
     @ViewBuilder
@@ -400,6 +411,17 @@ struct MovieDetailView: View {
     private func startPlayback() {
         guard let playlist = moviePlaylist,
               let media = PlayableMedia.from(movie: movie, playlist: playlist) else { return }
+        if ExternalPlayback.open(media) { return }
+        #if os(macOS)
+            openWindow(id: "player", value: media)
+        #else
+            playingMedia = media
+        #endif
+    }
+
+    private func startPlaybackFromBeginning() {
+        guard let playlist = moviePlaylist,
+              let media = PlayableMedia.from(movie: movie, playlist: playlist, resumeFromProgress: false) else { return }
         if ExternalPlayback.open(media) { return }
         #if os(macOS)
             openWindow(id: "player", value: media)

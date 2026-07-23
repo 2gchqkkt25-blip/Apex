@@ -82,6 +82,14 @@ struct FullScreenPlayerView: View {
     /// External subtitle file URL (from OpenSubtitles.com). Set when the stream
     /// doesn't have embedded subtitle tracks and OpenSubtitles is configured.
     @State private var externalSubtitleURL: URL?
+    /// Set by the active engine when it discovers embedded subtitle tracks.
+    /// Unlike AVAsset preflight this also works for MKV and other formats that
+    /// KSPlayer/VLCKit can parse but AVFoundation cannot inspect reliably.
+    @State private var hasEmbeddedSubtitles = false
+
+    /// Mirrored from the active playback engine so host-level external
+    /// subtitles rise above the same auto-hiding controls as embedded tracks.
+    @State private var arePlayerControlsVisible = true
 
     init(media: PlayableMedia) {
         self.media = media
@@ -129,18 +137,25 @@ struct FullScreenPlayerView: View {
                     segments: skipSegments,
                     clock: clock,
                     startTime: activeMedia.startTime,
-                    onSeek: { seekBridge.seek($0) }
+                    onSeek: { target in
+                        // Update the shared clock immediately so every overlay
+                        // observes the absolute seek before the engine's next tick.
+                        clock.current = target
+                        seekBridge.seek(target)
+                    }
                 )
                 .zIndex(100)
             }
 
             // External subtitles (OpenSubtitles.com) — shown when the stream
             // doesn't have embedded subtitle tracks.
-            if displayMedia != nil, let externalSubtitleURL {
+            if displayMedia != nil, !hasEmbeddedSubtitles, let externalSubtitleURL {
                 ExternalSubtitleOverlay(
                     subtitleURL: externalSubtitleURL,
-                    clock: clock
+                    clock: clock,
+                    controlsVisible: arePlayerControlsVisible
                 )
+                .ignoresSafeArea()
                 .zIndex(99)
             }
 
@@ -236,6 +251,7 @@ struct FullScreenPlayerView: View {
             // Only for VOD content (not live) and only when no embedded tracks
             // are detected after a brief delay.
             externalSubtitleURL = nil
+            hasEmbeddedSubtitles = false
             guard !activeMedia.isLive else { return }
             guard WyzieSubsClient.shared.isConfigured else { return }
             guard UserDefaults.standard.bool(forKey: SubtitleSettings.enabledKey) else { return }
@@ -272,15 +288,15 @@ struct FullScreenPlayerView: View {
             case let .episode(id):
                 var descriptor = FetchDescriptor<Episode>(predicate: #Predicate { $0.id == id })
                 descriptor.fetchLimit = 1
-                let ep = try? modelContext.fetch(descriptor).first
-                season = ep?.seasonNum
-                episode = ep?.episodeNum
+                let episodeModel = try? modelContext.fetch(descriptor).first
+                season = episodeModel?.seasonNum
+                episode = episodeModel?.episodeNum
                 // Use the Skip Intro resolver's proven IMDB resolution path —
                 // it handles missing imdbId by looking up TMDB external IDs.
                 if let lookup = await IntroSkipResolver.lookup(for: activeMedia.contentRef, in: modelContext) {
                     imdbId = lookup.imdbId
                 } else {
-                    imdbId = ep?.series?.imdbId
+                    imdbId = episodeModel?.series?.imdbId
                 }
             default:
                 imdbId = nil
@@ -387,7 +403,11 @@ struct FullScreenPlayerView: View {
                 nextUpMedia: nextUpMedia,
                 fallbackAvailable: hasFallbackEngine,
                 onPlaybackFailed: fallBackToNextEngine,
-                onSelectMedia: switchMedia
+                onPlaybackEnded: handlePlaybackEnded,
+                onEmbeddedSubtitlesAvailable: noteEmbeddedSubtitlesAvailable,
+                onSelectMedia: switchMedia,
+                onSwitchChannel: media.isLive ? switchLiveChannelAction : nil,
+                onControlsVisibilityChanged: { arePlayerControlsVisible = $0 }
             )
             .id(engineAttempt)
         case .ksPlayer:
@@ -398,8 +418,11 @@ struct FullScreenPlayerView: View {
                 nextUpMedia: nextUpMedia,
                 fallbackAvailable: hasFallbackEngine,
                 onPlaybackFailed: fallBackToNextEngine,
+                onPlaybackEnded: handlePlaybackEnded,
+                onEmbeddedSubtitlesAvailable: noteEmbeddedSubtitlesAvailable,
                 onSelectMedia: switchMedia,
-                onSwitchChannel: media.isLive ? switchLiveChannelAction : nil
+                onSwitchChannel: media.isLive ? switchLiveChannelAction : nil,
+                onControlsVisibilityChanged: { arePlayerControlsVisible = $0 }
             )
             .id(engineAttempt)
         case .vlcKit:
@@ -410,7 +433,11 @@ struct FullScreenPlayerView: View {
                 nextUpMedia: nextUpMedia,
                 fallbackAvailable: hasFallbackEngine,
                 onPlaybackFailed: fallBackToNextEngine,
-                onSelectMedia: switchMedia
+                onPlaybackEnded: handlePlaybackEnded,
+                onEmbeddedSubtitlesAvailable: noteEmbeddedSubtitlesAvailable,
+                onSelectMedia: switchMedia,
+                onSwitchChannel: media.isLive ? switchLiveChannelAction : nil,
+                onControlsVisibilityChanged: { arePlayerControlsVisible = $0 }
             )
             .id(engineAttempt)
         }
@@ -425,8 +452,11 @@ struct FullScreenPlayerView: View {
         if StalkerLink.isPlaceholder(url) {
             resolvedMedia = nil
             resolveError = nil
+            Logger.player.info("Stalker: resolving placeholder for \(activeMedia.title, privacy: .public)")
             do {
-                resolvedMedia = try await StalkerStreamResolver.resolve(activeMedia, container: modelContext.container)
+                resolvedMedia = try await withTimeout(seconds: 45) {
+                    try await StalkerStreamResolver.resolve(activeMedia, container: modelContext.container)
+                }
             } catch {
                 resolveError = error.localizedDescription
                 Logger.player.error("Stalker stream resolution failed: \(error.localizedDescription, privacy: .public)")
@@ -467,6 +497,33 @@ struct FullScreenPlayerView: View {
         Task { await resolveActiveMedia() }
     }
 
+    /// Races `operation` against a timeout and cancels whichever task loses.
+    private func withTimeout<T: Sendable>(
+        seconds: TimeInterval,
+        operation: @escaping @Sendable () async throws -> T
+    ) async throws -> T {
+        try await withThrowingTaskGroup(of: T.self) { group in
+            group.addTask { try await operation() }
+            group.addTask {
+                try await Task.sleep(for: .seconds(seconds))
+                throw PlayerResolutionError.timedOut
+            }
+            defer { group.cancelAll() }
+            guard let result = try await group.next() else {
+                throw CancellationError()
+            }
+            return result
+        }
+    }
+
+    private enum PlayerResolutionError: LocalizedError {
+        case timedOut
+
+        var errorDescription: String? {
+            "The stream link request timed out. Please try again."
+        }
+    }
+
     /// Creates a PlayableMedia copy with a resolved URL.
     private func mediaWith(url: URL) -> PlayableMedia {
         PlayableMedia(
@@ -500,6 +557,33 @@ struct FullScreenPlayerView: View {
         activeMedia = newMedia
         // Slide the outgoing channel into the recall slot so `right` can jump back.
         LiveChannelHistory.record(newMedia)
+    }
+
+    /// Engine-level end events cover providers whose manifest duration is
+    /// inaccurate and therefore never trips the clock-based autoplay window.
+    /// Keep the same Premium and user-setting gates as PlayerNextUpOverlay.
+    private func handlePlaybackEnded(mediaID: String) {
+        guard mediaID == activeMedia.id, PremiumManager.shared.isPremium else { return }
+        let defaults = UserDefaults.standard
+        let autoPlayEnabled = defaults.object(forKey: PlayerSettings.Playback.autoPlayNextKey) as? Bool
+            ?? PlayerSettings.Playback.autoPlayNextDefault
+        guard autoPlayEnabled else { return }
+
+        let next = nextUpMedia?.id == activeMedia.id
+            ? nil
+            : nextUpMedia ?? NextEpisodeResolver.nextMedia(after: activeMedia.contentRef, in: modelContext)
+        guard let next else { return }
+        Logger.player.info("Playback ended; advancing to next episode")
+        switchMedia(to: next)
+    }
+
+    /// Latch embedded-track discovery for this media item and immediately
+    /// remove any downloaded overlay that may already have appeared.
+    private func noteEmbeddedSubtitlesAvailable() {
+        guard !hasEmbeddedSubtitles else { return }
+        hasEmbeddedSubtitles = true
+        externalSubtitleURL = nil
+        Logger.player.info("[Subtitles] Embedded track discovered by playback engine — suppressing external overlay")
     }
 
     private var closeButton: some View {
@@ -542,29 +626,31 @@ struct FullScreenPlayerView: View {
         #endif
     }
 
-    /// Navigate to the previous or next live channel without leaving fullscreen.
-    /// macOS and iOS only — tvOS uses the Siri Remote's onMoveCommand instead.
+    // Navigate to the previous or next live channel without leaving fullscreen.
+    // macOS and iOS only — tvOS uses the Siri Remote's onMoveCommand instead.
     #if !os(tvOS)
-    private var switchLiveChannelAction: ((Int) -> Void)? {
-        { [self] offset in switchLiveChannel(offset: offset) }
-    }
+        private var switchLiveChannelAction: ((Int) -> Void)? {
+            { [self] offset in switchLiveChannel(offset: offset) }
+        }
 
-    private func switchLiveChannel(offset: Int) {
-        guard activeMedia.isLive else { return }
-        let sort = ContentSortOption(
-            rawValue: UserDefaults.standard.string(forKey: SortStorageKey.liveContent) ?? ""
-        ) ?? .playlist
-        guard let target = LiveChannelNavigator.adjacentMedia(
-            for: activeMedia,
-            offset: offset,
-            sort: sort,
-            scope: LiveChannelNavigator.activeSurfScope,
-            in: modelContext
-        ) else { return }
-        switchMedia(to: target)
-    }
+        private func switchLiveChannel(offset: Int) {
+            guard activeMedia.isLive else { return }
+            let sort = ContentSortOption(
+                rawValue: UserDefaults.standard.string(forKey: SortStorageKey.liveContent) ?? ""
+            ) ?? .playlist
+            guard let target = LiveChannelNavigator.adjacentMedia(
+                for: activeMedia,
+                offset: offset,
+                sort: sort,
+                scope: LiveChannelNavigator.activeSurfScope,
+                in: modelContext
+            ) else { return }
+            switchMedia(to: target)
+        }
     #else
-    private var switchLiveChannelAction: ((Int) -> Void)? { nil }
+        private var switchLiveChannelAction: ((Int) -> Void)? {
+            nil
+        }
     #endif
 
     private func releaseAudioSession() {

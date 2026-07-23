@@ -82,7 +82,7 @@ final class Series {
     var indexedAt: Date?
 
     var categoryId: String?
-    @Relationship(deleteRule: .cascade) var episodes: [Episode] = []
+    @Relationship(deleteRule: .cascade, inverse: \Episode.series) var episodes: [Episode] = []
 
     var isFavorite: Bool = false
     var lastWatchedDate: Date?

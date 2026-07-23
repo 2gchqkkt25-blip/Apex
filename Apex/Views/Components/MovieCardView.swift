@@ -8,7 +8,7 @@
 import SwiftUI
 
 struct MovieCardView: View {
-    let movie: Movie
+    @Bindable var movie: Movie
 
     var body: some View {
         VStack(alignment: .leading, spacing: PosterCardMetrics.titleSpacing) {
@@ -39,6 +39,7 @@ struct MovieCardView: View {
             }
             .frame(width: PosterCardMetrics.posterWidth, height: PosterCardMetrics.posterHeight)
             .posterRatingOverlay(PosterRatingDisplay.forMovie(movie))
+            .posterFavoriteOverlay(movie.isFavorite)
             .clipShape(RoundedRectangle(cornerRadius: PosterCardMetrics.cornerRadius))
             // A shadow applied after clipShape forces an offscreen render pass per
             // card every frame. On tvOS the focus style already supplies depth and

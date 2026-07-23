@@ -19,9 +19,10 @@ struct PlayerNextUpOverlay: View {
     /// The shared playback clock. Read here (and only here) so ticking it
     /// invalidates just this overlay, not the engine view above it.
     let clock: PlaybackClock
-    /// Whether the engine's own controls overlay is currently showing. The
-    /// button hides while the controls are up, so the two don't fight for focus
-    /// (tvOS) or overlap the scrubber (iOS/macOS).
+    /// Whether the engine's own controls overlay is currently showing. On
+    /// touch/focus platforms the button hides to avoid competing controls. On
+    /// macOS it stays visible when pointer movement reveals the transport bar,
+    /// and moves above that bar so it remains clickable.
     let controlsVisible: Bool
     let onPlayNext: (PlayableMedia) -> Void
 
@@ -61,7 +62,7 @@ struct PlayerNextUpOverlay: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
         .allowsHitTesting(showsButton)
         .animation(.easeInOut(duration: 0.25), value: showsButton)
-        .onChange(of: shouldAutoAdvance) { _, advance in
+        .onChange(of: shouldAutoAdvance, initial: true) { _, advance in
             guard advance, !didAutoAdvance else { return }
             didAutoAdvance = true
             onPlayNext(nextMedia)
@@ -89,13 +90,28 @@ struct PlayerNextUpOverlay: View {
     }
 
     private var showsButton: Bool {
-        guard premium.isPremium, showNextButton, !controlsVisible, clock.current > 0, fraction >= buttonThreshold else {
+        guard premium.isPremium,
+              showNextButton,
+              controlsAllowButton,
+              clock.current > 0,
+              fraction >= buttonThreshold
+        else {
             return false
         }
         #if os(tvOS)
             if dismissed { return false }
         #endif
         return true
+    }
+
+    private var controlsAllowButton: Bool {
+        #if os(macOS)
+            // Moving the mouse reveals the transport controls. Hiding this
+            // button in response made it impossible to move the pointer onto it.
+            true
+        #else
+            !controlsVisible
+        #endif
     }
 
     /// True as the episode reaches its end: within the last few seconds, or past
@@ -153,7 +169,13 @@ struct PlayerNextUpOverlay: View {
             }
             .buttonStyle(.plain)
             .padding(.trailing, 20)
-            .padding(.bottom, 40)
+            #if os(macOS)
+                // Clear the macOS title/scrubber/control stack while it is up.
+                .padding(.bottom, controlsVisible ? 150 : 40)
+                .animation(.easeInOut(duration: 0.2), value: controlsVisible)
+            #else
+                .padding(.bottom, 40)
+            #endif
         #endif
     }
 }

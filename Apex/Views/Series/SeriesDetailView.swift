@@ -47,7 +47,7 @@ struct SeriesDetailView: View {
     init(series: Series, animationNamespace: Namespace.ID? = nil) {
         self.series = series
         self.animationNamespace = animationNamespace
-        let needsFetch: Bool = if TMDBClient.shared.isConfigured {
+        let needsFetch = if TMDBClient.shared.isConfigured {
             if let enrichedAt = series.tmdbEnrichedAt,
                Date().timeIntervalSince(enrichedAt) < 14 * 24 * 3600
             {
@@ -242,6 +242,7 @@ struct SeriesDetailView: View {
                             EpisodeCard(
                                 episode: episode,
                                 onPlay: { playEpisode(episode) },
+                                onPlayFromBeginning: { playEpisodeFromBeginning(episode) },
                                 onToggleWatched: { toggleWatched(episode) },
                                 onMarkPreviousWatched: { markPreviousWatched(episode) },
                                 onMarkFollowingUnwatched: { markFollowingUnwatched(episode) }
@@ -251,6 +252,7 @@ struct SeriesDetailView: View {
                                 episode: episode,
                                 playlist: seriesPlaylist,
                                 onPlay: { playEpisode(episode) },
+                                onPlayFromBeginning: { playEpisodeFromBeginning(episode) },
                                 onToggleWatched: { toggleWatched(episode) },
                                 onMarkPreviousWatched: { markPreviousWatched(episode) },
                                 onMarkFollowingUnwatched: { markFollowingUnwatched(episode) }
@@ -585,6 +587,17 @@ private extension SeriesDetailView {
     func playEpisode(_ episode: Episode) {
         guard let playlist = seriesPlaylist,
               let media = PlayableMedia.from(episode: episode, playlist: playlist) else { return }
+        if ExternalPlayback.open(media) { return }
+        #if os(macOS)
+            openWindow(id: "player", value: media)
+        #else
+            playingMedia = media
+        #endif
+    }
+
+    func playEpisodeFromBeginning(_ episode: Episode) {
+        guard let playlist = seriesPlaylist,
+              let media = PlayableMedia.from(episode: episode, playlist: playlist, resumeFromProgress: false) else { return }
         if ExternalPlayback.open(media) { return }
         #if os(macOS)
             openWindow(id: "player", value: media)

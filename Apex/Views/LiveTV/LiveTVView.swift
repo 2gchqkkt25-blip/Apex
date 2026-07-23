@@ -192,7 +192,7 @@ struct LiveTVView: View {
                 }
             }
             #if !os(tvOS)
-                .scrollContentBackground(.hidden)
+            .scrollContentBackground(.hidden)
             #endif
             .background(themeManager.colors.background)
             .platformNavigationTitle("Live TV")
@@ -249,6 +249,14 @@ struct LiveTVView: View {
                     sections: sections,
                     selectedSection: $selectedSection
                 )
+
+                if channelCount > 0 {
+                    Text("\(channelCount) channels")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal)
+                        .padding(.vertical, 4)
+                }
 
                 if let displayed {
                     detail(for: displayed)
@@ -318,6 +326,19 @@ struct LiveTVView: View {
     /// The id prefix every Category / LiveStream of the active playlist shares.
     private var playlistPrefix: String {
         activePlaylist.map { "\($0.id.uuidString)-" } ?? ""
+    }
+
+    /// Store-level count for the header. Avoids an unbounded `@Query` that used
+    /// to materialize the complete channel catalog on every Live TV screen.
+    private var channelCount: Int {
+        let prefix = playlistPrefix
+        guard !prefix.isEmpty else { return 0 }
+        let descriptor = FetchDescriptor<LiveStream>(
+            predicate: #Predicate {
+                $0.id.starts(with: prefix) && $0.isHidden == false
+            }
+        )
+        return (try? modelContext.fetchCount(descriptor)) ?? 0
     }
 
     /// Categories scoped to the active playlist. The `@Query` fetches every
@@ -395,9 +416,29 @@ struct CategorySidebar: View {
     @Environment(\.modelContext) private var modelContext
     @State private var isEditing = false
 
+    private var playlistPrefix: String {
+        for section in sections {
+            if case let .category(cat) = section {
+                return "\(String(cat.id.prefix(36)))-"
+            }
+        }
+        return ""
+    }
+
+    private var channelCount: Int {
+        let prefix = playlistPrefix
+        guard !prefix.isEmpty else { return 0 }
+        let descriptor = FetchDescriptor<LiveStream>(
+            predicate: #Predicate {
+                $0.id.starts(with: prefix) && $0.isHidden == false
+            }
+        )
+        return (try? modelContext.fetchCount(descriptor)) ?? 0
+    }
+
     /// Only category sections (not virtual Favorites/Recently Watched/All) are reorderable.
     private var reorderableSections: [LiveTVSection] {
-        sections.filter { if case .category = $0 { return true } else { return false } }
+        sections.filter { if case .category = $0 { true } else { false } }
     }
 
     var body: some View {
@@ -479,6 +520,14 @@ struct CategorySidebar: View {
                         .padding(.horizontal, 4)
                         .padding(.vertical, 6)
 
+                        if channelCount > 0 {
+                            Text("\(channelCount) channels")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 4)
+                                .padding(.bottom, 2)
+                        }
+
                         ForEach(sections) { section in
                             let isSelected = selectedSection?.id == section.id
                             HStack(spacing: 8) {
@@ -557,6 +606,7 @@ struct CategorySidebar: View {
         @Binding var selectedSection: LiveTVSection?
 
         @State private var showingPicker = false
+        @State private var startEditing = false
 
         /// The section the button reflects — the user's selection, or the first
         /// available one if that selection has since disappeared (mirrors
@@ -567,32 +617,48 @@ struct CategorySidebar: View {
         }
 
         var body: some View {
-            Button {
-                showingPicker = true
-            } label: {
-                HStack(spacing: 8) {
-                    if let icon = currentSection?.icon {
-                        Image(systemName: icon)
-                            .font(.subheadline)
+            HStack(spacing: 0) {
+                Button {
+                    startEditing = false
+                    showingPicker = true
+                } label: {
+                    HStack(spacing: 8) {
+                        if let icon = currentSection?.icon {
+                            Image(systemName: icon)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                        (currentSection?.titleText ?? Text("Select a Category"))
+                            .font(.headline)
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                        Spacer()
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.caption.weight(.semibold))
                             .foregroundStyle(.secondary)
                     }
-                    (currentSection?.titleText ?? Text("Select a Category"))
-                        .font(.headline)
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
-                    Spacer()
-                    Image(systemName: "chevron.up.chevron.down")
+                    .padding(.horizontal)
+                    .padding(.vertical, 10)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    startEditing = true
+                    showingPicker = true
+                } label: {
+                    Image(systemName: "arrow.up.arrow.down")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
+                        .padding(.trailing, 12)
+                        .padding(.vertical, 10)
+                        .contentShape(Rectangle())
                 }
-                .padding(.horizontal)
-                .padding(.vertical, 10)
-                .contentShape(Rectangle())
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
             .background(.bar)
             .sheet(isPresented: $showingPicker) {
-                CategoryPickerSheet(sections: sections, selectedSection: $selectedSection)
+                CategoryPickerSheet(sections: sections, selectedSection: $selectedSection, startInEditMode: startEditing)
             }
 
             Divider()
@@ -605,6 +671,7 @@ struct CategorySidebar: View {
     private struct CategoryPickerSheet: View {
         let sections: [LiveTVSection]
         @Binding var selectedSection: LiveTVSection?
+        var startInEditMode = false
 
         @Environment(\.dismiss) private var dismiss
         @Environment(\.modelContext) private var modelContext
@@ -619,54 +686,61 @@ struct CategorySidebar: View {
 
         /// Only category sections (not virtual Favorites/Recently Watched) are reorderable.
         private var reorderableSections: [LiveTVSection] {
-            sections.filter { if case .category = $0 { return true } else { return false } }
+            sections.filter { if case .category = $0 { true } else { false } }
+        }
+
+        private var selectionList: some View {
+            ForEach(filteredSections) { section in
+                let isSelected = selectedSection?.id == section.id
+                Button {
+                    selectedSection = section
+                    dismiss()
+                } label: {
+                    HStack(spacing: 12) {
+                        if let icon = section.icon {
+                            Image(systemName: icon)
+                                .foregroundStyle(.secondary)
+                        }
+                        section.titleText
+                            .foregroundStyle(.primary)
+                        Spacer()
+                        if isSelected {
+                            Image(systemName: "checkmark")
+                                .fontWeight(.semibold)
+                                .foregroundStyle(.tint)
+                        }
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+
+        private var reorderList: some View {
+            Section {
+                ForEach(reorderableSections) { section in
+                    HStack(spacing: 12) {
+                        if let icon = section.icon {
+                            Image(systemName: icon)
+                                .foregroundStyle(.secondary)
+                        }
+                        section.titleText
+                            .foregroundStyle(.primary)
+                    }
+                }
+                .onMove(perform: moveCategories)
+            } header: {
+                Text("Drag to reorder")
+            }
         }
 
         var body: some View {
             NavigationStack {
                 List {
                     if !isEditing {
-                        ForEach(filteredSections) { section in
-                            let isSelected = selectedSection?.id == section.id
-                            Button {
-                                selectedSection = section
-                                dismiss()
-                            } label: {
-                                HStack(spacing: 12) {
-                                    if let icon = section.icon {
-                                        Image(systemName: icon)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                    section.titleText
-                                        .foregroundStyle(.primary)
-                                    Spacer()
-                                    if isSelected {
-                                        Image(systemName: "checkmark")
-                                            .fontWeight(.semibold)
-                                            .foregroundStyle(.tint)
-                                    }
-                                }
-                                .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                        }
+                        selectionList
                     } else {
-                        // Edit mode: drag-to-reorder category sections
-                        Section {
-                            ForEach(reorderableSections) { section in
-                                HStack(spacing: 12) {
-                                    if let icon = section.icon {
-                                        Image(systemName: icon)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                    section.titleText
-                                        .foregroundStyle(.primary)
-                                }
-                            }
-                            .onMove(perform: moveCategories)
-                        } header: {
-                            Text("Drag to reorder")
-                        }
+                        reorderList
                     }
                 }
                 .listStyle(.plain)
@@ -699,6 +773,7 @@ struct CategorySidebar: View {
                     }
                 }
             }
+            .onAppear { isEditing = startInEditMode }
         }
 
         private func moveCategories(from source: IndexSet, to destination: Int) {
@@ -728,7 +803,7 @@ struct ChannelsList: View {
     let playlistPrefix: String
     let playlist: Playlist?
     let sectionToken: String
-  @Bindable var epgCache: LiveTVSectionEPGCache
+    @Bindable var epgCache: LiveTVSectionEPGCache
     let onPlay: (LiveStream) -> Void
     @Environment(\.modelContext) private var modelContext
     @Environment(\.contentRestriction) private var restriction
@@ -752,7 +827,7 @@ struct ChannelsList: View {
         self.playlistPrefix = playlistPrefix
         self.playlist = playlist
         self.sectionToken = sectionToken
-        self._epgCache = Bindable(epgCache)
+        _epgCache = Bindable(epgCache)
         self.onPlay = onPlay
         _streams = Query(LiveChannelQuery.descriptor(for: scope, sort: sort, playlistPrefix: playlistPrefix))
     }

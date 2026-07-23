@@ -53,6 +53,14 @@ final class CloudSyncCoordinator {
     /// the catalog scan and the `@Query` refresh that froze the UI on tvOS.
     private var cloudImportPending = false
 
+    /// Covers pre-suspension flush / in-flight reconcile saves so SQLite isn't
+    /// left locked when RunningBoard suspends the process (`0xdead10cc`).
+    /// `nonisolated(unsafe)`: the expiration handler may run off the main actor
+    /// and must end the task synchronously before it returns.
+    #if os(iOS) || os(tvOS) || os(visionOS)
+        private nonisolated(unsafe) var backgroundFlushTaskID = UIBackgroundTaskIdentifier.invalid
+    #endif
+
     private var observers: [NSObjectProtocol] = []
 
     init(catalogContainer: ModelContainer, cloudContainer: ModelContainer, cloudKitContainerIdentifier: String, cloudKitEnabled: Bool) {
@@ -128,10 +136,46 @@ final class CloudSyncCoordinator {
             // before a delayed pass could run. Always runs — this is how a toggled
             // favorite or watch-progress reaches the cloud, and the safety net that
             // lets foreground / remote-change passes skip freely.
-            reconcile(reason: .backgroundFlush, debounced: false)
+            requestBackgroundFlush()
         @unknown default:
             break
         }
+    }
+
+    /// Pre-suspension flush: request background execution time so an in-flight
+    /// SQLite commit can finish, and avoid starting a competing save while
+    /// CloudKit already holds the store write lock (RunningBoard `0xdead10cc`).
+    private func requestBackgroundFlush() {
+        beginBackgroundExecutionIfNeeded()
+        if status.isSyncing {
+            // CloudKit import/export is mid-transaction on the cloud store. Starting
+            // our own save races that lock. Keep background time only if a reconcile
+            // is already running so *its* save can finish; otherwise drop the task.
+            Logger.sync.debug("Background flush skipped — CloudKit sync in progress")
+            if !isReconciling {
+                endBackgroundExecution()
+            }
+            return
+        }
+        reconcile(reason: .backgroundFlush, debounced: false)
+    }
+
+    private func beginBackgroundExecutionIfNeeded() {
+        #if os(iOS) || os(tvOS) || os(visionOS)
+            guard backgroundFlushTaskID == .invalid else { return }
+            backgroundFlushTaskID = UIApplication.shared.beginBackgroundTask(withName: "CloudSync.backgroundFlush") { [weak self] in
+                self?.endBackgroundExecution()
+            }
+        #endif
+    }
+
+    private nonisolated func endBackgroundExecution() {
+        #if os(iOS) || os(tvOS) || os(visionOS)
+            let id = backgroundFlushTaskID
+            guard id != .invalid else { return }
+            backgroundFlushTaskID = .invalid
+            UIApplication.shared.endBackgroundTask(id)
+        #endif
     }
 
     // MARK: - Reconcile
@@ -198,6 +242,11 @@ final class CloudSyncCoordinator {
                 // Open the gate only after the last queued pass, so imported
                 // playlists are fully materialised before the form decision.
                 status.hasCompletedInitialSync = true
+            }
+            // Drop the pre-suspension background task once nothing is in flight.
+            // A follow-up `reconcile()` above may have set `isReconciling` again.
+            if !isReconciling {
+                endBackgroundExecution()
             }
         }
     }

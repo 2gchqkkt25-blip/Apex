@@ -35,12 +35,18 @@ struct KSPlayerEngineView: View {
     /// Invoked when this engine can't start the stream and a fallback engine is
     /// available — see `failPlayback`. The host advances to the next engine.
     var onPlaybackFailed: (() -> Void)?
+    /// Invoked when KSPlayer confirms this on-demand item reached its end.
+    var onPlaybackEnded: ((String) -> Void)?
+    /// Invoked when KSPlayer exposes at least one embedded subtitle track.
+    var onEmbeddedSubtitlesAvailable: (() -> Void)?
     /// Invoked when the viewer picks a different stream (another episode, or a
     /// live channel via the Siri remote) from the in-player overlay. The host
     /// swaps `media` in response. tvOS only.
     var onSelectMedia: ((PlayableMedia) -> Void)?
     /// Channel switching for live TV (iOS/macOS). Offset: +1 next, -1 previous.
     var onSwitchChannel: ((Int) -> Void)?
+    /// Mirrors the auto-hiding controls state to host-level subtitle overlays.
+    var onControlsVisibilityChanged: ((Bool) -> Void)?
 
     @StateObject var coordinator = KSVideoPlayer.Coordinator()
     /// Drives bounded backoff reconnects when the stream drops (see
@@ -145,11 +151,21 @@ struct KSPlayerEngineView: View {
     let stallTimeout: TimeInterval = 30
 
     var body: some View {
-        #if os(tvOS)
-            tvBody
-        #else
-            standardBody
-        #endif
+        Group {
+            #if os(tvOS)
+                tvBody
+            #else
+                standardBody
+            #endif
+        }
+        .onReceive(coordinator.subtitleModel.objectWillChange) { _ in
+            // SubtitleModel publishes before mutating its track collection.
+            // Inspect on the next main-actor turn so the new tracks are visible.
+            Task { @MainActor in
+                guard !coordinator.subtitleModel.subtitleInfos.isEmpty else { return }
+                onEmbeddedSubtitlesAvailable?()
+            }
+        }
     }
 
     // MARK: - tvOS body (shared overlay)
@@ -172,6 +188,7 @@ struct KSPlayerEngineView: View {
                             updateLoadingState(state)
                             engine.syncState(state)
                             handleState(state)
+                            reportPlaybackEndIfNeeded(state)
                         }
                     }
                     .onPlay { current, total in
@@ -292,10 +309,12 @@ struct KSPlayerEngineView: View {
                 resetHideTimer()
             }
             .onChange(of: isControlsVisible) { _, visible in
+                onControlsVisibilityChanged?(visible)
                 // Hand focus to the tap-catcher once the controls vanish so the
                 // remote can bring them back.
                 if !visible { Task { @MainActor in catcherFocused = true } }
             }
+            .onAppear { onControlsVisibilityChanged?(isControlsVisible) }
             // Handle Menu/back at the player root so it reliably overrides the
             // cover's default dismiss-on-Menu.
             .onExitCommand { handleMenuPress() }
@@ -382,6 +401,7 @@ struct KSPlayerEngineView: View {
                             isPlaying = (state == .bufferFinished)
                             updateLoadingState(state)
                             handleState(state)
+                            reportPlaybackEndIfNeeded(state)
                         }
                     }
                     .onPlay { current, total in
@@ -431,6 +451,7 @@ struct KSPlayerEngineView: View {
             }
             .preferredColorScheme(.dark)
             .onAppear {
+                onControlsVisibilityChanged?(isControlsVisible)
                 seekBridge.seekTo = { [coordinator] time in coordinator.seek(time: time) }
                 scheduleHide()
                 observePipState()
@@ -453,6 +474,9 @@ struct KSPlayerEngineView: View {
             }
             .onChange(of: hasStartedPlayback) { _, started in
                 if started { resetHideTimer() }
+            }
+            .onChange(of: isControlsVisible) { _, visible in
+                onControlsVisibilityChanged?(visible)
             }
             #if os(macOS)
             .onContinuousHover(coordinateSpace: .local) { phase in
@@ -531,14 +555,17 @@ struct KSPlayerEngineView: View {
 
     // MARK: - Actions (shared)
 
-    @ViewBuilder
     private var ksSubtitleLayer: some View {
         HStack {
             Spacer()
-            KSPlayerSubtitleOverlay(model: coordinator.subtitleModel)
+            KSPlayerSubtitleOverlay(
+                model: coordinator.subtitleModel,
+                controlsVisible: isControlsVisible
+            )
             Spacer()
         }
         .padding()
+        .ignoresSafeArea()
     }
 
     private func togglePlay() {

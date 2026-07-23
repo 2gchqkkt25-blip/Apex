@@ -17,10 +17,14 @@ nonisolated enum StalkerStreamResolver {
     /// it unchanged. Throws `StalkerError` when the portal can't be reached or
     /// returns no playable URL.
     static func resolve(_ media: PlayableMedia, container: ModelContainer) async throws -> PlayableMedia {
+        Logger.player.info("StalkerResolver: checking \(media.title, privacy: .public)")
         guard let (type, cmd) = StalkerLink.decode(media.url) else { return media }
+        Logger.player.info("StalkerResolver: decoded placeholder type=\(type.rawValue, privacy: .public)")
         guard let playlist = playlist(for: media.contentRef, container: container) else {
+            Logger.player.error("StalkerResolver: playlist lookup failed for id=\(media.id, privacy: .public)")
             throw StalkerError.invalidURL
         }
+        Logger.player.info("StalkerResolver: found playlist, resolving stream...")
         let client = StalkerClient(configuration: StalkerClient.Configuration(playlist: playlist))
         let url = try await client.resolveStreamURL(type: type, cmd: cmd)
         Logger.player.log("Stalker create_link resolved a stream URL for \(media.title, privacy: .public)")

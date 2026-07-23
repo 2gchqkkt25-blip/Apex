@@ -40,13 +40,13 @@ struct MoviesView: View {
     /// via the per-row "Show All" link.
     private let previewLimit = 20
 
-    /// How many categories render as full inline preview rows. Each preview row
-    /// carries its own live `@Query`, so capping them keeps the browse screen
-    /// fast; the remaining categories surface as lightweight name tiles below.
+    // How many categories render as full inline preview rows. Each preview row
+    // carries its own live `@Query`, so capping them keeps the browse screen
+    // fast; the remaining categories surface as lightweight name tiles below.
     #if os(iOS)
-    private let previewCategoryLimit = 4
+        private let previewCategoryLimit = 4
     #else
-    private let previewCategoryLimit = 4
+        private let previewCategoryLimit = 4
     #endif
 
     var body: some View {
@@ -73,6 +73,12 @@ struct MoviesView: View {
                 } else {
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 24, pinnedViews: []) {
+                            if movieCount > 0 {
+                                Text("\(movieCount) Movies")
+                                    .font(.subheadline.weight(.medium))
+                                    .foregroundStyle(.secondary)
+                                    .padding(.horizontal, 16)
+                            }
                             MovieCollectionRow(kind: .recentlyWatched, playlistPrefix: playlistPrefix, animationNamespace: animationNamespace)
                             MovieCollectionRow(kind: .favorites, playlistPrefix: playlistPrefix, animationNamespace: animationNamespace)
                             MovieCollectionRow(kind: .recentlyAdded, playlistPrefix: playlistPrefix, animationNamespace: animationNamespace)
@@ -87,7 +93,7 @@ struct MoviesView: View {
                 }
             }
             #if !os(tvOS)
-                .scrollContentBackground(.hidden)
+            .scrollContentBackground(.hidden)
             #endif
             .background(themeManager.colors.background)
             .platformNavigationTitle("Movies")
@@ -133,6 +139,30 @@ struct MoviesView: View {
     /// scope the cross-category collection rows in-memory.
     private var playlistPrefix: String {
         activePlaylist.map { "\($0.id.uuidString)-" } ?? ""
+    }
+
+    /// Counts directly in SQLite instead of hydrating the entire movie catalog.
+    /// The previous unbounded `@Query` existed only for this label and could
+    /// freeze tvOS when a provider exposed tens of thousands of VOD entries.
+    private var movieCount: Int {
+        let prefix = playlistPrefix
+        guard !prefix.isEmpty else { return 0 }
+
+        let descriptor = FetchDescriptor<Movie>(
+            predicate: #Predicate { $0.id.starts(with: prefix) }
+        )
+        var count = (try? modelContext.fetchCount(descriptor)) ?? 0
+        if restriction.isActive {
+            for categoryID in restriction.restrictedCategoryIDs {
+                let hidden = FetchDescriptor<Movie>(
+                    predicate: #Predicate {
+                        $0.id.starts(with: prefix) && $0.categoryId == categoryID
+                    }
+                )
+                count -= (try? modelContext.fetchCount(hidden)) ?? 0
+            }
+        }
+        return max(count, 0)
     }
 
     /// Categories scoped to the active playlist. The `@Query` fetches every

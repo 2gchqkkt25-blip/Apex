@@ -38,13 +38,13 @@ struct SeriesView: View {
 
     private let previewLimit = 20
 
-    /// How many categories render as full inline preview rows. Each preview row
-    /// carries its own live `@Query`, so capping them keeps the browse screen
-    /// fast; the remaining categories surface as lightweight name tiles below.
+    // How many categories render as full inline preview rows. Each preview row
+    // carries its own live `@Query`, so capping them keeps the browse screen
+    // fast; the remaining categories surface as lightweight name tiles below.
     #if os(iOS)
-    private let previewCategoryLimit = 4
+        private let previewCategoryLimit = 4
     #else
-    private let previewCategoryLimit = 4
+        private let previewCategoryLimit = 4
     #endif
 
     var body: some View {
@@ -71,6 +71,12 @@ struct SeriesView: View {
                 } else {
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 24, pinnedViews: []) {
+                            if seriesCount > 0 {
+                                Text("\(seriesCount) Series")
+                                    .font(.subheadline.weight(.medium))
+                                    .foregroundStyle(.secondary)
+                                    .padding(.horizontal, 16)
+                            }
                             SeriesCollectionRow(kind: .recentlyWatched, playlistPrefix: playlistPrefix, animationNamespace: animationNamespace)
                             SeriesCollectionRow(kind: .favorites, playlistPrefix: playlistPrefix, animationNamespace: animationNamespace)
                             SeriesCollectionRow(kind: .recentlyAdded, playlistPrefix: playlistPrefix, animationNamespace: animationNamespace)
@@ -85,7 +91,7 @@ struct SeriesView: View {
                 }
             }
             #if !os(tvOS)
-                .scrollContentBackground(.hidden)
+            .scrollContentBackground(.hidden)
             #endif
             .background(themeManager.colors.background)
             .platformNavigationTitle("Series")
@@ -131,6 +137,29 @@ struct SeriesView: View {
     /// scope the cross-category collection rows in-memory.
     private var playlistPrefix: String {
         activePlaylist.map { "\($0.id.uuidString)-" } ?? ""
+    }
+
+    /// Counts in the persistent store without instantiating every Series model.
+    /// This keeps large catalogs off Apple TV's main thread and out of memory.
+    private var seriesCount: Int {
+        let prefix = playlistPrefix
+        guard !prefix.isEmpty else { return 0 }
+
+        let descriptor = FetchDescriptor<Series>(
+            predicate: #Predicate { $0.id.starts(with: prefix) }
+        )
+        var count = (try? modelContext.fetchCount(descriptor)) ?? 0
+        if restriction.isActive {
+            for categoryID in restriction.restrictedCategoryIDs {
+                let hidden = FetchDescriptor<Series>(
+                    predicate: #Predicate {
+                        $0.id.starts(with: prefix) && $0.categoryId == categoryID
+                    }
+                )
+                count -= (try? modelContext.fetchCount(hidden)) ?? 0
+            }
+        }
+        return max(count, 0)
     }
 
     /// Categories scoped to the active playlist. The `@Query` fetches every

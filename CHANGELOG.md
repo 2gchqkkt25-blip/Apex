@@ -4,6 +4,42 @@ All notable changes to Apex Stream Player.
 
 ---
 
+## Build 47 (1.2.0) — July 23, 2026
+
+### Crash Fixes
+
+- **SwiftData crash when deleting a playlist (iCloud reconcile)** — TestFlight reports showed `EXC_BREAKPOINT` in `_InvalidFutureBackingData.getValue` during `CloudSyncEngine.saveStores()` → `_propagateDelete`. Playlist → Category and Series → Episode relationships now declare explicit inverses, and `PlaylistDeletion` clears/deletes categories before the playlist so cascade delete never walks half-invalid backing data after a background-context merge.
+- **Background kill `0xdead10cc` during iCloud sync** — RunningBoard killed the app when a CloudKit import held the SQLite write lock while the pre-suspension reconcile tried to save. Background/inactive now requests a `beginBackgroundTask` so in-flight commits can finish, and skips starting a competing flush while CloudKit is already syncing.
+
+### Release
+
+- Build number **47** (1.2.0).
+
+---
+
+## Build 46 (1.2.0) — July 20, 2026
+
+### Playback Fixes
+
+- **Next Episode and autoplay reliability** — KSPlayer, VLCKit, and AVPlayer now report a real end-of-playback event to the shared player host. The Next Episode overlay initializes correctly on every platform, and Auto Play Next advances only when enabled.
+- **Skip Intro no longer loops the opening** — Pressing Skip Intro or Skip Recap now latches the segment as dismissed, cancels any pending resume seek, and advances the shared playback clock immediately. Drift tolerance applies before the tagged segment only, preventing a completed skip from jumping backward and replaying the first few seconds.
+- **macOS Next Episode button remains reachable** — Moving the pointer to the button may reveal the player controls, but the Next Episode action stays visible and moves above the transport bar instead of disappearing.
+- **Stalker link timeout hardened** — Stream-link resolution now races the portal request against a 45-second timeout, cancels the losing task, and presents a useful retry message when a portal does not respond.
+
+### Subtitle Fixes
+
+- **macOS duplicate subtitles removed** — Each playback engine reports embedded subtitle availability to the shared player. Once an embedded track is discovered, the downloaded subtitle overlay is removed so only one subtitle layer is rendered.
+- **Cross-platform subtitle placement verified** — Bottom subtitles clear safe areas and visible transport controls on iOS, macOS, and tvOS; Center subtitles remain geometrically centered and do not shift with controls.
+
+### Performance and Release Hardening
+
+- **Large Xtream playlists remain responsive on tvOS** — Browse counts use SwiftData `fetchCount` rather than unbounded live queries, avoiding full-catalog observation and repeated view invalidation. Stalker background imports save once per category and yield between categories to preserve Siri Remote responsiveness.
+- **Release metadata aligned** — The main app and Top Shelf extension now share build number 46.
+- **macOS icon packaging corrected** — The 32 pt Retina app-icon slot now uses a proper 64×64 asset instead of an undersized image.
+- **Release documentation refreshed** — The TestFlight checklist now covers large-playlist responsiveness, every playback engine's end-of-episode behavior, subtitle deduplication, pointer interaction, and Skip Intro regression testing.
+
+---
+
 ## Build 45 (1.2.0) — July 20, 2026
 
 ### Bug Fixes

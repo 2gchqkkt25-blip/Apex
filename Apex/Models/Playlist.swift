@@ -36,7 +36,7 @@ final class Playlist {
     var lastSyncDate: Date?
     var syncStatusRaw: String = "idle"
 
-    @Relationship(deleteRule: .cascade) var categories: [Category] = []
+    @Relationship(deleteRule: .cascade, inverse: \Category.playlist) var categories: [Category] = []
 
     var addedAt: Date = Date()
     var lastUpdated: Date?

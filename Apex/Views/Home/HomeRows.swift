@@ -62,9 +62,10 @@ private struct HomeItemCell: View {
                         title: item.title,
                         imageURL: item.imageURL,
                         progress: item.progress,
-                        rating: item.posterRating
+                        rating: item.posterRating,
+                        isFavorite: movie.isFavorite
                     )
-                        .matchedTransitionSourceIfAvailable(id: movie.id, in: animationNamespace)
+                    .matchedTransitionSourceIfAvailable(id: movie.id, in: animationNamespace)
                 }
                 .posterCardButtonStyle()
             case let .series(series):
@@ -73,9 +74,10 @@ private struct HomeItemCell: View {
                         title: item.title,
                         imageURL: item.imageURL,
                         progress: item.progress,
-                        rating: item.posterRating
+                        rating: item.posterRating,
+                        isFavorite: series.isFavorite
                     )
-                        .matchedTransitionSourceIfAvailable(id: series.id, in: animationNamespace)
+                    .matchedTransitionSourceIfAvailable(id: series.id, in: animationNamespace)
                 }
                 .posterCardButtonStyle()
             case let .live(stream):
@@ -181,6 +183,7 @@ private struct HomePosterCard: View {
     let imageURL: URL?
     var progress: Double?
     var rating: PosterRatingDisplay?
+    var isFavorite = false
     var isLive: Bool = false
 
     var body: some View {
@@ -219,6 +222,7 @@ private struct HomePosterCard: View {
             }
             .frame(width: PosterCardMetrics.posterWidth, height: PosterCardMetrics.posterHeight)
             .posterRatingOverlay(rating)
+            .posterFavoriteOverlay(isFavorite)
             .clipShape(RoundedRectangle(cornerRadius: PosterCardMetrics.cornerRadius))
             .shadow(radius: 2)
 

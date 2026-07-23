@@ -78,19 +78,27 @@ class StalkerClient {
     private func candidateEndpoints() -> [URL] {
         let raw = configuration.portalURL.trimmingCharacters(in: .whitespacesAndNewlines)
         guard var components = URLComponents(string: raw), components.host != nil else { return [] }
-        // Reduce to scheme://host:port — the path the user pasted (`/c/`,
-        // `/stalker_portal/`, a trailing slash) is just a hint at the variant.
         let pastedPath = components.path.lowercased()
         components.query = nil
         components.fragment = nil
 
-        let paths: [String] = if pastedPath.contains("stalker_portal") {
-            ["/stalker_portal/server/load.php", "/portal.php", "/server/load.php"]
-        } else {
-            ["/portal.php", "/server/load.php", "/stalker_portal/server/load.php"]
-        }
+        let phpFiles = ["portal.php", "server/load.php", "stalker_portal/server/load.php"]
 
-        return paths.compactMap { path in
+        // Build candidate URLs both at the root AND under the user-pasted path
+        // prefix (e.g. http://portal.com/c/portal.php when the user entered
+        // http://portal.com/c/). Portals that only serve middleware under the
+        // subpath fail the root-level candidates and succeed on the prefixed ones.
+        let prefixCandidates: [String] = {
+            let trimmedPath = pastedPath.dropFirst() // drop leading /
+            guard !trimmedPath.isEmpty, trimmedPath != "/" else { return [] }
+            let pathWithoutTrailingSlash = trimmedPath.hasSuffix("/")
+                ? String(trimmedPath.dropLast())
+                : String(trimmedPath)
+            return phpFiles.map { "/\(pathWithoutTrailingSlash)/\($0)" }
+        }()
+        let allCandidates = prefixCandidates + phpFiles.map { "/\($0)" }
+
+        return allCandidates.compactMap { path in
             var copy = components
             copy.path = path
             return copy.url
@@ -131,6 +139,7 @@ class StalkerClient {
         let endpoints = candidateEndpoints()
         guard !endpoints.isEmpty else { throw StalkerError.invalidURL }
 
+        Logger.network.info("Stalker handshake: trying \(endpoints.count) candidate endpoints")
         var lastError: Error = StalkerError.handshakeFailed
         for endpoint in endpoints {
             // Bail immediately if a caller deadline (e.g. the add-playlist
@@ -138,6 +147,7 @@ class StalkerClient {
             // the remaining endpoints.
             try Task.checkCancellation()
             do {
+                Logger.network.debug("Stalker handshake: trying \(endpoint.absoluteString, privacy: .public)")
                 let url = appendingQuery(to: endpoint, [
                     URLQueryItem(name: "type", value: "stb"),
                     URLQueryItem(name: "action", value: "handshake"),
@@ -352,16 +362,31 @@ class StalkerClient {
 
     // MARK: - Stream resolution
 
-    /// Resolves a `cmd` into a short-lived playable URL via `create_link`.
+    /// Resolves a `cmd` into a playable URL. For portals that already embed a
+    /// tokenized playable URL in the channel `cmd` field, returns that URL
+    /// directly — calling `create_link` on an already-resolved URL produces a
+    /// broken response with an empty stream parameter.
     func resolveStreamURL(type: StalkerLink.LinkType, cmd: String) async throws -> URL {
+        Logger.network.info("Stalker create_link: type=\(type.rawValue, privacy: .public) cmd=\(cmd, privacy: .public)")
+
+        // If the cmd already contains a playable http(s) URL, use it directly.
+        // Many portals embed the full tokenized play link in the channel cmd
+        // field; re-resolving via create_link strips the stream parameter.
+        if let prebuilt = StalkerLink.resolvedURL(from: cmd) {
+            Logger.network.info("Stalker create_link: cmd already contains a playable URL, using directly")
+            return prebuilt
+        }
+
         let envelope: StalkerEnvelope<StalkerCreateLink> = try await request(
             type: type.rawValue,
             action: "create_link",
             extraQuery: [URLQueryItem(name: "cmd", value: cmd)]
         )
         guard let rawCmd = envelope.js.cmd, let url = StalkerLink.resolvedURL(from: rawCmd) else {
+            Logger.network.error("Stalker create_link: no playable URL in response cmd=\(envelope.js.cmd ?? "nil", privacy: .public)")
             throw StalkerError.noStreamURL
         }
+        Logger.network.info("Stalker create_link: raw response cmd='\(rawCmd, privacy: .public)' resolved to \(url.absoluteString, privacy: .public)")
         return url
     }
 }

@@ -303,6 +303,7 @@
     struct TVEpisodeCard: View {
         let episode: Episode
         var onPlay: () -> Void
+        var onPlayFromBeginning: (() -> Void)?
         var onToggleWatched: () -> Void = {}
         var onMarkPreviousWatched: () -> Void = {}
         var onMarkFollowingUnwatched: () -> Void = {}
@@ -336,6 +337,14 @@
             }
             .buttonStyle(TVCardButtonStyle(focusScale: 1.06))
             .contextMenu {
+                if let playFromStart = onPlayFromBeginning, episode.watchProgress > 1 {
+                    Button {
+                        playFromStart()
+                    } label: {
+                        Label("Play from Beginning", systemImage: "gobackward")
+                    }
+                    Divider()
+                }
                 EpisodeWatchedMenu(
                     episode: episode,
                     onToggleWatched: onToggleWatched,
@@ -463,6 +472,7 @@
         let title: String
         let imageURL: URL?
         var rating: PosterRatingDisplay?
+        var isFavorite = false
 
         var body: some View {
             VStack(alignment: .leading, spacing: 10) {
@@ -485,6 +495,7 @@
                 }
                 .frame(width: TVDetailMetrics.posterCardWidth, height: TVDetailMetrics.posterCardHeight)
                 .posterRatingOverlay(rating)
+                .posterFavoriteOverlay(isFavorite)
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
                 Text(title)

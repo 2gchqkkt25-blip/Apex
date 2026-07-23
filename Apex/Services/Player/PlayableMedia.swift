@@ -52,7 +52,8 @@ extension PlayableMedia {
     // When a local file is available (downloaded for offline viewing), it takes
     // priority over the remote URL.
 
-    static func from(movie: Movie, playlist: Playlist, client: XtreamClient = XtreamClient()) -> PlayableMedia? {
+    static func from(movie: Movie, playlist: Playlist, client: XtreamClient = XtreamClient(), resumeFromProgress: Bool = true) -> PlayableMedia? {
+        let startTime = resumeFromProgress ? movie.watchProgress : 0
         // Prefer local file for offline/downloaded playback
         if let path = movie.localFileURL,
            movie.downloadStatus == .completed,
@@ -65,7 +66,7 @@ extension PlayableMedia {
                 subtitle: movie.releaseDate,
                 posterURL: movie.iconURL,
                 kind: .vod,
-                startTime: movie.watchProgress,
+                startTime: startTime,
                 contentRef: .movie(movie.id)
             )
         }
@@ -78,7 +79,7 @@ extension PlayableMedia {
             subtitle: movie.releaseDate,
             posterURL: movie.iconURL,
             kind: .vod,
-            startTime: movie.watchProgress,
+            startTime: startTime,
             contentRef: .movie(movie.id)
         )
     }
@@ -100,7 +101,8 @@ extension PlayableMedia {
         return directURL.flatMap(URL.init(string:)) ?? build()
     }
 
-    static func from(episode: Episode, playlist: Playlist, client: XtreamClient = XtreamClient()) -> PlayableMedia? {
+    static func from(episode: Episode, playlist: Playlist, client: XtreamClient = XtreamClient(), resumeFromProgress: Bool = true) -> PlayableMedia? {
+        let startTime = resumeFromProgress ? episode.watchProgress : 0
         // Prefer local file for offline/downloaded playback
         if let path = episode.localFileURL,
            episode.downloadStatus == .completed,
@@ -114,7 +116,7 @@ extension PlayableMedia {
                 subtitle: "S\(episode.seasonNum) E\(episode.episodeNum) · \(episode.title)",
                 posterURL: URL(string: episode.movieImage ?? ""),
                 kind: .vod,
-                startTime: episode.watchProgress,
+                startTime: startTime,
                 contentRef: .episode(episode.id)
             )
         }
@@ -127,12 +129,10 @@ extension PlayableMedia {
             guard let resolved = episode.directSource.flatMap(URL.init(string:)) else { return nil }
             url = resolved
         case .xtream:
-            // Some providers supply a direct_source URL instead of relying on the
-            // constructed /series/user/pass/id.ext path. Try directSource first,
-            // fall back to building the URL from episode ID + extension.
             if let direct = episode.directSource,
                !direct.isEmpty,
-               let directURL = URL(string: direct) {
+               let directURL = URL(string: direct)
+            {
                 url = directURL
             } else if let built = client.buildEpisodeURL(for: episode, playlist: playlist) {
                 url = built
@@ -149,7 +149,7 @@ extension PlayableMedia {
             subtitle: subtitle,
             posterURL: URL(string: episode.movieImage ?? ""),
             kind: .vod,
-            startTime: episode.watchProgress,
+            startTime: startTime,
             contentRef: .episode(episode.id)
         )
     }

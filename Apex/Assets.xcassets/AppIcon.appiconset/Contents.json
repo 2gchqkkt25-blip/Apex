@@ -43,13 +43,13 @@
       "size" : "16x16"
     },
     {
-      "filename" : "ApexIcon-16.png",
+      "filename" : "ApexIcon-32.png",
       "idiom" : "mac",
       "scale" : "1x",
       "size" : "32x32"
     },
     {
-      "filename" : "ApexIcon-32.png",
+      "filename" : "ApexIcon-64.png",
       "idiom" : "mac",
       "scale" : "2x",
       "size" : "32x32"

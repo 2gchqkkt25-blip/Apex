@@ -13,6 +13,9 @@ build/
 
 .vscode/
 
+# Local Codex desktop state
+.freebuff/
+
 # Swift Package Manager (root manifest vendors dev tooling — see Package.swift)
 .build/
 

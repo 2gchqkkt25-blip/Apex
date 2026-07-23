@@ -2,7 +2,7 @@
 
 > **Purpose:** Track what stays, what goes, and what changes during the Lume → Apex rebrand.
 >
-> **Last updated:** July 15, 2026 (Build 41)
+> **Last updated:** July 20, 2026 (Build 46)
 
 ---
 
@@ -28,7 +28,7 @@ Fetches remote or local `.m3u`/`.m3u8` files, stream-parses entries, classifies 
 - **Status:** Core — **Decision:** ✅ Keep
 
 ### 1.3 Stalker (Ministra) Portal API Integration
-Authenticates by MAC address against Stalker/Ministra portals. Fetches channels, VOD, series with pagination. Resolves short-lived stream URLs at playback time.
+Authenticates by MAC address against Stalker/Ministra portals. Fetches channels, VOD, series with pagination. Sync imports page 1 of every VOD/series category for immediate browsing, then fills pages 2–20 for all categories in a detached utility task. Resolves short-lived stream URLs at playback time.
 - **Files:** `StalkerClient.swift`, `StalkerDTOs.swift`, `StalkerSupport.swift`, `ContentSyncManager+Stalker.swift`, `StalkerStreamResolver.swift`
 - **Status:** Core — **Decision:** ✅ Keep
 
@@ -47,7 +47,7 @@ Switch between multiple playlists with progress overlay. Each switch re-scopes a
 ## 2. Live TV
 
 ### 2.1 Live TV Channel Browsing
-Category sidebar/rail + channel list with lazy loading. EPG now/next info on each channel card. Category search on iOS.
+Category sidebar/rail + channel list with lazy loading. EPG now/next info on each channel card. Category search on iOS. The browse header shows the active playlist's visible channel count.
 - **Files:** `LiveTVView.swift`, `LiveTVSection.swift`, `LiveTVTVComponents.swift`
 - **Status:** Core — **Decision:** ✅ Keep
 
@@ -67,7 +67,7 @@ Play past programmes on live channels that support it (Xtream-only). Modelled as
 - **Status:** Core — **Decision:** ✅ Keep
 
 ### 2.5 Favorite Channels
-Toggle channels as favorites from the player or channel list. Independent Favorites ordering.
+Toggle channels as favorites from the player or channel list. Favorited channel rows show a filled red heart inline beside the channel name. Independent Favorites ordering.
 - **Files:** `LiveStream.swift`, `PlayerFavorites.swift`
 - **Status:** Core — **Decision:** ✅ Keep
 
@@ -86,18 +86,18 @@ Recently Watched section in the Live TV rail.
 ## 3. Movies
 
 ### 3.1 Movie Browsing
-Browse movies by category with preview rows, "Show All" per category, compact grid tiles for remaining categories. Smart collections (Recently Watched, Favorites, Recently Added).
+Browse movies by category with preview rows, "Show All" per category, compact grid tiles for remaining categories, and an active-playlist movie count at the top. Smart collections (Recently Watched, Favorites, Recently Added). Favorited posters show a top-left heart without overlapping the top-right rating badge.
 - **Files:** `MoviesView.swift`, `LibraryCollectionRows.swift`, `CategoryContentGrid.swift`
 - **Status:** Core — **Decision:** ✅ Keep
 
 ### 3.2 Movie Detail Screen
-Full-bleed backdrop hero, metadata line, Play/Resume button, expandable synopsis, cast row with photos, "You May Also Like", TMDB collection, "Other Sources", external ratings chips, trailer/video rows.
+Full-bleed backdrop hero, metadata line, Play/Resume and Start from Beginning buttons, expandable synopsis, cast row with photos, "You May Also Like", TMDB collection, "Other Sources", external ratings chips, trailer/video rows. Start from Beginning appears when resume progress exists.
 - **Files:** `MovieDetailView.swift`, `TVMovieDetailView.swift`, `TVDetailComponents.swift`, `TVDetailButtons.swift`, `MediaDetailComponents.swift`, `ExternalRatingsView.swift`, `ExpandableText.swift`, `VideoComponents.swift`
 - **Status:** Core — **Decision:** 🔧 Rework — Add IMDb + TMDB collection data and show metadata for VODs
 
 ### 3.3 Movie Favorites
-Mark movies as favorites with watchlist date. Drives the Favorites home row.
-- **Files:** `Movie.swift`, `PlayerFavorites.swift`
+Mark movies as favorites with watchlist date. Drives the Favorites home row and the shared top-left poster badge across category grids, Home rails, collection rows, similar-title strips, and tvOS recommendation rails.
+- **Files:** `Movie.swift`, `PlayerFavorites.swift`, `MovieCardView.swift`, `HomeRows.swift`, `PosterRatingBadge.swift`
 - **Status:** Core — **Decision:** ✅ Keep
 
 ### 3.4 Watched / Unwatched Toggle for Movies
@@ -115,7 +115,7 @@ Derive genres from TMDB/provider data and browse by genre.
 ## 4. Series
 
 ### 4.1 Series Browsing
-Browse series by category with preview rows, Recently Watched/Favorites/Recently Added collections, genre grid.
+Browse series by category with preview rows, Recently Watched/Favorites/Recently Added collections, genre grid, and an active-playlist series count at the top. Favorited posters use the same top-left heart as movies.
 - **Files:** `SeriesView.swift`, `LibraryCollectionRows.swift`
 - **Status:** Core — **Decision:** ✅ Keep
 
@@ -125,13 +125,13 @@ Backdrop hero, season/episode list, metadata, cast, trailers, "You May Also Like
 - **Status:** Core — **Decision:** 🔧 Rework — Add IMDb + TMDB metadata, matching the richness of the Movie detail screen
 
 ### 4.3 Episode Management
-Mark episodes watched/unwatched individually or in batch (mark all earlier/later). Context menu per episode card.
+Mark episodes watched/unwatched individually or in batch (mark all earlier/later). Episode context menus include Play from Beginning when saved progress exists, on iOS, macOS, and tvOS.
 - **Files:** `Episode.swift`, `EpisodeCard.swift`, `EpisodeWatchedMenu.swift`
 - **Status:** Core — **Decision:** ✅ Keep
 
 ### 4.4 Series Favorites
-Favorite series via detail screen or player controls.
-- **Files:** `Series.swift`, `PlayerFavorites.swift`
+Favorite series via detail screen or player controls. Favorite state drives the shared top-left badge across all series poster variants.
+- **Files:** `Series.swift`, `PlayerFavorites.swift`, `SeriesCardView.swift`, `HomeRows.swift`, `PosterRatingBadge.swift`
 - **Status:** Core — **Decision:** ✅ Keep
 
 ### 4.5 Series Genre Browsing
@@ -213,6 +213,11 @@ Loading indicator, error state with retry, video info overlay (codec/resolution/
 Shows active codec, resolution, frame rate for the current stream.
 - **Files:** `PlayerVideoInfo.swift`
 - **Status:** Auxiliary — **Decision:** ✅ Keep
+
+### 5.14 Subtitle Appearance and Placement
+Settings → Subtitles → Appearance controls Bottom/Center placement, size, color, background opacity, and bottom offset. Bottom placement respects platform safe areas and moves above visible player controls (iOS/iPadOS orientation-aware, macOS desktop controls, and the larger tvOS overlay); Center remains geometrically centered. Control visibility is shared across KSPlayer, VLCKit, and AVPlayer so external subtitles react consistently.
+- **Files:** `OpenSubtitlesSettings.swift`, `OpenSubtitlesSettingsView.swift`, `ExternalSubtitleOverlay.swift`, `FullScreenPlayerView.swift`, `KSPlayerSubtitleOverlay.swift`, `KSPlayerEngineView.swift`, `VLCPlayerEngineView.swift`, `AVPlayerEngineView.swift`
+- **Status:** Core — **Decision:** ✅ Keep
 
 ---
 
@@ -331,7 +336,7 @@ CloudKit-synced per-content user state: watch progress, watched flag, favorites,
 ## 9. Sync & Cloud
 
 ### 9.1 Content Sync (Playlist Catalog)
-Actor-based background sync for Xtream, M3U, Stalker. Downloads catalogs in batches, upserts into SwiftData, prunes stale items. Cancellable with progress reporting.
+Actor-based background sync for Xtream, M3U, Stalker. Downloads catalogs in batches, upserts into SwiftData, prunes stale items. Stalker imports page 1 of every VOD/series category during visible sync and loads remaining pages 2–20 for all categories afterward at utility priority. Cancellable with progress reporting.
 - **Files:** `ContentSyncManager.swift`, `ContentSyncManager+Helpers.swift`, `ContentSyncManager+M3U.swift`, `ContentSyncManager+Stalker.swift`, `SyncProgress.swift`, `SyncFrequency.swift`
 - **Status:** Core — **Decision:** ✅ Keep
 
@@ -462,7 +467,7 @@ Open-source credits, app version info, build details.
 - **Status:** Core — **Decision:** ✅ Keep
 
 ### 13.8 Sort Options (Categories and Content)
-Per-tab sort options: Playlist Order, Name A-Z/Z-A, Newest/Oldest First. Persisted per tab.
+Per-tab sort options: Playlist Order, Name A-Z/Z-A, Newest/Oldest First. Persisted per tab. On iOS, the up/down button beside the Live TV category bar opens the reorder sheet directly in edit mode.
 - **Files:** `SortOption.swift`, `SortMenu.swift`
 - **Status:** Core — **Decision:** ✅ Keep
 
@@ -571,6 +576,11 @@ Bring Series detail screen to parity with Movies — add the same IMDb/TMDB coll
 - **Files to investigate:** `SeriesDetailView.swift`, `TVSeriesDetailView.swift`
 - **Status:** ⬜ Not started
 
+### 🔜 Mini Player / Inline Playback (NEW)
+Persistent mini player that continues playing the current live TV stream while browsing channels, categories, or other tabs. The full-screen player state is extracted into a shared `@Observable` session so playback survives navigation. Mini view appears at the top/bottom of the channel list with play/pause, channel name, and close.
+- **Files to investigate:** `FullScreenPlayerView.swift`, `LiveTVView.swift`, `MainTabView.swift`
+- **Status:** ⬜ Not started
+
 ---
 
 ## Quick-Reference: Premium-Gated Features
@@ -617,7 +627,7 @@ Bring Series detail screen to parity with Movies — add the same IMDb/TMDB coll
 | AI / Indexing | 2 | 0 | 0 | 2 |
 | UI / Infrastructure | 9 | 0 | 0 | 9 |
 | **Existing Total** | **93** | **3** | **0** | **96** |
-| New Features (section 17) | — | — | — | 4 ⬜ |
+| New Features (section 17) | — | — | — | 5 ⬜ |
 
 ### Items needing rework
 1. **3.2 Movie Detail** — Add IMDb + TMDB collections data, improve VOD metadata display
@@ -629,7 +639,7 @@ Bring Series detail screen to parity with Movies — add the same IMDb/TMDB coll
 
 ---
 
-*Last updated: June 29, 2026*
+*Last updated: July 20, 2026 (Build 46)*
 
 
 ---
@@ -637,7 +647,7 @@ Bring Series detail screen to parity with Movies — add the same IMDb/TMDB coll
 ## 2. Live TV
 
 ### 2.1 Live TV Channel Browsing
-Category sidebar/rail + channel list with lazy loading. EPG now/next info on each channel card. Category search on iOS.
+Category sidebar/rail + channel list with lazy loading. EPG now/next info on each channel card. Category search on iOS. The browse header shows the active playlist's visible channel count.
 - **Files:** `LiveTVView.swift`, `LiveTVSection.swift`, `LiveTVTVComponents.swift`
 - **Status:** Core
 - **Decision:** keep
@@ -661,7 +671,7 @@ Play past programmes on live channels that support it (Xtream-only). Modelled as
 - **Decision:** keep
 
 ### 2.5 Favorite Channels
-Toggle channels as favorites from the player or channel list. Independent Favorites ordering.
+Toggle channels as favorites from the player or channel list. Favorited channel rows show a filled red heart inline beside the channel name. Independent Favorites ordering.
 - **Files:** `LiveStream.swift`, `PlayerFavorites.swift`
 - **Status:** Core
 - **Decision:** keep
@@ -683,20 +693,20 @@ Recently Watched section in the Live TV rail.
 ## 3. Movies
 
 ### 3.1 Movie Browsing
-Browse movies by category with preview rows, "Show All" per category, compact grid tiles for remaining categories. Smart collections (Recently Watched, Favorites, Recently Added).
+Browse movies by category with preview rows, "Show All" per category, compact grid tiles for remaining categories, and an active-playlist movie count at the top. Smart collections (Recently Watched, Favorites, Recently Added). Favorited posters show a top-left heart without overlapping the top-right rating badge.
 - **Files:** `MoviesView.swift`, `LibraryCollectionRows.swift`, `CategoryContentGrid.swift`
 - **Status:** Core
 - **Decision:** keep
 
 ### 3.2 Movie Detail Screen
-Full-bleed backdrop hero, metadata line, Play/Resume button, expandable synopsis, cast row with photos, "You May Also Like", TMDB collection, "Other Sources", external ratings chips, trailer/video rows.
+Full-bleed backdrop hero, metadata line, Play/Resume and Start from Beginning buttons, expandable synopsis, cast row with photos, "You May Also Like", TMDB collection, "Other Sources", external ratings chips, trailer/video rows. Start from Beginning appears when resume progress exists.
 - **Files:** `MovieDetailView.swift`, `TVMovieDetailView.swift`, `TVDetailComponents.swift`, `TVDetailButtons.swift`, `MediaDetailComponents.swift`, `ExternalRatingsView.swift`, `ExpandableText.swift`, `VideoComponents.swift`
 - **Status:** Core
 - **Decision:** Keep but I want to add the IMDM and TMDB Collections and show the data for the VODs
 
 ### 3.3 Movie Favorites
-Mark movies as favorites with watchlist date. Drives the Favorites home row.
-- **Files:** `Movie.swift`, `PlayerFavorites.swift`
+Mark movies as favorites with watchlist date. Drives the Favorites home row and the shared top-left poster badge across category grids, Home rails, collection rows, similar-title strips, and tvOS recommendation rails.
+- **Files:** `Movie.swift`, `PlayerFavorites.swift`, `MovieCardView.swift`, `HomeRows.swift`, `PosterRatingBadge.swift`
 - **Status:** Core
 - **Decision:** keep
 
@@ -717,7 +727,7 @@ Derive genres from TMDB/provider data and browse by genre.
 ## 4. Series
 
 ### 4.1 Series Browsing
-Browse series by category with preview rows, Recently Watched/Favorites/Recently Added collections, genre grid.
+Browse series by category with preview rows, Recently Watched/Favorites/Recently Added collections, genre grid, and an active-playlist series count at the top. Favorited posters use the same top-left heart as movies.
 - **Files:** `SeriesView.swift`, `LibraryCollectionRows.swift`
 - **Status:** Core
 - **Decision:** keep
@@ -729,14 +739,14 @@ Backdrop hero, season/episode list, metadata, cast, trailers, "You May Also Like
 - **Decision:** keep, I want to add the metadata and the IMDB and TMDB data like in Movies
 
 ### 4.3 Episode Management
-Mark episodes watched/unwatched individually or in batch (mark all earlier/later). Context menu per episode card.
+Mark episodes watched/unwatched individually or in batch (mark all earlier/later). Episode context menus include Play from Beginning when saved progress exists, on iOS, macOS, and tvOS.
 - **Files:** `Episode.swift`, `EpisodeCard.swift`, `EpisodeWatchedMenu.swift`
 - **Status:** Core
 - **Decision:** Keep
 
 ### 4.4 Series Favorites
-Favorite series via detail screen or player controls.
-- **Files:** `Series.swift`, `PlayerFavorites.swift`
+Favorite series via detail screen or player controls. Favorite state drives the shared top-left badge across all series poster variants.
+- **Files:** `Series.swift`, `PlayerFavorites.swift`, `SeriesCardView.swift`, `HomeRows.swift`, `PosterRatingBadge.swift`
 - **Status:** Core
 - **Decision:** Keep
 
@@ -832,6 +842,12 @@ Loading indicator, error state with retry, video info overlay (codec/resolution/
 Shows active codec, resolution, frame rate for the current stream.
 - **Files:** `PlayerVideoInfo.swift`
 - **Status:** Auxiliary
+- **Decision:** Keep
+
+### 5.14 Subtitle Appearance and Placement
+Settings → Subtitles → Appearance controls Bottom/Center placement, size, color, background opacity, and bottom offset. Bottom placement respects platform safe areas and moves above visible player controls (iOS/iPadOS orientation-aware, macOS desktop controls, and the larger tvOS overlay); Center remains geometrically centered. Control visibility is shared across KSPlayer, VLCKit, and AVPlayer so external subtitles react consistently.
+- **Files:** `OpenSubtitlesSettings.swift`, `OpenSubtitlesSettingsView.swift`, `ExternalSubtitleOverlay.swift`, `FullScreenPlayerView.swift`, `KSPlayerSubtitleOverlay.swift`, `KSPlayerEngineView.swift`, `VLCPlayerEngineView.swift`, `AVPlayerEngineView.swift`
+- **Status:** Core
 - **Decision:** Keep
 
 ---
@@ -970,7 +986,7 @@ CloudKit-synced per-content user state: watch progress, watched flag, favorites,
 ## 9. Sync & Cloud
 
 ### 9.1 Content Sync (Playlist Catalog)
-Actor-based background sync for Xtream, M3U, Stalker. Downloads catalogs in batches, upserts into SwiftData, prunes stale items. Cancellable with progress reporting.
+Actor-based background sync for Xtream, M3U, Stalker. Downloads catalogs in batches, upserts into SwiftData, prunes stale items. Stalker imports page 1 of every VOD/series category during visible sync and loads remaining pages 2–20 for all categories afterward at utility priority. Cancellable with progress reporting.
 - **Files:** `ContentSyncManager.swift`, `ContentSyncManager+Helpers.swift`, `ContentSyncManager+M3U.swift`, `ContentSyncManager+Stalker.swift`, `SyncProgress.swift`, `SyncFrequency.swift`
 - **Status:** Core
 - **Decision:** keep
@@ -1124,7 +1140,7 @@ Open-source credits, app version info, build details.
 - **Decision:** keep
 
 ### 13.8 Sort Options (Categories and Content)
-Per-tab sort options: Playlist Order, Name A-Z/Z-A, Newest/Oldest First. Persisted per tab.
+Per-tab sort options: Playlist Order, Name A-Z/Z-A, Newest/Oldest First. Persisted per tab. On iOS, the up/down button beside the Live TV category bar opens the reorder sheet directly in edit mode.
 - **Files:** `SortOption.swift`, `SortMenu.swift`
 - **Status:** Core
 - **Decision:** keep

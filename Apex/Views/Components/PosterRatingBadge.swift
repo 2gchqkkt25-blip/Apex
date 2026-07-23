@@ -65,29 +65,116 @@ struct PosterRatingBadge: View {
     }
 
     #if os(tvOS)
-        private var starSize: CGFloat { 18 }
-        private var textSize: CGFloat { 22 }
-        private var horizontalPadding: CGFloat { 12 }
-        private var verticalPadding: CGFloat { 6 }
-        private var badgeInset: CGFloat { 10 }
-        private var badgeSpacing: CGFloat { 6 }
+        private var starSize: CGFloat {
+            18
+        }
+
+        private var textSize: CGFloat {
+            22
+        }
+
+        private var horizontalPadding: CGFloat {
+            12
+        }
+
+        private var verticalPadding: CGFloat {
+            6
+        }
+
+        private var badgeInset: CGFloat {
+            10
+        }
+
+        private var badgeSpacing: CGFloat {
+            6
+        }
     #else
-        private var starSize: CGFloat { 9 }
-        private var textSize: CGFloat { 11 }
-        private var horizontalPadding: CGFloat { 6 }
-        private var verticalPadding: CGFloat { 3 }
-        private var badgeInset: CGFloat { 6 }
-        private var badgeSpacing: CGFloat { 3 }
+        private var starSize: CGFloat {
+            9
+        }
+
+        private var textSize: CGFloat {
+            11
+        }
+
+        private var horizontalPadding: CGFloat {
+            6
+        }
+
+        private var verticalPadding: CGFloat {
+            3
+        }
+
+        private var badgeInset: CGFloat {
+            6
+        }
+
+        private var badgeSpacing: CGFloat {
+            3
+        }
+    #endif
+}
+
+/// High-contrast favorite marker shared by movie and series posters. A fixed
+/// dark plate remains legible on bright artwork and avoids material rendering
+/// disappearing inside lazily rendered/focused poster cards.
+struct PosterFavoriteBadge: View {
+    var body: some View {
+        Image(systemName: "heart.fill")
+            .symbolRenderingMode(.monochrome)
+            .font(.system(size: heartSize, weight: .bold))
+            .foregroundStyle(.red)
+            .frame(width: plateSize, height: plateSize)
+            .background(.black.opacity(0.78), in: Circle())
+            .overlay {
+                Circle().stroke(.white.opacity(0.18), lineWidth: 1)
+            }
+            .padding(badgeInset)
+            .accessibilityLabel("Favorite")
+    }
+
+    #if os(tvOS)
+        private var heartSize: CGFloat {
+            24
+        }
+
+        private var plateSize: CGFloat {
+            48
+        }
+
+        private var badgeInset: CGFloat {
+            10
+        }
+    #else
+        private var heartSize: CGFloat {
+            13
+        }
+
+        private var plateSize: CGFloat {
+            28
+        }
+
+        private var badgeInset: CGFloat {
+            6
+        }
     #endif
 }
 
 extension View {
     /// Overlays a rating pill when `display` is non-nil.
-    @ViewBuilder
     func posterRatingOverlay(_ display: PosterRatingDisplay?) -> some View {
         overlay(alignment: .topTrailing) {
             if let display {
                 PosterRatingBadge(display: display)
+            }
+        }
+    }
+
+    /// Overlays the shared heart marker for favorited movie and series cards.
+    func posterFavoriteOverlay(_ isFavorite: Bool) -> some View {
+        overlay(alignment: .topLeading) {
+            if isFavorite {
+                PosterFavoriteBadge()
             }
         }
     }

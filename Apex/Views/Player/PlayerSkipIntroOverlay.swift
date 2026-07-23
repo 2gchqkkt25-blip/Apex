@@ -12,9 +12,13 @@ struct PlayerSkipIntroOverlay: View {
     var startTime: TimeInterval = 0
     let onSeek: (TimeInterval) -> Void
 
+    /// Latch the pressed segment on every platform. The clock can take a tick
+    /// to reflect an engine seek; without this, the button remains actionable
+    /// during that window and can send the playhead backward repeatedly.
+    @State private var dismissedSegment: ActiveSegment?
+
     #if os(tvOS)
         @FocusState private var buttonFocused: Bool
-        @State private var dismissedSegment: ActiveSegment?
     #endif
 
     /// Drives re-renders on a cadence so the overlay tracks the playhead even
@@ -34,8 +38,7 @@ struct PlayerSkipIntroOverlay: View {
     }
 
     var body: some View {
-        let _ = pollTick
-        let position = playbackPosition
+        let position = playbackPosition(refreshTick: pollTick)
         let activeSegment = activeSegment(at: position)
 
         Group {
@@ -47,23 +50,21 @@ struct PlayerSkipIntroOverlay: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
         .allowsHitTesting(activeSegment != nil)
         .animation(.easeInOut(duration: 0.25), value: activeSegment?.segment.end)
-        .onAppear {
-            Logger.player.info("[SkipIntro] Overlay mounted — intro=\(segments.intro != nil, privacy: .public) start=\(segments.intro.map { String(format: "%.1f", $0.start) } ?? "nil", privacy: .public) end=\(segments.intro.map { String(format: "%.1f", $0.end) } ?? "nil", privacy: .public) recap=\(segments.recap != nil, privacy: .public) resume=\(startTime, privacy: .public)")
-        }
+        .onAppear { logOverlayMounted() }
         .onReceive(Timer.publish(every: 0.25, on: .main, in: .common).autoconnect()) { _ in
             pollTick &+= 1
         }
         #if os(tvOS)
-            .onChange(of: activeSegment?.segment.end) { _, _ in
-                if activeSegment != nil { Task { @MainActor in buttonFocused = true } }
-            }
-            .onChange(of: segments) { _, _ in
-                dismissedSegment = nil
-            }
+        .onChange(of: activeSegment?.segment.end) { _, _ in
+            if activeSegment != nil { Task { @MainActor in buttonFocused = true } }
+        }
         #endif
+        .onChange(of: segments) { _, _ in
+            dismissedSegment = nil
+        }
     }
 
-    private var playbackPosition: TimeInterval {
+    private func playbackPosition(refreshTick _: Int) -> TimeInterval {
         let current = clock.current
         if current.isFinite, current > 0 { return current }
         if startTime.isFinite, startTime > 0 { return startTime }
@@ -82,17 +83,25 @@ struct PlayerSkipIntroOverlay: View {
     }
 
     private func contains(_ segment: IntroSegments.Segment, _ time: TimeInterval) -> Bool {
+        guard segment.duration >= minimumDuration else { return false }
         let start = max(0, segment.start - timingSlack)
-        let end = segment.end + timingSlack
-        let duration = end - start
-        return duration >= minimumDuration && time >= start && time < end
+        // Drift allowance belongs before the tagged segment only. Extending the
+        // window after `end` left the button visible after its seek target had
+        // passed, so pressing it jumped backward and replayed the opening.
+        return time >= start && time < segment.end
     }
 
     private func showsButton(for active: ActiveSegment) -> Bool {
-        #if os(tvOS)
-            if dismissedSegment == active { return false }
-        #endif
-        return true
+        dismissedSegment != active
+    }
+
+    private func logOverlayMounted() {
+        let introStart = segments.intro.map { String(format: "%.1f", $0.start) } ?? "nil"
+        let introEnd = segments.intro.map { String(format: "%.1f", $0.end) } ?? "nil"
+        let message = "[SkipIntro] Overlay mounted — intro=\(segments.intro != nil) "
+            + "start=\(introStart) end=\(introEnd) "
+            + "recap=\(segments.recap != nil) resume=\(startTime)"
+        Logger.player.info("\(message, privacy: .public)")
     }
 
     private func label(for kind: Kind) -> LocalizedStringKey {
@@ -100,7 +109,10 @@ struct PlayerSkipIntroOverlay: View {
     }
 
     private func skip(_ active: ActiveSegment) {
-        onSeek(active.segment.end)
+        dismissedSegment = active
+        let target = max(active.segment.end, playbackPosition(refreshTick: pollTick) + 0.5)
+        Logger.player.info("[SkipIntro] Seeking to (target, format: .fixed(precision: 1))s")
+        onSeek(target)
     }
 
     @ViewBuilder

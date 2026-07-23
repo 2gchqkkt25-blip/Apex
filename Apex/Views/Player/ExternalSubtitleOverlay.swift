@@ -7,34 +7,34 @@
 //  reads the clock's current time independently.
 //
 
-import SwiftUI
 import OSLog
+import SwiftUI
 
 /// Parses and renders an SRT subtitle file, displaying cues based on playback time.
 struct ExternalSubtitleOverlay: View {
     let subtitleURL: URL
     @Bindable var clock: PlaybackClock
+    var controlsVisible = false
 
     @State private var cues: [SRTCue] = []
     @State private var currentText: String = ""
     @State private var pollTimer: Timer?
 
+    private let appearance = SubtitleAppearance.current
+
     var body: some View {
-        VStack {
-            Spacer()
+        SubtitleOverlayLayout(appearance: appearance, controlsVisible: controlsVisible) {
             if !currentText.isEmpty {
                 Text(currentText)
-                    .font(.system(size: subtitleFontSize, weight: .medium))
-                    .foregroundStyle(.white)
+                    .font(.system(size: appearance.fontSize, weight: .medium))
+                    .foregroundStyle(appearance.textColor)
                     .shadow(color: .black.opacity(0.9), radius: 2, x: 1, y: 1)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 24)
                     .padding(.vertical, 8)
-                    .background(.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 6))
-                    .padding(.bottom, bottomPadding)
+                    .background(.black.opacity(appearance.backgroundOpacity), in: RoundedRectangle(cornerRadius: 6))
             }
         }
-        .allowsHitTesting(false)
         .task {
             cues = SRTParser.parse(fileURL: subtitleURL)
             if cues.isEmpty {
@@ -58,22 +58,6 @@ struct ExternalSubtitleOverlay: View {
             pollTimer?.invalidate()
             pollTimer = nil
         }
-    }
-
-    private var subtitleFontSize: CGFloat {
-        #if os(tvOS)
-        28
-        #else
-        17
-        #endif
-    }
-
-    private var bottomPadding: CGFloat {
-        #if os(tvOS)
-        60
-        #else
-        40
-        #endif
     }
 
     private func updateCurrentCue(at time: TimeInterval) {
@@ -126,20 +110,17 @@ enum SRTParser {
             // Find the timestamp line (contains " --> ")
             // Some SRT files have extra blank lines or metadata before the index
             var timestampLineIndex: Int?
-            for (i, line) in lines.enumerated() {
-                if line.contains(" --> ") {
-                    timestampLineIndex = i
-                    break
-                }
+            for (lineIndex, line) in lines.enumerated() where line.contains(" --> ") {
+                timestampLineIndex = lineIndex
+                break
             }
             guard let tsIdx = timestampLineIndex, tsIdx + 1 < lines.count else { continue }
 
             // Parse index (line before timestamp, if available)
-            let index: Int
-            if tsIdx > 0, let parsed = Int(lines[tsIdx - 1]) {
-                index = parsed
+            let index: Int = if tsIdx > 0, let parsed = Int(lines[tsIdx - 1]) {
+                parsed
             } else {
-                index = cues.count + 1
+                cues.count + 1
             }
 
             // Parse timestamps "00:01:23,456 --> 00:01:26,789"
@@ -176,9 +157,11 @@ enum SRTParser {
     }
 }
 
-// Make SRTCue usable in SwiftUI
+/// Make SRTCue usable in SwiftUI
 extension SRTParser.SRTCue: Identifiable {
-    var id: Int { index }
+    var id: Int {
+        index
+    }
 }
 
 typealias SRTCue = SRTParser.SRTCue

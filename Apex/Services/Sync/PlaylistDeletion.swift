@@ -69,6 +69,16 @@ nonisolated enum PlaylistDeletion {
         // Drop the playlist's auto-created EPG source so it isn't re-synced.
         EPGSourceReconciler.remove(playlistID: playlist.id, in: context)
 
+        // Delete categories explicitly (and clear the inverse) before the playlist
+        // itself. Relying solely on cascade during a background-context save that
+        // merges into the UI context can hit `_InvalidFutureBackingData` while
+        // SwiftData walks `Category.playlist` in `_propagateDelete`.
+        let categories = Array(playlist.categories)
+        for category in categories {
+            category.playlist = nil
+            context.delete(category)
+        }
+        playlist.categories = []
         context.delete(playlist)
 
         // Prune the guide listings for channels no surviving playlist carries.

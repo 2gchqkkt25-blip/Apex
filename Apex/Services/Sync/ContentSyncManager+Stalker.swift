@@ -18,10 +18,12 @@ import SwiftData
 
 extension ContentSyncManager {
     /// A positive `Int` stream id for a Stalker element. Stalker ids are numeric
-    /// strings (`"123"`); fall back to a stable hash for the rare non-numeric id
-    /// so element ids stay constant across re-syncs.
+    /// strings (`"123"`) or compound strings (`"123:456"`); take the first segment
+    /// before any colon as the numeric id, and fall back to a stable hash for the
+    /// rare fully non-numeric id so element ids stay constant across re-syncs.
     private static func streamId(for stalkerId: String) -> Int {
-        if let int = Int(stalkerId), int > 0 { return int }
+        let numericPrefix = stalkerId.split(separator: ":")[0]
+        if let int = Int(numericPrefix), int > 0 { return int }
         return M3UIdentity.numericId(for: stalkerId)
     }
 
@@ -58,37 +60,148 @@ extension ContentSyncManager {
         await progress?.complete(.liveCategories)
 
         // Only sync Live TV channels upfront (one bulk call, fast).
-        // Movies and Series load on-demand when the user browses a category.
-        await progress?.start(.movies)
-        await progress?.update(detail: "On-demand")
-        await progress?.complete(.movies)
+        // Movies and Series sync just the first page of each category during
+        // sync — one request per category gives poster cards for all categories
+        // without the 30+ minute penalty of full pagination.
+        if !vodCategories.isEmpty {
+            try await syncStalkerMovies(
+                client: client,
+                categories: vodCategories,
+                playlistId: playlistId,
+                progress: progress,
+                maxPages: 1
+            )
+        }
 
-        await progress?.start(.series)
-        await progress?.update(detail: "On-demand")
-        await progress?.complete(.series)
+        if !seriesCategories.isEmpty {
+            try await syncStalkerSeries(
+                client: client,
+                categories: seriesCategories,
+                playlistId: playlistId,
+                progress: progress,
+                maxPages: 1
+            )
+        }
 
         try await syncStalkerChannels(client: client, playlistId: playlistId, progress: progress)
 
         markStalkerPlaylistUpdated(playlistId)
 
-        // Deferred: preload first page of top categories in the background so
-        // Movies/Series tabs show poster cards immediately after sync. This runs
-        // AFTER the sync sheet closes — non-blocking, best-effort.
+        // Background: load remaining pages of all categories after sync sheet closes.
+        // Page 1 was already loaded during sync for immediate poster cards; this task
+        // fetches pages 2–20 in the background so the full catalog populates without
+        // blocking the user.
         let bgContainer = modelContainer
-        let bgVodCats = Array(vodCategories.prefix(15))
-        let bgSeriesCats = Array(seriesCategories.prefix(15))
+        let bgVodCats = vodCategories
+        let bgSeriesCats = seriesCategories
         let bgPlaylistId = playlistId
         let bgConfig = client.configuration
         Task.detached(priority: .utility) {
             let bgClient = StalkerClient(configuration: bgConfig)
             let manager = ContentSyncManager(modelContainer: bgContainer)
-            await manager.preloadStalkerFirstPages(
+            Logger.database.info("Stalker: background catalog loading started for \(bgVodCats.count) VOD + \(bgSeriesCats.count) series categories")
+            await manager.syncStalkerContentInBackground(
                 client: bgClient,
                 vodCategories: bgVodCats,
                 seriesCategories: bgSeriesCats,
                 playlistId: bgPlaylistId
             )
+            Logger.database.info("Stalker: background catalog loading completed")
         }
+    }
+
+    /// Loads remaining pages (2–20) of all VOD and series categories in the
+    /// background. Called after sync completes so the full catalog fills in without
+    /// blocking the user. Best-effort — failures are silently ignored.
+    func syncStalkerContentInBackground(
+        client: StalkerClient,
+        vodCategories: [StalkerCategory],
+        seriesCategories: [StalkerCategory],
+        playlistId: UUID
+    ) async {
+        let vodPrefix = "\(playlistId.uuidString)-\(CategoryType.vod.rawValue)-"
+        let seriesPrefix = "\(playlistId.uuidString)-\(CategoryType.series.rawValue)-"
+        var seenMovieIds = Set<String>()
+        var seenSeriesIds = Set<String>()
+
+        for category in vodCategories where !category.id.isEmpty {
+            guard !Task.isCancelled else { return }
+            guard let result = try? await client.getOrderedList(type: "vod", categoryId: category.id, page: 1),
+                  !result.items.isEmpty else { continue }
+            let totalItems = result.totalItems ?? 0
+            let pageSize = result.pageSize ?? 14
+            let totalPages = min(20, max(1, Int(ceil(Double(totalItems) / Double(pageSize)))))
+            guard totalPages > 1 else { continue }
+
+            // Accumulate one category and save it once. Saving every page made
+            // the main view context merge up to 19 times per category, which
+            // could keep tvOS's UI thread continuously busy for large portals.
+            var remainingItems: [StalkerVODItem] = []
+            for page in 2 ... totalPages {
+                guard !Task.isCancelled else { return }
+                guard let pageResult = try? await client.getOrderedList(type: "vod", categoryId: category.id, page: page),
+                      !pageResult.items.isEmpty else { continue }
+                remainingItems.append(contentsOf: pageResult.items)
+            }
+            if !remainingItems.isEmpty {
+                autoreleasepool {
+                    _ = upsertStalkerMovies(
+                        remainingItems, categoryId: category.id, playlistPrefix: vodPrefix,
+                        playlistId: playlistId, seenIds: &seenMovieIds
+                    )
+                }
+            }
+            await yieldAfterStalkerBackgroundCategory()
+        }
+
+        for category in seriesCategories where !category.id.isEmpty {
+            guard !Task.isCancelled else { return }
+            guard let result = try? await client.getOrderedList(type: "series", categoryId: category.id, page: 1),
+                  !result.items.isEmpty else { continue }
+            let totalItems = result.totalItems ?? 0
+            let pageSize = result.pageSize ?? 14
+            let totalPages = min(20, max(1, Int(ceil(Double(totalItems) / Double(pageSize)))))
+            guard totalPages > 1 else { continue }
+
+            let context = ModelContext(modelContainer)
+            context.autosaveEnabled = false
+            for page in 2 ... totalPages {
+                guard !Task.isCancelled else { return }
+                guard let pageResult = try? await client.getOrderedList(type: "series", categoryId: category.id, page: page),
+                      !pageResult.items.isEmpty else { continue }
+                for item in pageResult.items {
+                    guard let stalkerId = item.id else { continue }
+                    let seriesId = Self.streamId(for: stalkerId)
+                    let id = "\(playlistId.uuidString)-series-\(seriesId)"
+                    guard !seenSeriesIds.contains(id) else { continue }
+                    seenSeriesIds.insert(id)
+                    let existing = try? context.fetch(
+                        FetchDescriptor<Series>(predicate: #Predicate { $0.id == id })
+                    ).first
+                    let series = existing ?? Series(id: id, seriesId: seriesId, name: "")
+                    if existing == nil { context.insert(series) }
+                    series.name = item.name ?? ""
+                    series.cover = item.screenshot
+                    series.plot = item.description
+                    series.releaseDate = item.year
+                    series.categoryId = seriesPrefix + category.id
+                }
+            }
+            // One merge per category rather than one per page keeps browsing
+            // and Siri Remote focus responsive while the catalog fills in.
+            try? context.save()
+            await yieldAfterStalkerBackgroundCategory()
+        }
+    }
+
+    /// Give foreground work a scheduling window between background categories.
+    /// Apple TV has less CPU and memory headroom, so use a small cooperative
+    /// pause there; other platforms only need a task yield.
+    private func yieldAfterStalkerBackgroundCategory() async {
+        await Task.yield()
+        #if os(tvOS)
+            try? await Task.sleep(for: .milliseconds(250))
+        #endif
     }
 
     // MARK: - Categories
@@ -127,7 +240,8 @@ extension ContentSyncManager {
         client: StalkerClient,
         categories: [StalkerCategory],
         playlistId: UUID,
-        progress: SyncProgress?
+        progress: SyncProgress?,
+        maxPages: Int = 20
     ) async throws {
         await progress?.start(.movies)
         let playlistPrefix = "\(playlistId.uuidString)-\(CategoryType.vod.rawValue)-"
@@ -136,7 +250,7 @@ extension ContentSyncManager {
 
         for category in categories where !category.id.isEmpty {
             try Task.checkCancellation()
-            let items = await (try? client.getAllOrderedItems(type: "vod", categoryId: category.id)) ?? []
+            let items = await (try? client.getAllOrderedItems(type: "vod", categoryId: category.id, maxPages: maxPages)) ?? []
             guard !items.isEmpty else { continue }
 
             autoreleasepool {
@@ -270,7 +384,8 @@ extension ContentSyncManager {
         client: StalkerClient,
         categories: [StalkerCategory],
         playlistId: UUID,
-        progress: SyncProgress?
+        progress: SyncProgress?,
+        maxPages: Int = 20
     ) async throws {
         await progress?.start(.series)
         let playlistPrefix = "\(playlistId.uuidString)-\(CategoryType.series.rawValue)-"
@@ -279,7 +394,7 @@ extension ContentSyncManager {
 
         for category in categories where !category.id.isEmpty {
             try Task.checkCancellation()
-            let items = await (try? client.getAllOrderedItems(type: "series", categoryId: category.id)) ?? []
+            let items = await (try? client.getAllOrderedItems(type: "series", categoryId: category.id, maxPages: maxPages)) ?? []
             guard !items.isEmpty else { continue }
 
             try autoreleasepool {
@@ -331,10 +446,11 @@ extension ContentSyncManager {
 
     /// Fetches a Stalker series' episodes on demand (the series detail screen
     /// calls this through `fetchEpisodes`). Best-effort: the portal returns each
-    /// episode as an ordered-list item carrying its own `cmd`, which is stored in
-    /// `directSource` for playback-time `create_link` resolution. Portals that
-    /// don't expose episodes this way yield an empty list, leaving the series
-    /// browsable with no episodes rather than failing.
+    /// season as an ordered-list item with its episode numbers in the `series`
+    /// array and a season-level `cmd`. Each episode gets its own per-episode `cmd`
+    /// encoding the item's `id` (series_id:season_num) with the episode number
+    /// appended as `:epNum`, wrapped as a VOD-style `create_link` command — the
+    /// portal only resolves series episodes through the VOD `create_link` path.
     func fetchStalkerEpisodes(seriesId: Int, seriesElementId: String, playlist: Playlist) async throws -> [ParsedEpisode] {
         let client = StalkerClient(configuration: StalkerClient.Configuration(playlist: playlist))
         let items = try await client.getAllOrderedItems(
@@ -345,13 +461,14 @@ extension ContentSyncManager {
         )
         var result: [ParsedEpisode] = []
         for (index, item) in items.enumerated() {
-            guard let cmd = item.cmd else { continue }
+            let streamId = item.id ?? "\(seriesId):\(index + 1)"
             // Stalker series carry a flat episode list; use the provider order
             // (1-based) for the episode number and group everything under one
             // season, which is how most portals present a series.
             let episodeNumbers = item.seriesNumbers.isEmpty ? [index + 1] : item.seriesNumbers
             for episodeNum in episodeNumbers {
-                let episodeKey = "\(item.id ?? "\(index)")-\(episodeNum)"
+                let episodeKey = "\(streamId):\(episodeNum)"
+                let episodeCmd = buildStalkerEpisodeCmd(streamId: episodeKey)
                 result.append(ParsedEpisode(
                     id: "\(seriesElementId)-episode-\(episodeKey)",
                     episodeId: episodeKey,
@@ -360,7 +477,7 @@ extension ContentSyncManager {
                     seasonNum: 1,
                     episodeNum: episodeNum,
                     added: nil,
-                    directSource: cmd,
+                    directSource: episodeCmd,
                     durationSecs: nil,
                     movieImage: item.screenshot,
                     rating: nil,
@@ -370,6 +487,16 @@ extension ContentSyncManager {
             }
         }
         return result
+    }
+
+    /// Builds a base64-encoded JSON `cmd` for a series episode `create_link`.
+    /// Portals that encode their VOD commands as `{"type":"movie","stream_id":"..."}`
+    /// resolve series episodes through the same VOD path — the season-level `cmd`
+    /// has no episode number and produces an empty stream parameter.
+    /// `target_container` is included to match the portal's own VOD command format.
+    private func buildStalkerEpisodeCmd(streamId: String) -> String {
+        let payload = #"{"type":"movie","stream_id":"\#(streamId)","stream_source":null,"target_container":"[\"mp4\"]"}"#
+        return Data(payload.utf8).base64EncodedString()
     }
 
     // MARK: - Live channels (itv)

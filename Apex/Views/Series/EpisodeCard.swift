@@ -6,6 +6,7 @@ struct EpisodeCard: View {
     let episode: Episode
     @Environment(ThemeManager.self) private var themeManager
     var onPlay: () -> Void
+    var onPlayFromBeginning: (() -> Void)?
     var onToggleWatched: () -> Void = {}
     var onMarkPreviousWatched: () -> Void = {}
     var onMarkFollowingUnwatched: () -> Void = {}
@@ -53,6 +54,14 @@ struct EpisodeCard: View {
         }
         .buttonStyle(.plain)
         .contextMenu {
+            if let playFromStart = onPlayFromBeginning, episode.watchProgress > 1 {
+                Button {
+                    playFromStart()
+                } label: {
+                    Label("Play from Beginning", systemImage: "gobackward")
+                }
+                Divider()
+            }
             EpisodeWatchedMenu(
                 episode: episode,
                 onToggleWatched: onToggleWatched,
@@ -184,6 +193,7 @@ struct EpisodeCard: View {
         let episode: Episode
         let playlist: Playlist?
         var onPlay: () -> Void
+        var onPlayFromBeginning: (() -> Void)?
         var onToggleWatched: () -> Void
         var onMarkPreviousWatched: () -> Void
         var onMarkFollowingUnwatched: () -> Void
@@ -197,6 +207,7 @@ struct EpisodeCard: View {
             EpisodeCard(
                 episode: episode,
                 onPlay: onPlay,
+                onPlayFromBeginning: onPlayFromBeginning,
                 onToggleWatched: onToggleWatched,
                 onMarkPreviousWatched: onMarkPreviousWatched,
                 onMarkFollowingUnwatched: onMarkFollowingUnwatched,
