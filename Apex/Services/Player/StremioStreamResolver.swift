@@ -6,8 +6,8 @@
 //  playback time. Queries ALL configured Stremio addons that support streams
 //  (not just the owning addon), merges results, and auto-selects the best
 //  quality. This mirrors how the Stremio desktop app works — catalog addons
-//  (Cinemeta) provide browsing, stream addons (AIOStreams, Torrentio) provide
-//  playback, and the player queries all of them.
+//  (Cinemeta) provide browsing, stream addons provide playback, and the
+//  player queries all of them.
 //
 
 import Foundation

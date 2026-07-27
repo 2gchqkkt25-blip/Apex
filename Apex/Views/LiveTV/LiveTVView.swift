@@ -68,6 +68,8 @@ struct LiveTVView: View {
     @State private var showingSync = false
     @State private var playingMedia: PlayableMedia?
     @State private var showingSettings = false
+    /// Corner AVPlayer preview while browsing (iOS/macOS, Wi‑Fi only).
+    @State private var previewMedia: PlayableMedia?
     /// Shared list + guide EPG cache — survives list↔guide toggles and category
     /// switches (Build 19). SwiftData remains source of truth.
     @State private var epgCache = LiveTVSectionEPGCache()
@@ -104,8 +106,65 @@ struct LiveTVView: View {
     @ViewBuilder
     private func detail(for section: LiveTVSection) -> some View {
         let token = section.id
+        #if os(macOS)
+            // Same in-flow setup as tvOS: preview column on the leading edge,
+            // guide/list shrink beside it so nothing is covered. Width tracks
+            // the window/pane size.
+            GeometryReader { geo in
+                let screenWidth = NSScreen.main?.frame.width ?? geo.size.width
+                let previewWidth = LiveTVMiniPreview.preferredWidth(
+                    screenWidth: screenWidth,
+                    paneWidth: geo.size.width
+                )
+                HStack(alignment: .top, spacing: 16) {
+                    if let previewMedia {
+                        VStack(spacing: 0) {
+                            LiveTVMiniPreview(
+                                media: previewMedia,
+                                onExpand: { expandPreview() },
+                                onClose: { self.previewMedia = nil },
+                                width: previewWidth
+                            )
+                            .padding(.top, 12)
+                            .padding(.leading, 12)
+                            Spacer(minLength: 0)
+                        }
+                        .frame(width: previewWidth + 12)
+                        .transition(.opacity)
+                    }
+
+                    detailBrowseStack(for: section, sectionToken: token)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+            .animation(.easeOut(duration: 0.15), value: previewMedia?.id)
+        #else
+            detailBrowseStack(for: section, sectionToken: token)
+            #if os(iOS)
+                // Floating overlay on phone/iPad — in-flow would steal too much
+                // horizontal space from the guide.
+                .overlay(alignment: .topLeading) {
+                    if let previewMedia {
+                        LiveTVMiniPreview(
+                            media: previewMedia,
+                            onExpand: { expandPreview() },
+                            onClose: { self.previewMedia = nil }
+                        )
+                        .padding(.leading, 16)
+                        .padding(.top, 12)
+                        .transition(.opacity)
+                    }
+                }
+                .animation(.easeOut(duration: 0.15), value: previewMedia?.id)
+            #endif
+        #endif
+    }
+
+    /// List + guide ZStack shared by every platform's detail layout.
+    @ViewBuilder
+    private func detailBrowseStack(for section: LiveTVSection, sectionToken: String) -> some View {
         ZStack {
-            channelList(for: section, sectionToken: token)
+            channelList(for: section, sectionToken: sectionToken)
                 .opacity(layoutMode == .list ? 1 : 0)
                 .allowsHitTesting(layoutMode == .list)
                 .accessibilityHidden(layoutMode != .list)
@@ -115,18 +174,18 @@ struct LiveTVView: View {
                 playlistPrefix: playlistPrefix,
                 playlist: activePlaylist,
                 sort: contentSort,
-                sectionToken: token,
+                sectionToken: sectionToken,
                 epgCache: epgCache
             ) { stream in
-                playChannel(stream)
+                handleChannelSelection(stream)
             }
             .opacity(layoutMode == .guide ? 1 : 0)
             .allowsHitTesting(layoutMode == .guide)
             .accessibilityHidden(layoutMode != .guide)
         }
         .id(contentSort.rawValue)
-        .onAppear { epgCache.activate(section: token) }
-        .onChange(of: token) { _, newToken in
+        .onAppear { epgCache.activate(section: sectionToken) }
+        .onChange(of: sectionToken) { _, newToken in
             epgCache.activate(section: newToken)
         }
     }
@@ -142,7 +201,7 @@ struct LiveTVView: View {
                 sectionToken: sectionToken,
                 epgCache: epgCache
             ) { stream in
-                playChannel(stream)
+                handleChannelSelection(stream)
             }
             .frame(maxWidth: .infinity)
         #else
@@ -154,7 +213,7 @@ struct LiveTVView: View {
                 sectionToken: sectionToken,
                 epgCache: epgCache
             ) { stream in
-                playChannel(stream)
+                handleChannelSelection(stream)
             }
         #endif
     }
@@ -235,6 +294,12 @@ struct LiveTVView: View {
             #if os(iOS) || os(tvOS)
             .fullScreenCover(item: $playingMedia) { media in
                 FullScreenPlayerView(media: media)
+                    .onAppear { previewMedia = nil }
+            }
+            #endif
+            #if !os(tvOS)
+            .onChange(of: playingMedia?.id) { _, newID in
+                if newID != nil { previewMedia = nil }
             }
             #endif
         }
@@ -309,10 +374,13 @@ struct LiveTVView: View {
                 displayedSection: displayed,
                 layoutModeRaw: $layoutModeRaw,
                 contentSort: contentSort,
-                onPlay: { playChannel($0) },
+                onPlay: { handleChannelSelection($0) },
                 playlistPrefix: playlistPrefix,
                 playlist: activePlaylist,
-                epgCache: epgCache
+                epgCache: epgCache,
+                previewMedia: previewMedia,
+                onExpandPreview: { expandPreview() },
+                onClosePreview: { previewMedia = nil }
             )
         }
     #endif
@@ -388,6 +456,46 @@ struct LiveTVView: View {
             : sections.first
     }
 
+    private func handleChannelSelection(_ stream: LiveStream) {
+        // Wi‑Fi corner preview: select a channel to audition it without leaving
+        // browse. Cellular, deferred Stalker/Stremio URLs, and ExternalPlayback
+        // skip the float and go straight to fullscreen.
+        guard let playlist = activePlaylist,
+              let media = PlayableMedia.from(stream: stream, playlist: playlist) else { return }
+        let needsResolve = StalkerLink.isPlaceholder(media.url)
+            || media.url.absoluteString.hasPrefix("stremio://")
+        if !needsResolve,
+           NetworkMonitor.shared.shouldProceedWithHeavyNetworkWork(),
+           ExternalPlayback.preferred == nil
+        {
+            if let section = selectedSection {
+                LiveChannelNavigator.activeSurfScope = section.scope
+            } else {
+                LiveChannelNavigator.activeSurfScope = nil
+            }
+            // Selecting the same channel again while previewing expands it.
+            if previewMedia?.contentRef == media.contentRef {
+                expandPreview()
+                return
+            }
+            previewMedia = media
+            return
+        }
+        playChannel(stream)
+    }
+
+    private func expandPreview() {
+        guard let previewMedia else { return }
+        let media = previewMedia
+        self.previewMedia = nil
+        if ExternalPlayback.open(media) { return }
+        #if os(macOS)
+            openWindow(id: "player", value: media)
+        #else
+            playingMedia = media
+        #endif
+    }
+
     private func playChannel(_ stream: LiveStream) {
         guard let playlist = activePlaylist,
               let media = PlayableMedia.from(stream: stream, playlist: playlist) else { return }
@@ -398,6 +506,7 @@ struct LiveTVView: View {
         } else {
             LiveChannelNavigator.activeSurfScope = nil
         }
+        previewMedia = nil
         if ExternalPlayback.open(media) { return }
         #if os(macOS)
             openWindow(id: "player", value: media)

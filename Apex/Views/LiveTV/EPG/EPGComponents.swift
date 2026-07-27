@@ -69,6 +69,42 @@ struct EPGMetrics {
             )
         #endif
     }
+
+    /// Denser metrics for the in-player Guide overlay — enough room for a
+    /// handful of channel rows without covering the whole video.
+    static var playerOverlay: EPGMetrics {
+        #if os(tvOS)
+            EPGMetrics(
+                pointsPerMinute: 5,
+                rowHeight: 72,
+                rowSpacing: 8,
+                channelColumnWidth: 220,
+                headerHeight: 44,
+                blockCornerRadius: 12,
+                blockInset: 12
+            )
+        #elseif os(macOS)
+            EPGMetrics(
+                pointsPerMinute: 3.2,
+                rowHeight: 44,
+                rowSpacing: 3,
+                channelColumnWidth: 160,
+                headerHeight: 28,
+                blockCornerRadius: 6,
+                blockInset: 8
+            )
+        #else
+            EPGMetrics(
+                pointsPerMinute: 2.8,
+                rowHeight: 52,
+                rowSpacing: 3,
+                channelColumnWidth: 110,
+                headerHeight: 28,
+                blockCornerRadius: 7,
+                blockInset: 8
+            )
+        #endif
+    }
 }
 
 // MARK: - Time ruler

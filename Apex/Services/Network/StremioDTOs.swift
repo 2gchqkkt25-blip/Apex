@@ -11,7 +11,7 @@ import Foundation
 // MARK: - Manifest
 
 /// A manifest `resources` entry — either a plain string (`"stream"`) or an object
-/// with per-resource type/idPrefix filters (Torrentio, Cinemeta stream, etc.).
+/// with per-resource type/idPrefix filters (object-style resources, Cinemeta, etc.).
 enum StremioResource: Decodable, Sendable {
     case simple(String)
     case defined(StremioResourceDef)

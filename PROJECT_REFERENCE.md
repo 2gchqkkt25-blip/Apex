@@ -22,7 +22,8 @@
 
 - Browse & stream **Live TV**, **Movies**, and **Series**
 - Content from **Xtream Codes**, **M3U/M3U8 playlists**, **Stalker portals**, or **Stremio addons**
-- **EPG guide** with full time-grid view
+- **EPG guide** with full time-grid view — plus **in-player Guide** while watching live TV
+- **Live TV mini preview** while browsing (Wi‑Fi)
 - **TMDB/OMDb metadata** — posters, ratings, cast, descriptions
 - **Automatic subtitles** — Wyzie Subs (SRT overlay for movies + series)
 - **3 playback engines** — KSPlayer (default), VLCKit, AVPlayer (auto-fallback)
@@ -122,7 +123,7 @@ Without these keys, the app works but metadata is limited to what the IPTV provi
 | 55 | **Playlist sync: branded UI + unified EPG** | ✅ **Done (Jul 7 late)** — Apex logo-gradient sync screen; content + TV guide in one flow; bundled EPG mode (US feeds, ~88% early stop); **% progress** on TV Guide step. See `EPG.md` § Playlist sync. |
 | 56 | **EPG: instant channel cards after sync** | ✅ **Done (Jul 7 late)** — `EPGBrowseLoader` skips live API when store already has rows (was adding 3+ min delay). `forceGuideRefresh()` on guide step complete. |
 | 57 | **Home tab first-launch performance** | ✅ **Done (Jul 7 late)** — library-first heroes, playlist-only sync wait, deferred indexer (20s iOS) + EPG (90s iOS). See § Home Launch Performance below. |
-| 58 | **Stremio manifest URL parsing** | ✅ **Done (Jul 7 late)** — decode object-style `resources` (Torrentio), optional catalog `name`, URL normalizer, MAC-address validation bug fixed on login form. |
+| 58 | **Stremio manifest URL parsing** | ✅ **Done (Jul 7 late)** — decode object-style `resources`, optional catalog `name`, URL normalizer, MAC-address validation bug fixed on login form. |
 | 59 | **Build 19 — tvOS EPG stability & performance** | ✅ **Done (Jul 8)** — crashes fixed, guide-load speed matched list view, category caching persists, inline quick EPG sync. See § Build 19 below. |
 | 60 | **Sync screen — remove playlist/server name** | ✅ **Done (Jul 8)** — `playlist.name` removed from branded sync header on iOS + tvOS. Shows "Apex" + status only. |
 | 61 | **Default Live TV view setting** | ✅ **Done (Jul 8)** — Settings → TV Guide → Default View picker (List / Guide). Uses existing `@AppStorage` so it takes effect immediately. |
@@ -162,6 +163,8 @@ Without these keys, the app works but metadata is limited to what the IPTV provi
 | 95 | **EPG guide — instant cache on category switch** | ✅ **Done (Jul 16)** — `epgCache.activate(section:)` runs on `.onAppear` (synchronous first frame) so cached programme data paints immediately. |
 | 96 | **Build 45 — playback, browse badges/counts, subtitles, and Stalker completion** | ✅ **Done (Jul 20)** — Added Start from Beginning for resumed movies and episode context menus; playlist-scoped Movies/Series/channel totals; one-tap iOS category reorder; Stalker page-1 foreground import plus pages 2–20 background fill for all VOD/series categories. Corrected favorite hearts across every movie/series poster variant (with non-overlapping top-right ratings) and inline Live TV hearts. Refined Bottom subtitles to clear safe areas and visible controls per platform while Center remains geometrically fixed. |
 | 97 | **Build 46 — final playback, subtitle, and tvOS performance hardening** | ✅ **Done (Jul 20)** — Restored end-of-playback signaling for KSPlayer, VLCKit, and AVPlayer so Next Episode and Auto Play Next work consistently. Fixed Skip Intro/Recap looping, kept the macOS Next Episode button reachable when pointer movement reveals controls, and removed duplicate macOS subtitles using engine-reported embedded-track availability. Replaced unbounded browse-count queries and reduced Stalker background-save churn for responsive large Xtream/Stalker libraries on tvOS. Hardened the Stalker resolution timeout, aligned the app and Top Shelf build number, and corrected the macOS Retina icon asset. |
+| 98 | **In-player Live TV Guide** | ✅ **Done (Jul 27)** — Compact multi-channel EPG over video while watching live TV (`PlayerEPGGuidePanel`). tvOS Guide tab + Up-from-play focus; iOS/macOS expandable Guide in the track pill. Channel/programme tap switches without leaving playback. |
+| 99 | **Live TV mini preview** | ✅ **Done (Jul 27)** — Wi‑Fi AVPlayer preview while browsing Live TV (`LiveTVMiniPreview`). tvOS/macOS: in-flow leading column, display-/window-scaled width. iOS: top-leading float. Expand to fullscreen; retarget on new channel. Skips cellular / Stalker / Stremio / external player. |
 
 ---
 
@@ -885,7 +888,7 @@ Settings → Appearance (between Premium and Profiles)
 - Full source type: client, DTOs, sync pipeline, stream resolver
 - Login UI (iOS + tvOS), PlaylistDetail fields
 - Playback integration via `stremio://` placeholder resolution
-- **Manifest parsing (Jul 7 late):** `StremioResource` enum accepts string **or** object `resources` entries (Torrentio-style). Catalog `name` defaults to `id` when omitted. `StremioURL.normalize()` handles `…/manifest.json`, configured paths (`qualityfilter=…`), and `stremio+https://` install links. Stored playlist base URL is normalized so sync doesn't double-append `manifest.json`. Login form no longer required a Stalker MAC address when Stremio was selected. Tests: `ApexTests/Services/StremioTests.swift`.
+- **Manifest parsing (Jul 7 late):** `StremioResource` enum accepts string **or** object `resources` entries. Catalog `name` defaults to `id` when omitted. `StremioURL.normalize()` handles `…/manifest.json`, configured paths (`qualityfilter=…`), and `stremio+https://` install links. Stored playlist base URL is normalized so sync doesn't double-append `manifest.json`. Login form no longer required a Stalker MAC address when Stremio was selected. Tests: `ApexTests/Services/StremioTests.swift`.
 
 ### Theme System
 - 5 themes with semantic color tokens (accent, background, surface, text)
@@ -1612,7 +1615,14 @@ See **What's Been Built → iOS Device — Large Library Fix** above for full de
 
 ## Roadmap — Planned Features
 
-> Features prioritized for future builds. Difficulty estimates assume the current architecture. None started yet.
+> Features prioritized for future builds. Difficulty estimates assume the current architecture.
+
+### Completed (unreleased — Jul 27, 2026)
+
+| Feature | Notes |
+|---------|-------|
+| **In-player EPG mini-guide overlay** | Shipped. Guide over live video without leaving playback. tvOS: Guide tab on controls (Up from play focuses it; surfing only when controls hidden). iOS/macOS: Guide button in track pill. Shared `PlayerEPGGuidePanel` timeline (same idea as main `EPGGuideView`). See `CHANGELOG.md` Unreleased. |
+| **Live TV mini preview** | Shipped on **iOS, macOS, and tvOS**. Wi‑Fi-only `LiveTVMiniPreview` (`AVPlayerCoordinator`). **tvOS/macOS:** in-flow leading column beside guide/list; width ~28% of screen/pane (clamped). **iOS:** floating top-leading overlay. Tap/Select → fullscreen; same channel again on tvOS also expands; other channel retargets. Cellular / Stalker / Stremio / external player still go fullscreen. |
 
 ### Priority 1 — High Impact (next up)
 
@@ -1634,13 +1644,11 @@ See **What's Been Built → iOS Device — Large Library Fix** above for full de
 | Feature | Difficulty | Description |
 |---------|-----------|-------------|
 | **EPG external feed gap-fill** | Low (~1 day) | After provider xmltv.php sync, check which channels got 0 programmes. Fill those gaps from epgshare01 feeds. Keeps speed while improving accuracy for providers with incomplete guides. |
-| **In-player EPG mini-guide overlay** | Medium (~2-3 days) | Compact programme guide overlaid on the video while watching a live channel, without exiting playback. Multi-channel scrollable timeline reusing existing EPG components (`EPGComponents`, `EPGGridBuilder`, `LiveTVSectionEPGCache`). Tapping a programme switches channel via `LiveChannelNavigator`. Added as a "Guide" tab pill in the tvOS player overlay alongside Episodes / Recent / Info, and as an expandable panel on iOS/macOS. Stream continues playing behind the overlay. See [Issue #1](https://github.com/2gchqkkt25-blip/Apex/issues/1). |
-| **Live TV mini preview** | Medium (~2-3 days) | Small floating video window in the corner while browsing Live TV channels. Tap a channel → preview plays in the corner while you keep scrolling. Tap preview to go fullscreen or pick another channel to switch it. Lightweight AVPlayer overlay, not the full engine stack. Wi-Fi only (uses a concurrent connection). |
 | **Stream quality picker for Xtream** | Low (~1 day) | Let user choose stream format (m3u8/ts/original) per playlist or globally. Some providers serve better quality in one format. |
 | **Multi-audio track selection** | Low (~1 day) | Surface audio track picker in player controls (some streams have English + Spanish + commentary tracks). |
 | **Parental PIN on app launch** | Low (~half day) | Optional PIN/Face ID gate on app open for households with shared Apple TV. |
 | **Watch history sync to Trakt** | Medium (~2 days) | Auto-scrobble live TV and VOD to Trakt. Already has Trakt client — needs the watch-event hook. |
-| **Picture-in-Picture improvements** | Low (~1 day) | PiP for live TV while browsing the guide. Currently works for VOD. |
+| **Picture-in-Picture improvements** | Low (~1 day) | System PiP for live TV (and polish for VOD). Browse-while-watching live is already covered by **Live TV mini preview** above. |
 
 ### Priority 4 — Platform Polish
 

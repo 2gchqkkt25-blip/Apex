@@ -102,14 +102,14 @@ struct KSPlayerEngineView: View {
     @State private var isPipActive = false
     @State var hideTask: Task<Void, Never>?
     @State private var hoverHideTask: Task<Void, Never>?
+    /// While an overlay panel (Guide / episodes / info) is open the controls
+    /// must not auto-hide out from under the viewer.
+    @State private var isPanelOpen = false
 
     #if os(tvOS)
         /// Republishes KSPlayer state to the shared overlay (`isPlaying`,
         /// `videoInfo`) and bridges its track / seek API.
         @StateObject var engine = KSTVPlaybackEngine()
-        /// While an overlay panel (episodes / info) is open the controls must
-        /// not auto-hide out from under the viewer.
-        @State private var isPanelOpen = false
         /// Bumped to ask the overlay to close its open panel (Menu/back press).
         @State private var panelCloseToken = 0
         /// The channel-switching state below is `internal` (not `private`) so the
@@ -377,16 +377,6 @@ struct KSPlayerEngineView: View {
                 closePlayer()
             }
         }
-
-        /// Keep the controls pinned open while an overlay panel is showing.
-        private func setPanelOpen(_ open: Bool) {
-            isPanelOpen = open
-            if open {
-                hideTask?.cancel()
-            } else {
-                resetHideTimer()
-            }
-        }
     #endif
 
     // MARK: - iOS / macOS body (own controls)
@@ -522,7 +512,9 @@ struct KSPlayerEngineView: View {
                 onTogglePlay: { togglePlay() },
                 onResetHideTimer: { resetHideTimer() },
                 onScheduleHide: { scheduleHide() },
-                onSwitchChannel: onSwitchChannel
+                onSwitchChannel: onSwitchChannel,
+                onSelectMedia: onSelectMedia,
+                onPanelOpenChange: { setPanelOpen($0) }
             )
         }
 
@@ -600,7 +592,7 @@ struct KSPlayerEngineView: View {
         #if os(tvOS)
             guard engine.isPlaying, !isPanelOpen else { return }
         #else
-            guard isPlaying else { return }
+            guard isPlaying, !isPanelOpen else { return }
         #endif
         hideTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: UInt64(autoHideInterval * 1_000_000_000))
@@ -612,6 +604,16 @@ struct KSPlayerEngineView: View {
             withAnimation(.easeInOut(duration: 0.2)) {
                 isControlsVisible = false
             }
+        }
+    }
+
+    /// Keep the controls pinned open while an overlay panel (Guide) is showing.
+    private func setPanelOpen(_ open: Bool) {
+        isPanelOpen = open
+        if open {
+            hideTask?.cancel()
+        } else {
+            resetHideTimer()
         }
     }
 

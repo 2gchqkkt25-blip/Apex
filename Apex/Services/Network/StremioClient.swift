@@ -193,8 +193,8 @@ final class StremioClient {
 
     // MARK: - Streams
 
-    /// Fetches playable streams for an item.  Filters out torrent-only streams
-    /// (infoHash without a URL) since those require a P2P backend.
+    /// Fetches playable streams for an item. Filters out entries that only
+    /// provide an infoHash (no HTTP URL) since those are not directly playable.
     func fetchStreams(baseURL: URL, type: String, id: String) async throws -> [StremioStream] {
         let url = baseURL.appendingPathComponent("stream/\(type)/\(id).json")
         let data = try await get(url)
@@ -204,8 +204,7 @@ final class StremioClient {
         } catch {
             throw StremioError.decodingError(error)
         }
-        // Only keep streams that have a direct URL — infoHash-only streams need
-        // a torrent backend, which we don't bundle.
+        // Only keep streams that have a direct HTTP URL.
         return response.streams.filter { $0.bestURL != nil }
     }
 

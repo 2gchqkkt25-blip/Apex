@@ -284,7 +284,9 @@ struct AVPlayerEngineView: View {
                 onTogglePlay: { togglePlay() },
                 onResetHideTimer: { resetHideTimer() },
                 onScheduleHide: { scheduleHide() },
-                onSwitchChannel: onSwitchChannel
+                onSwitchChannel: onSwitchChannel,
+                onSelectMedia: onSelectMedia,
+                onPanelOpenChange: { setPanelOpen($0) }
             )
         #endif
     }

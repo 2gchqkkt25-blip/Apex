@@ -4,6 +4,21 @@ All notable changes to Apex Stream Player.
 
 ---
 
+## Unreleased
+
+### Features
+
+- **In-player Live TV Guide** — While watching a live channel, open Guide from the player controls to browse a compact multi-channel EPG timeline over the video and switch channels without leaving playback.
+  - **tvOS:** Guide tab on the controls pill; **Up** from play focuses Guide (channel surfing only while controls are hidden). Timeline matches the main Live TV guide; focus moves through channel rows and programme cells.
+  - **iOS / macOS:** Guide button in the track pill expands a panel over the video. Tap a channel or programme to switch.
+  - Shared UI: `PlayerEPGGuidePanel` (same grid idea as `EPGGuideView`).
+- **Live TV mini preview** — On Wi‑Fi, selecting a channel in Live TV browse opens a live AVPlayer preview so you can keep browsing. Tap / Select the preview (or the same channel again on tvOS) for fullscreen; pick another channel to retarget it. Cellular, Stalker/Stremio, and external-player setups still open fullscreen directly.
+  - **tvOS / macOS:** In-flow column on the leading edge of the guide/list (guide shrinks beside it — nothing covered). Width scales with the display / window (~28%, clamped).
+  - **iOS:** Floating top-leading overlay so the phone guide keeps full width.
+  - Implementation: `LiveTVMiniPreview` + `AVPlayerCoordinator`.
+
+---
+
 ## Build 47 (1.2.0) — July 23, 2026
 
 ### Crash Fixes
@@ -205,7 +220,7 @@ All notable changes to Apex Stream Player.
 
 ### Stremio — Fully Working
 
-- **Auto-catalog for stream-only addons** — When you add a stream addon (AIOStreams, Torrentio), the app automatically fetches the Cinemeta catalog so you have movies/series to browse. Just paste your URL → sync → content appears in Movies/Series tabs.
+- **Auto-catalog for stream-only addons** — When you add a stream-only addon, the app automatically fetches the Cinemeta catalog so you have movies/series to browse. Just paste your URL → sync → content appears in Movies/Series tabs.
 - **Categories created properly** — Stremio content now shows in Movies/Series tabs (was invisible due to missing category assignment).
 - **ModelContext crash fixed** — Category creation no longer crashes with "illegal attempt to insert model in different context."
 - **Catalog capped to 100 items** — Sync finishes in ~10-15 seconds instead of minutes (was pulling 2000+ items per catalog).
@@ -231,8 +246,8 @@ All notable changes to Apex Stream Player.
 
 ### Stremio — Full Addon Support
 
-- **Sync hang fixed** — Stream-only addons (Torrentio, AIOStreams) no longer stall the sync. Added pagination guards (20-page cap, duplicate detection) and empty-catalog detection.
-- **Multi-addon stream resolution** — When playing content, ALL configured Stremio addons that support streams are queried concurrently. Browse from Cinemeta, stream from AIOStreams — just like the Stremio desktop app.
+- **Sync hang fixed** — Stream-only addons no longer stall the sync. Added pagination guards (20-page cap, duplicate detection) and empty-catalog detection.
+- **Multi-addon stream resolution** — When playing content, ALL configured Stremio addons that support streams are queried concurrently. Browse from Cinemeta, stream from any configured stream addon — just like the Stremio desktop app.
 - **Stream picker UI** — Shows all available streams ranked by quality (resolution, codec, HDR, file size) with source addon name. Pick manually or tap "Play Best Quality" for instant playback.
 - **Addon catalog browser** — Settings → Playlists → "Stremio Addons". Browse the official Stremio community addon collection, searchable and filterable (All / Catalogs / Streams). One-tap install adds any addon as a playlist.
 - **Auto-stream quality selection** — Scores streams by 4K/1080p/720p, HEVC/H.264, HDR, file size. Best stream selected automatically when only one is available or via the "Play Best" button.

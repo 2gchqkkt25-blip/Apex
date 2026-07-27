@@ -497,8 +497,10 @@ Shared entry point: **`EPGBrowseLoader`** (used by iOS/macOS Live TV, EPG grid, 
 | `XtreamDTOs.swift` / `XtreamEPGText` | Timestamp formats (unix, SQL, XMLTV compact) |
 | `EPGInserter.swift` | XMLTV file import — single parse, no timezone-detection pass, no shift (`alignLatestToNow` param retained but ignored) |
 | `EPGGuideView.swift` | Grid: logos first, programmes async |
-| `LiveTVView.swift` / `LiveTVTVComponents.swift` | Channel cards |
-| `TVChannelBrowserOverlay.swift` | tvOS in-player guide |
+| `LiveTVView.swift` / `LiveTVTVComponents.swift` | Channel cards; Live TV mini preview host (in-flow on tvOS/macOS) |
+| `LiveTVMiniPreview.swift` | Wi‑Fi browse preview (`AVPlayerCoordinator`); display-/pane-scaled width |
+| `PlayerEPGGuidePanel.swift` | In-player multi-channel Guide overlay (all platforms) |
+| `TVChannelBrowserOverlay.swift` | tvOS left-press in-player channel browser |
 
 ---
 
@@ -569,6 +571,7 @@ These apply to **view layer only** (`LiveTVView`, `EPGGuideView`, `ChannelsList`
 | Live TV list cards | tvOS | `EPGBrowseLoader` via `TVChannelsList` | ✅ `refreshGeneration` |
 | EPG grid | all | `EPGGuideView` → `EPGBrowseLoader` | ✅ `refreshGeneration` (merge) |
 | In-player channel browser | tvOS | Store first, then `EPGBrowseLoader` for gaps | ✅ `refreshGeneration` (Jul 7 pm) |
+| In-player Live TV Guide panel | all | `PlayerEPGGuidePanel` (store / browse loader) | ✅ Jul 27 — Guide tab (tvOS) / track-pill Guide (iOS/macOS) |
 | In-player controls caption | tvOS | `TVPlayerContent.epgListings` (store) | ✅ `refreshGeneration` (Jul 7 pm) |
 | Sync Now | all | `EPGSyncService` → `EPGSyncManager` | — |
 | Settings → TV Guide | iOS, iPad, macOS, tvOS | `EPGSettingsView` | — |

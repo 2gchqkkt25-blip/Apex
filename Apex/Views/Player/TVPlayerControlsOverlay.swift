@@ -67,7 +67,7 @@
         /// Decays `scrubStepLevel` back to zero after a pause in input.
         @State var scrubResetTask: Task<Void, Never>?
 
-        enum TabKind: Hashable { case episodes, recent, info }
+        enum TabKind: Hashable { case episodes, recent, guide, info }
         @State var openTab: TabKind?
         @FocusState var focus: TVPlayerFocus?
         @State private var epgSync = EPGSyncService.shared
@@ -97,11 +97,14 @@
                     if direction == .left || direction == .right { moveScrub(direction) }
                     return
                 }
-                // With the controls up, up/down still surf channels — but only
-                // for live TV and while no panel owns vertical navigation.
-                guard media.isLive, openTab == nil,
-                      direction == .up || direction == .down else { return }
-                onSwitchChannel(direction)
+                // Live TV: Up from transport opens the Guide panel directly so
+                // the viewer doesn't have to hunt for the tab pill. Channel
+                // surfing stays on the host tap-catcher when controls are hidden.
+                if media.isLive, openTab == nil, direction == .up,
+                   focus == .transport || focus == .scrubber || focus == nil
+                {
+                    toggle(tab: .guide)
+                }
             }
             // The host bumps `panelCloseToken` on a Menu/back press. Mid-scrub
             // that cancels the scrub; otherwise it closes an open panel.
@@ -163,6 +166,18 @@
                     focus: $focus,
                     onSelect: select(channel:),
                     onClose: closePanel
+                )
+                .transition(.opacity)
+            case .guide:
+                PlayerEPGGuidePanel(
+                    media: media,
+                    onSelect: { newMedia in
+                        withAnimation(.easeInOut(duration: 0.2)) { openTab = nil }
+                        onPanelOpenChange(false)
+                        focus = .transport
+                        onSelectMedia(newMedia)
+                    },
+                    focus: $focus
                 )
                 .transition(.opacity)
             case .info:
@@ -229,9 +244,13 @@
                 transportControls
 
                 HStack(spacing: 16) {
+                    // Own focus section so Left from transport reliably lands on
+                    // the Guide / Recent / Info pills.
                     tabButtons
+                        .focusSection()
                     Spacer(minLength: 0)
                     trailingControls
+                        .focusSection()
                 }
             }
             .focusSection()
@@ -241,9 +260,13 @@
 
         var tabKinds: [TabKind] {
             if isSeries { return [.episodes, .info] }
-            // The recents rail only earns a tab once there's somewhere to switch
-            // to — i.e. a channel beyond the one playing now.
-            if media.isLive, recentChannels.count > 1 { return [.recent, .info] }
+            if media.isLive {
+                var tabs: [TabKind] = [.guide, .info]
+                // The recents rail only earns a tab once there's somewhere to
+                // switch to — i.e. a channel beyond the one playing now.
+                if recentChannels.count > 1 { tabs.insert(.recent, at: 1) }
+                return tabs
+            }
             return [.info]
         }
 
@@ -261,6 +284,7 @@
             switch kind {
             case .episodes: "Episodes"
             case .recent: "Recent"
+            case .guide: "Guide"
             case .info: "Info"
             }
         }

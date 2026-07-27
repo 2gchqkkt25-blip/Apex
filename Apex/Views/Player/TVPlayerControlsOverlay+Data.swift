@@ -189,6 +189,11 @@
             case .recent:
                 onPanelOpenChange(true)
                 focus = .channel(liveStream?.id ?? recentChannels.first?.id ?? "")
+            case .guide:
+                onPanelOpenChange(true)
+                // Prefer the playing channel's row so focus lands in the timeline
+                // near what's currently airing.
+                focus = .guideChannel(liveStream?.id ?? "")
             case .info:
                 onPanelOpenChange(true)
                 focus = infoPrimaryAction != nil ? .infoPrimary : .panelClose

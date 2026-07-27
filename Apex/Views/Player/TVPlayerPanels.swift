@@ -32,6 +32,8 @@
         case panelClose
         case episode(String)
         case channel(String)
+        case guideChannel(String)
+        case guideProgram(String)
         case infoPrimary
         case infoSecondary
     }

@@ -45,26 +45,62 @@ enum LiveChannelNavigator {
         in context: ModelContext
     ) -> PlayableMedia? {
         guard case let .live(id) = media.contentRef else { return nil }
+        let streams = fetchSurfChannels(for: media, sort: sort, scope: scope, in: context)
+        guard streams.count > 1,
+              let index = streams.firstIndex(where: { $0.id == id }) else { return nil }
+
+        let target = streams[(index + offset + streams.count) % streams.count]
+        guard let playlist = playlist(for: target, in: context) else { return nil }
+        return PlayableMedia.from(stream: target, playlist: playlist)
+    }
+
+    /// Channels available for the in-player Guide panel. Same scope/sort as
+    /// `adjacentMedia`, but capped and centred on the playing channel so the
+    /// overlay stays viewport-sized.
+    static func surfChannels(
+        for media: PlayableMedia,
+        sort: ContentSortOption,
+        scope: LiveChannelScope? = nil,
+        limit: Int = 40,
+        in context: ModelContext
+    ) -> [LiveStream] {
+        guard case let .live(id) = media.contentRef else { return [] }
+        let streams = fetchSurfChannels(for: media, sort: sort, scope: scope, in: context)
+        guard let index = streams.firstIndex(where: { $0.id == id }) else {
+            return Array(streams.prefix(limit))
+        }
+        let half = limit / 2
+        let start = max(0, min(index - half, streams.count - min(limit, streams.count)))
+        let end = min(streams.count, start + limit)
+        return Array(streams[start ..< end])
+    }
+
+    /// Full surf list for the active scope (uncapped beyond fetch limits). Used
+    /// by channel up/down; the Guide windows this further via `surfChannels`.
+    private static func fetchSurfChannels(
+        for media: PlayableMedia,
+        sort: ContentSortOption,
+        scope: LiveChannelScope?,
+        in context: ModelContext
+    ) -> [LiveStream] {
+        guard case let .live(id) = media.contentRef else { return [] }
         var currentDescriptor = FetchDescriptor<LiveStream>(predicate: #Predicate { $0.id == id })
         currentDescriptor.fetchLimit = 1
-        guard let current = try? context.fetch(currentDescriptor).first else { return nil }
+        guard let current = try? context.fetch(currentDescriptor).first else { return [] }
 
         // Extract the owning playlist's UUID prefix from the stream id
         // (all stream ids are formatted "<playlistUUID>-live-<streamId>").
         let playlistPrefix = String(current.id.prefix(36)) + "-"
 
-        let streams: [LiveStream]
-
         if let scope, case .all = scope {
-            // Surf within all channels of the same playlist
             var descriptor = FetchDescriptor<LiveStream>(
                 predicate: #Predicate { $0.isHidden == false && $0.id.starts(with: playlistPrefix) },
                 sortBy: sort.liveStreamDescriptors
             )
             descriptor.fetchLimit = 200
-            streams = (try? context.fetch(descriptor)) ?? []
-        } else if let scope, case .favorites = scope {
-            // Surf within favorites of the same playlist
+            return (try? context.fetch(descriptor)) ?? []
+        }
+        if let scope, case .favorites = scope {
             let descriptor = FetchDescriptor<LiveStream>(
                 predicate: #Predicate { $0.isFavorite && $0.isHidden == false && $0.id.starts(with: playlistPrefix) },
                 sortBy: [
@@ -73,30 +109,23 @@ enum LiveChannelNavigator {
                     SortDescriptor(\LiveStream.name)
                 ]
             )
-            streams = (try? context.fetch(descriptor)) ?? []
-        } else if let scope, case .recentlyWatched = scope {
-            // Surf within recently watched of the same playlist
+            return (try? context.fetch(descriptor)) ?? []
+        }
+        if let scope, case .recentlyWatched = scope {
             var descriptor = FetchDescriptor<LiveStream>(
                 predicate: #Predicate { $0.lastWatchedDate != nil && $0.isHidden == false && $0.id.starts(with: playlistPrefix) },
                 sortBy: [SortDescriptor(\LiveStream.lastWatchedDate, order: .reverse)]
             )
             descriptor.fetchLimit = 50
-            streams = (try? context.fetch(descriptor)) ?? []
-        } else {
-            // Default: surf within the same category (already playlist-scoped via categoryId prefix)
-            guard let categoryId = current.categoryId else { return nil }
-            let descriptor = FetchDescriptor<LiveStream>(
-                predicate: #Predicate { $0.categoryId == categoryId },
-                sortBy: sort.liveStreamDescriptors
-            )
-            streams = (try? context.fetch(descriptor)) ?? []
+            return (try? context.fetch(descriptor)) ?? []
         }
 
-        guard streams.count > 1,
-              let index = streams.firstIndex(where: { $0.id == current.id }) else { return nil }
-
-        let target = streams[(index + offset + streams.count) % streams.count]
-        guard let playlist = playlist(for: target, in: context) else { return nil }
-        return PlayableMedia.from(stream: target, playlist: playlist)
+        // Default: surf within the same category (already playlist-scoped via categoryId prefix)
+        guard let categoryId = current.categoryId else { return [] }
+        let descriptor = FetchDescriptor<LiveStream>(
+            predicate: #Predicate { $0.categoryId == categoryId },
+            sortBy: sort.liveStreamDescriptors
+        )
+        return (try? context.fetch(descriptor)) ?? []
     }
 }

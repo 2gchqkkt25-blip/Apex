@@ -24,11 +24,16 @@ import SwiftUI
         var onScheduleHide: () -> Void
         /// Channel switching callback for live TV (iOS/macOS). Positive = next, negative = previous.
         var onSwitchChannel: ((Int) -> Void)?
+        /// Switch to an arbitrary live channel from the in-player Guide.
+        var onSelectMedia: ((PlayableMedia) -> Void)?
+        /// Keeps the host from auto-hiding controls while the Guide is open.
+        var onPanelOpenChange: ((Bool) -> Void)?
 
         @Environment(\.modelContext) private var modelContext
         /// Mirrors the backing model's favorite flag; refreshed when the media
         /// changes and updated locally on toggle so the heart re-renders.
         @State private var isFavorite = false
+        @State private var isGuideOpen = false
 
         var body: some View {
             ZStack {
@@ -37,13 +42,30 @@ import SwiftUI
                 VStack(spacing: 0) {
                     topBar
                     Spacer(minLength: 0)
-                    centerTransport
-                    Spacer(minLength: 0)
+                    if !isGuideOpen {
+                        centerTransport
+                        Spacer(minLength: 0)
+                    }
+                    if isGuideOpen, media.isLive {
+                        PlayerEPGGuidePanel(
+                            media: media,
+                            onSelect: { newMedia in
+                                onSelectMedia?(newMedia)
+                                closeGuide()
+                            },
+                            onClose: closeGuide
+                        )
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 12)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
                     bottomControls
                 }
             }
+            .animation(.easeInOut(duration: 0.22), value: isGuideOpen)
             .task(id: media.id) {
                 isFavorite = PlayerFavorites.isFavorite(for: media.contentRef, in: modelContext)
+                if isGuideOpen { closeGuide() }
             }
         }
 
@@ -210,6 +232,7 @@ import SwiftUI
 
         private var secondaryControls: some View {
             HStack(spacing: 4) {
+                if media.isLive { guideButton }
                 if !coordinator.textTrackOptions.isEmpty { subtitleMenu }
                 if coordinator.audioTrackOptions.count > 1 { audioTrackMenu }
                 if !media.isLive { playbackRateMenu }
@@ -218,6 +241,32 @@ import SwiftUI
             }
             .padding(.horizontal, 4)
             .glassEffectCompat(.regularInteractive, in: Capsule())
+        }
+
+        private var guideButton: some View {
+            Button {
+                toggleGuide()
+            } label: {
+                pillGlyph("list.bullet.rectangle", dimmed: !isGuideOpen)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(isGuideOpen ? "Close guide" : "Guide")
+        }
+
+        private func toggleGuide() {
+            if isGuideOpen {
+                closeGuide()
+            } else {
+                isGuideOpen = true
+                onPanelOpenChange?(true)
+                onResetHideTimer()
+            }
+        }
+
+        private func closeGuide() {
+            isGuideOpen = false
+            onPanelOpenChange?(false)
+            onScheduleHide()
         }
 
         private var favoriteButton: some View {

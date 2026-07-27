@@ -274,6 +274,11 @@
         let playlist: Playlist?
         @Bindable var epgCache: LiveTVSectionEPGCache
 
+        /// Corner floating preview over the channel/guide pane (top-leading).
+        var previewMedia: PlayableMedia?
+        var onExpandPreview: (() -> Void)?
+        var onClosePreview: (() -> Void)?
+
         private var layoutMode: LiveTVLayoutMode {
             LiveTVLayoutMode(rawValue: layoutModeRaw) ?? .list
         }
@@ -291,41 +296,68 @@
                 )
                 content
             }
+            .animation(.easeOut(duration: 0.15), value: previewMedia?.id)
         }
 
         @ViewBuilder
         private var content: some View {
             if let section = displayedSection {
                 let token = section.id
-                ZStack {
-                    TVChannelsList(
-                        scope: section.scope,
-                        playlistPrefix: playlistPrefix,
-                        playlist: playlist,
-                        sort: contentSort,
-                        sectionToken: token,
-                        epgCache: epgCache,
-                        onPlay: onPlay
+                GeometryReader { geo in
+                    let previewWidth = LiveTVMiniPreview.preferredWidth(
+                        screenWidth: UIScreen.main.bounds.width,
+                        paneWidth: geo.size.width
                     )
-                    .opacity(layoutMode == .list ? 1 : 0)
-                    .allowsHitTesting(layoutMode == .list)
-                    .accessibilityHidden(layoutMode != .list)
+                    HStack(alignment: .top, spacing: 20) {
+                        // In-flow (not overlay): guide/list shrink beside the
+                        // preview so channel names and programmes stay readable.
+                        if let previewMedia {
+                            VStack(spacing: 0) {
+                                LiveTVMiniPreview(
+                                    media: previewMedia,
+                                    onExpand: { onExpandPreview?() },
+                                    onClose: { onClosePreview?() },
+                                    width: previewWidth
+                                )
+                                .padding(.top, 20)
+                                .padding(.leading, 8)
+                                Spacer(minLength: 0)
+                            }
+                            .frame(width: previewWidth + 8)
+                            .transition(.opacity)
+                        }
 
-                    EPGGuideView(
-                        scope: section.scope,
-                        playlistPrefix: playlistPrefix,
-                        playlist: playlist,
-                        sort: contentSort,
-                        sectionToken: token,
-                        epgCache: epgCache,
-                        onPlay: onPlay
-                    )
-                    .opacity(layoutMode == .guide ? 1 : 0)
-                    .allowsHitTesting(layoutMode == .guide)
-                    .accessibilityHidden(layoutMode != .guide)
+                        ZStack {
+                            TVChannelsList(
+                                scope: section.scope,
+                                playlistPrefix: playlistPrefix,
+                                playlist: playlist,
+                                sort: contentSort,
+                                sectionToken: token,
+                                epgCache: epgCache,
+                                onPlay: onPlay
+                            )
+                            .opacity(layoutMode == .list ? 1 : 0)
+                            .allowsHitTesting(layoutMode == .list)
+                            .accessibilityHidden(layoutMode != .list)
+
+                            EPGGuideView(
+                                scope: section.scope,
+                                playlistPrefix: playlistPrefix,
+                                playlist: playlist,
+                                sort: contentSort,
+                                sectionToken: token,
+                                epgCache: epgCache,
+                                onPlay: onPlay
+                            )
+                            .opacity(layoutMode == .guide ? 1 : 0)
+                            .allowsHitTesting(layoutMode == .guide)
+                            .accessibilityHidden(layoutMode != .guide)
+                        }
+                        .id(contentSort.rawValue)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
                 }
-                .id(contentSort.rawValue)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .onAppear { epgCache.activate(section: token) }
                 .onChange(of: token) { _, newToken in
                     epgCache.activate(section: newToken)

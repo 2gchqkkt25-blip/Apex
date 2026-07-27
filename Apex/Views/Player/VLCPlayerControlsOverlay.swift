@@ -2,6 +2,7 @@ import SwiftData
 import SwiftUI
 import VLCKitSPM
 
+#if !os(tvOS)
 /// Native iOS-style controls overlay for the VLCKit engine.
 ///
 /// Modeled on the system video player (Apple TV app): a center transport
@@ -9,6 +10,7 @@ import VLCKitSPM
 /// title block paired with a grouped glass pill of track controls, and a
 /// clean full-width scrubber. Extracted from `VLCPlayerEngineView` to keep
 /// each type under the SwiftLint `type_body_length` threshold.
+/// tvOS uses the shared `TVPlayerControlsOverlay` instead.
 struct VLCPlayerControlsOverlay: View {
     @ObservedObject var coordinator: VLCPlayerCoordinator
     let media: PlayableMedia
@@ -23,11 +25,16 @@ struct VLCPlayerControlsOverlay: View {
     var onScheduleHide: () -> Void
     /// Channel switching callback for live TV (iOS/macOS). Positive = next, negative = previous.
     var onSwitchChannel: ((Int) -> Void)?
+    /// Switch to an arbitrary live channel from the in-player Guide.
+    var onSelectMedia: ((PlayableMedia) -> Void)?
+    /// Keeps the host from auto-hiding controls while the Guide is open.
+    var onPanelOpenChange: ((Bool) -> Void)?
 
     @Environment(\.modelContext) private var modelContext
     /// Mirrors the backing model's favorite flag; refreshed when the media
     /// changes and updated locally on toggle so the heart re-renders.
     @State private var isFavorite = false
+    @State private var isGuideOpen = false
 
     var body: some View {
         ZStack {
@@ -36,13 +43,30 @@ struct VLCPlayerControlsOverlay: View {
             VStack(spacing: 0) {
                 topBar
                 Spacer(minLength: 0)
-                centerTransport
-                Spacer(minLength: 0)
+                if !isGuideOpen {
+                    centerTransport
+                    Spacer(minLength: 0)
+                }
+                if isGuideOpen, media.isLive {
+                    PlayerEPGGuidePanel(
+                        media: media,
+                        onSelect: { newMedia in
+                            onSelectMedia?(newMedia)
+                            closeGuide()
+                        },
+                        onClose: closeGuide
+                    )
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 12)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
                 bottomControls
             }
         }
+        .animation(.easeInOut(duration: 0.22), value: isGuideOpen)
         .task(id: media.id) {
             isFavorite = PlayerFavorites.isFavorite(for: media.contentRef, in: modelContext)
+            if isGuideOpen { closeGuide() }
         }
     }
 
@@ -217,6 +241,7 @@ struct VLCPlayerControlsOverlay: View {
         let hasRate = !media.isLive
 
         return HStack(spacing: 4) {
+            if media.isLive { guideButton }
             if hasText { subtitleMenu }
             if hasAudio { audioTrackMenu }
             if hasRate { playbackRateMenu }
@@ -224,6 +249,32 @@ struct VLCPlayerControlsOverlay: View {
         }
         .padding(.horizontal, 4)
         .glassEffectCompat(.regularInteractive, in: Capsule())
+    }
+
+    private var guideButton: some View {
+        Button {
+            toggleGuide()
+        } label: {
+            pillGlyph("list.bullet.rectangle", dimmed: !isGuideOpen)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(isGuideOpen ? "Close guide" : "Guide")
+    }
+
+    private func toggleGuide() {
+        if isGuideOpen {
+            closeGuide()
+        } else {
+            isGuideOpen = true
+            onPanelOpenChange?(true)
+            onResetHideTimer()
+        }
+    }
+
+    private func closeGuide() {
+        isGuideOpen = false
+        onPanelOpenChange?(false)
+        onScheduleHide()
     }
 
     private var favoriteButton: some View {
@@ -407,3 +458,4 @@ struct VLCPlayerControlsOverlay: View {
         }
     }
 }
+#endif

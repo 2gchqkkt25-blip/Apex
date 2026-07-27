@@ -15,8 +15,8 @@ extension ContentSyncManager {
     // MARK: - Entry point
 
     /// The official Stremio catalog addon — provides movie/series browsing.
-    /// Used automatically when a stream-only addon (AIOStreams, Torrentio) is
-    /// added, so the user has content to browse + play via their stream addon.
+    /// Used automatically when a stream-only addon is added, so the user has
+    /// content to browse + play via their stream addon.
     private static let cinemetaBaseURL = URL(string: "https://v3-cinemeta.strem.io")!
 
     func performStremioSync(playlist: Playlist, playlistId: UUID, progress: SyncProgress?) async throws {
@@ -42,7 +42,7 @@ extension ContentSyncManager {
 
         // Determine catalog source: use the addon's own catalogs if it has them,
         // otherwise use Cinemeta (the standard Stremio catalog) so stream-only
-        // addons (AIOStreams, Torrentio) still have browsable content.
+        // addons still have browsable content.
         let catalogBase: URL
         let catalogs: [StremioCatalogDef]
 

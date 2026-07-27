@@ -10,12 +10,12 @@ import Foundation
 import Testing
 
 struct StremioTests {
-    private let torrentioManifest = """
+    private let streamAddonManifest = """
     {
-      "id": "com.stremio.torrentio.addon",
+      "id": "com.example.streamaddon",
       "version": "0.0.15",
-      "name": "Torrentio",
-      "description": "Provides torrent streams",
+      "name": "StreamHub",
+      "description": "Provides HTTP stream sources",
       "catalogs": [],
       "resources": [
         { "name": "stream", "types": ["movie", "series", "anime"], "idPrefixes": ["tt", "kitsu"] }
@@ -57,8 +57,8 @@ struct StremioTests {
     }
 
     @Test func `manifest decodes object resources`() throws {
-        let manifest = try JSONDecoder().decode(StremioManifest.self, from: Data(torrentioManifest.utf8))
-        #expect(manifest.name == "Torrentio")
+        let manifest = try JSONDecoder().decode(StremioManifest.self, from: Data(streamAddonManifest.utf8))
+        #expect(manifest.name == "StreamHub")
         #expect(manifest.hasStreams)
         #expect(!manifest.hasCatalogs)
     }
@@ -69,18 +69,18 @@ struct StremioTests {
     }
 
     @Test func `normalize strips manifest json suffix`() {
-        let url = StremioURL.normalize("https://torrentio.strem.fun/manifest.json")
-        #expect(url?.absoluteString == "https://torrentio.strem.fun")
+        let url = StremioURL.normalize("https://streams.example.addon/manifest.json")
+        #expect(url?.absoluteString == "https://streams.example.addon")
     }
 
     @Test func `normalize handles configured addon path`() {
-        let url = StremioURL.normalize("https://torrentio.strem.fun/qualityfilter=1080p/manifest.json")
-        #expect(url?.absoluteString == "https://torrentio.strem.fun/qualityfilter=1080p")
+        let url = StremioURL.normalize("https://streams.example.addon/qualityfilter=1080p/manifest.json")
+        #expect(url?.absoluteString == "https://streams.example.addon/qualityfilter=1080p")
     }
 
     @Test func `manifest url appends manifest json to base`() {
-        let base = URL(string: "https://torrentio.strem.fun")!
-        #expect(StremioURL.manifestURL(base: base).absoluteString == "https://torrentio.strem.fun/manifest.json")
+        let base = URL(string: "https://streams.example.addon")!
+        #expect(StremioURL.manifestURL(base: base).absoluteString == "https://streams.example.addon/manifest.json")
     }
 
     @Test func `manifest url keeps legacy stremio v1 endpoint`() {

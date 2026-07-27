@@ -70,6 +70,8 @@ Metacritic), and your viewing activity can be scrobbled to **Trakt**.
 #### 📺 Live TV
 - Browse channels by category with logos and **EPG** data (now & next)
 - Full **program guide** with a scrollable timeline
+- **Live TV mini preview** — on Wi‑Fi, audition a channel in a corner/side player while you keep browsing (tvOS & macOS: in-flow beside the guide; iOS: floating overlay); tap to go fullscreen
+- **In-player Guide** — open a compact multi-channel EPG over the video while watching and change channels without leaving playback
 - **Custom EPG sources**: add external XMLTV feeds, refresh the guide on its own schedule, and sync manually — managed separately from playlist content
 - Catchup / time-shift support
 - Channel zapping with recently-watched history
