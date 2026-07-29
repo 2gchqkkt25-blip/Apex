@@ -89,7 +89,24 @@ struct FullScreenPlayerView: View {
 
     /// Mirrored from the active playback engine so host-level external
     /// subtitles rise above the same auto-hiding controls as embedded tracks.
-    @State private var arePlayerControlsVisible = true
+    /// Starts `false` so macOS can show a host close button while buffering
+    /// (engine overlays only mount after the first frame).
+    @State private var arePlayerControlsVisible = false
+
+    /// True when the stream URL isn't ready yet (Stalker/Stremio resolve).
+    private var isResolvingStream: Bool {
+        displayMedia == nil
+    }
+
+    #if os(macOS)
+        /// Hidden title bar + auto-fullscreen: no traffic lights. Show a host
+        /// close whenever the engine's own overlay isn't on screen.
+        private var isMacPlayerChromeMissing: Bool {
+            isResolvingStream || !arePlayerControlsVisible
+        }
+    #else
+        private var isMacPlayerChromeMissing: Bool { false }
+    #endif
 
     init(media: PlayableMedia) {
         self.media = media
@@ -164,7 +181,11 @@ struct FullScreenPlayerView: View {
             // the user sees duplicate X buttons whenever the controls are
             // visible. Only render our custom close for engines that don't
             // draw their own controls.
-            if !engine.rendersOwnControls {
+            //
+            // macOS: hidden title bar + auto-fullscreen leave no system chrome,
+            // so keep a host close visible whenever the engine overlay isn't
+            // actually on screen (buffering or controls auto-hidden).
+            if !engine.rendersOwnControls || (isMacPlayerChromeMissing) {
                 closeButton
                     .padding(.top, 4)
                     .padding(.leading, 4)

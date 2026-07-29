@@ -398,6 +398,83 @@ final class VLCPlayerCoordinator: NSObject, ObservableObject {
         if mediaPlayer.isPlaying { mediaPlayer.stop() }
         mediaPlayer.drawable = nil
         pipController = nil
+        didConfigure = false
+        mediaURL = nil
+        hasStartedPlayback = false
+        isPlaying = false
+        onPlaybackFailure = nil
+    }
+
+    /// Lightweight live browse preview — short network cache so IPTV MPEG-TS
+    /// starts quickly without the deep buffers used for fullscreen VOD/live.
+    func configureLivePreview(media: PlayableMedia) {
+        if didConfigure {
+            reloadLivePreview(media: media)
+            return
+        }
+        didConfigure = true
+
+        VLCPlayerCoordinator.installLibVLCLogBridgeIfNeeded()
+        isLive = true
+        startTime = 0
+        needsResume = false
+        options = VLCPlayerOptions.load()
+        mediaURL = media.url
+        retry.reset()
+        hasStartedPlayback = false
+        didReportFailure = false
+        didReportPlaybackEnd = false
+        lastTextTrackCount = 0
+        lastAudioTrackCount = 0
+        startStartupWatchdog()
+        mediaPlayer.delegate = self
+
+        guard let vlcMedia = VLCMedia(url: media.url) else {
+            reportFailure()
+            return
+        }
+        applyLivePreviewOptions(to: vlcMedia)
+        mediaPlayer.media = vlcMedia
+        Logger.player.log("configureLivePreview: url=\(media.url.absoluteString, privacy: .private(mask: .hash))")
+        mediaPlayer.play()
+        isPlaying = true
+    }
+
+    private func reloadLivePreview(media: PlayableMedia) {
+        isReloading = true
+        isLive = true
+        startTime = 0
+        needsResume = false
+        didSeekResume = false
+        resumeLanded = false
+        videoInfo = nil
+        options = VLCPlayerOptions.load()
+        mediaURL = media.url
+        lastKnownTime = 0
+        retry.reset()
+        hasStartedPlayback = false
+        didReportFailure = false
+        didReportPlaybackEnd = false
+        lastTextTrackCount = 0
+        lastAudioTrackCount = 0
+        startStartupWatchdog()
+
+        guard let vlcMedia = VLCMedia(url: media.url) else {
+            reportFailure()
+            return
+        }
+        applyLivePreviewOptions(to: vlcMedia)
+        mediaPlayer.media = vlcMedia
+        Logger.player.log("reloadLivePreview: url=\(media.url.absoluteString, privacy: .private(mask: .hash))")
+        mediaPlayer.play()
+        isPlaying = true
+    }
+
+    private func applyLivePreviewOptions(to media: VLCMedia) {
+        media.addOption(options.hardwareDecode ? ":avcodec-hw=videotoolbox" : ":avcodec-hw=none")
+        media.addOption(":network-caching=1000")
+        media.addOption(":live-caching=1000")
+        if options.httpReconnect { media.addOption(":http-reconnect=1") }
     }
 
     func pauseForBackground() {

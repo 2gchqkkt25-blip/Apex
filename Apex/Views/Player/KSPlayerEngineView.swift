@@ -441,7 +441,7 @@ struct KSPlayerEngineView: View {
             }
             .preferredColorScheme(.dark)
             .onAppear {
-                onControlsVisibilityChanged?(isControlsVisible)
+                onControlsVisibilityChanged?(isControlsVisible && hasStartedPlayback)
                 seekBridge.seekTo = { [coordinator] time in coordinator.seek(time: time) }
                 scheduleHide()
                 observePipState()
@@ -464,9 +464,10 @@ struct KSPlayerEngineView: View {
             }
             .onChange(of: hasStartedPlayback) { _, started in
                 if started { resetHideTimer() }
+                onControlsVisibilityChanged?(isControlsVisible && started)
             }
             .onChange(of: isControlsVisible) { _, visible in
-                onControlsVisibilityChanged?(visible)
+                onControlsVisibilityChanged?(visible && hasStartedPlayback)
             }
             #if os(macOS)
             .onContinuousHover(coordinateSpace: .local) { phase in

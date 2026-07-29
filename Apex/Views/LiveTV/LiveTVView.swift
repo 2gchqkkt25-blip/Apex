@@ -30,6 +30,13 @@ enum LiveTVLayoutMode: String, CaseIterable, Identifiable {
     static let storageKey = "apex.liveTV.layoutMode"
 }
 
+/// Corner mini-preview while browsing Live TV. On by default; when off, channel
+/// taps go straight to fullscreen (same as cellular / external-player paths).
+enum LiveTVPreviewSettings {
+    static let enabledKey = "apex.liveTV.previewEnabled"
+    static let enabledDefault = true
+}
+
 struct LiveTVView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.contentRestriction) private var restriction
@@ -77,6 +84,7 @@ struct LiveTVView: View {
     @AppStorage(SortStorageKey.liveCategories) private var categorySortRaw: String = CategorySortOption.playlist.rawValue
     @AppStorage(SortStorageKey.liveContent) private var contentSortRaw: String = ContentSortOption.playlist.rawValue
     @AppStorage(LiveTVLayoutMode.storageKey) private var layoutModeRaw: String = LiveTVLayoutMode.list.rawValue
+    @AppStorage(LiveTVPreviewSettings.enabledKey) private var previewEnabled = LiveTVPreviewSettings.enabledDefault
 
     private var categorySort: CategorySortOption {
         CategorySortOption(rawValue: categorySortRaw) ?? .playlist
@@ -106,57 +114,53 @@ struct LiveTVView: View {
     @ViewBuilder
     private func detail(for section: LiveTVSection) -> some View {
         let token = section.id
-        #if os(macOS)
-            // Same in-flow setup as tvOS: preview column on the leading edge,
-            // guide/list shrink beside it so nothing is covered. Width tracks
-            // the window/pane size.
-            GeometryReader { geo in
-                let screenWidth = NSScreen.main?.frame.width ?? geo.size.width
-                let previewWidth = LiveTVMiniPreview.preferredWidth(
-                    screenWidth: screenWidth,
-                    paneWidth: geo.size.width
-                )
-                HStack(alignment: .top, spacing: 16) {
-                    if let previewMedia {
-                        VStack(spacing: 0) {
-                            LiveTVMiniPreview(
-                                media: previewMedia,
-                                onExpand: { expandPreview() },
-                                onClose: { self.previewMedia = nil },
-                                width: previewWidth
-                            )
-                            .padding(.top, 12)
-                            .padding(.leading, 12)
-                            Spacer(minLength: 0)
-                        }
-                        .frame(width: previewWidth + 12)
-                        .transition(.opacity)
-                    }
+        #if os(iOS) || os(macOS)
+            // In-flow preview row (info + PiP) above list/guide — programme
+            // cells stay fully tappable. Avoid GeometryReader as the detail
+            // root on macOS (it collapses the NavigationStack titlebar).
+            VStack(spacing: 0) {
+                if let previewMedia {
+                    let previewWidth = LiveTVMiniPreview.preferredWidth(
+                        screenWidth: previewScreenWidth
+                    )
+                    let previewHeight = LiveTVMiniPreview.totalHeight(forWidth: previewWidth)
+                    HStack(alignment: .top, spacing: 12) {
+                        LiveTVPreviewInfoPane(
+                            media: previewMedia,
+                            epgCache: epgCache
+                        )
+                        .frame(maxWidth: .infinity, maxHeight: previewHeight, alignment: .topLeading)
 
-                    detailBrowseStack(for: section, sectionToken: token)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        LiveTVMiniPreview(
+                            media: previewMedia,
+                            onExpand: { expandPreview() },
+                            onClose: { self.previewMedia = nil },
+                            width: previewWidth
+                        )
+                        .frame(width: previewWidth, height: previewHeight)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 8)
+                    .transition(.opacity)
                 }
+
+                detailBrowseStack(for: section, sectionToken: token)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             .animation(.easeOut(duration: 0.15), value: previewMedia?.id)
         #else
             detailBrowseStack(for: section, sectionToken: token)
-            #if os(iOS)
-                // Floating overlay on phone/iPad — in-flow would steal too much
-                // horizontal space from the guide.
-                .overlay(alignment: .topLeading) {
-                    if let previewMedia {
-                        LiveTVMiniPreview(
-                            media: previewMedia,
-                            onExpand: { expandPreview() },
-                            onClose: { self.previewMedia = nil }
-                        )
-                        .padding(.leading, 16)
-                        .padding(.top, 12)
-                        .transition(.opacity)
-                    }
-                }
-                .animation(.easeOut(duration: 0.15), value: previewMedia?.id)
-            #endif
+        #endif
+    }
+
+    /// Display width used to size the in-flow mini preview.
+    private var previewScreenWidth: CGFloat {
+        #if os(macOS)
+            NSScreen.main?.frame.width ?? 1440
+        #elseif os(iOS)
+            UIScreen.main.bounds.width
+        #else
+            1920
         #endif
     }
 
@@ -271,6 +275,11 @@ struct LiveTVView: View {
                 }
             }
             #endif
+            #if os(macOS)
+            // Keep List/Guide + library tools visible when the window is
+            // fullscreen (content otherwise draws under a transparent bar).
+            .toolbarBackground(.visible, for: .windowToolbar)
+            #endif
             .libraryToolbar(config: LibraryToolbarConfiguration(
                 playlists: playlists,
                 selectedPlaylistID: $selectedPlaylistID,
@@ -290,6 +299,9 @@ struct LiveTVView: View {
                 // belongs to the previous playlist. Reset to the new playlist's
                 // first section so the channel list stays in sync.
                 selectedSection = sortedSections.first
+            }
+            .onChange(of: previewEnabled) { _, enabled in
+                if !enabled { previewMedia = nil }
             }
             #if os(iOS) || os(tvOS)
             .fullScreenCover(item: $playingMedia) { media in
@@ -458,13 +470,14 @@ struct LiveTVView: View {
 
     private func handleChannelSelection(_ stream: LiveStream) {
         // Wi‑Fi corner preview: select a channel to audition it without leaving
-        // browse. Cellular, deferred Stalker/Stremio URLs, and ExternalPlayback
-        // skip the float and go straight to fullscreen.
+        // browse. Off in Settings, cellular, deferred Stalker/Stremio URLs, and
+        // ExternalPlayback skip the float and go straight to fullscreen.
         guard let playlist = activePlaylist,
               let media = PlayableMedia.from(stream: stream, playlist: playlist) else { return }
         let needsResolve = StalkerLink.isPlaceholder(media.url)
             || media.url.absoluteString.hasPrefix("stremio://")
-        if !needsResolve,
+        if previewEnabled,
+           !needsResolve,
            NetworkMonitor.shared.shouldProceedWithHeavyNetworkWork(),
            ExternalPlayback.preferred == nil
         {
@@ -488,12 +501,7 @@ struct LiveTVView: View {
         guard let previewMedia else { return }
         let media = previewMedia
         self.previewMedia = nil
-        if ExternalPlayback.open(media) { return }
-        #if os(macOS)
-            openWindow(id: "player", value: media)
-        #else
-            playingMedia = media
-        #endif
+        openFullscreen(media)
     }
 
     private func playChannel(_ stream: LiveStream) {
@@ -507,6 +515,12 @@ struct LiveTVView: View {
             LiveChannelNavigator.activeSurfScope = nil
         }
         previewMedia = nil
+        openFullscreen(media)
+    }
+
+    /// Open the dedicated player. Preview uses VLCKit; fullscreen uses KSPlayer
+    /// — separate stacks, so no FFmpeg TLS handoff delay is required.
+    private func openFullscreen(_ media: PlayableMedia) {
         if ExternalPlayback.open(media) { return }
         #if os(macOS)
             openWindow(id: "player", value: media)

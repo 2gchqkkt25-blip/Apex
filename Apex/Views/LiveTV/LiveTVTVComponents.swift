@@ -274,7 +274,7 @@
         let playlist: Playlist?
         @Bindable var epgCache: LiveTVSectionEPGCache
 
-        /// Corner floating preview over the channel/guide pane (top-leading).
+        /// Corner floating preview over the channel/guide pane (top-trailing).
         var previewMedia: PlayableMedia?
         var onExpandPreview: (() -> Void)?
         var onClosePreview: (() -> Void)?
@@ -294,7 +294,45 @@
                     selectedSection: $selectedSection,
                     layoutModeRaw: $layoutModeRaw
                 )
-                content
+
+                // Preview occupies its own top-trailing row; guide/list fill the
+                // space below so the PiP never covers programme cells. The band
+                // left of the PiP shows channel + now-playing synopsis.
+                VStack(spacing: 0) {
+                    if let previewMedia {
+                        let previewWidth = LiveTVMiniPreview.preferredWidth(
+                            screenWidth: UIScreen.main.bounds.width
+                        )
+                        let previewHeight = LiveTVMiniPreview.totalHeight(forWidth: previewWidth)
+                        HStack(alignment: .top, spacing: 20) {
+                            LiveTVPreviewInfoPane(
+                                media: previewMedia,
+                                epgCache: epgCache
+                            )
+                            .frame(maxWidth: .infinity, maxHeight: previewHeight, alignment: .topLeading)
+                            .padding(.leading, 24)
+                            // Match the PiP's pull into the tab-bar band.
+                            .padding(.top, -28)
+                            .padding(.bottom, 8)
+
+                            LiveTVMiniPreview(
+                                media: previewMedia,
+                                onExpand: { onExpandPreview?() },
+                                onClose: { onClosePreview?() },
+                                width: previewWidth
+                            )
+                            .frame(width: previewWidth, height: previewHeight)
+                            .padding(.trailing, 16)
+                            .padding(.top, -28)
+                            .padding(.bottom, 8)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                        .transition(.opacity)
+                    }
+
+                    content
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
             }
             .animation(.easeOut(duration: 0.15), value: previewMedia?.id)
         }
@@ -303,61 +341,35 @@
         private var content: some View {
             if let section = displayedSection {
                 let token = section.id
-                GeometryReader { geo in
-                    let previewWidth = LiveTVMiniPreview.preferredWidth(
-                        screenWidth: UIScreen.main.bounds.width,
-                        paneWidth: geo.size.width
+                ZStack {
+                    TVChannelsList(
+                        scope: section.scope,
+                        playlistPrefix: playlistPrefix,
+                        playlist: playlist,
+                        sort: contentSort,
+                        sectionToken: token,
+                        epgCache: epgCache,
+                        onPlay: onPlay
                     )
-                    HStack(alignment: .top, spacing: 20) {
-                        // In-flow (not overlay): guide/list shrink beside the
-                        // preview so channel names and programmes stay readable.
-                        if let previewMedia {
-                            VStack(spacing: 0) {
-                                LiveTVMiniPreview(
-                                    media: previewMedia,
-                                    onExpand: { onExpandPreview?() },
-                                    onClose: { onClosePreview?() },
-                                    width: previewWidth
-                                )
-                                .padding(.top, 20)
-                                .padding(.leading, 8)
-                                Spacer(minLength: 0)
-                            }
-                            .frame(width: previewWidth + 8)
-                            .transition(.opacity)
-                        }
+                    .opacity(layoutMode == .list ? 1 : 0)
+                    .allowsHitTesting(layoutMode == .list)
+                    .accessibilityHidden(layoutMode != .list)
 
-                        ZStack {
-                            TVChannelsList(
-                                scope: section.scope,
-                                playlistPrefix: playlistPrefix,
-                                playlist: playlist,
-                                sort: contentSort,
-                                sectionToken: token,
-                                epgCache: epgCache,
-                                onPlay: onPlay
-                            )
-                            .opacity(layoutMode == .list ? 1 : 0)
-                            .allowsHitTesting(layoutMode == .list)
-                            .accessibilityHidden(layoutMode != .list)
-
-                            EPGGuideView(
-                                scope: section.scope,
-                                playlistPrefix: playlistPrefix,
-                                playlist: playlist,
-                                sort: contentSort,
-                                sectionToken: token,
-                                epgCache: epgCache,
-                                onPlay: onPlay
-                            )
-                            .opacity(layoutMode == .guide ? 1 : 0)
-                            .allowsHitTesting(layoutMode == .guide)
-                            .accessibilityHidden(layoutMode != .guide)
-                        }
-                        .id(contentSort.rawValue)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    }
+                    EPGGuideView(
+                        scope: section.scope,
+                        playlistPrefix: playlistPrefix,
+                        playlist: playlist,
+                        sort: contentSort,
+                        sectionToken: token,
+                        epgCache: epgCache,
+                        onPlay: onPlay
+                    )
+                    .opacity(layoutMode == .guide ? 1 : 0)
+                    .allowsHitTesting(layoutMode == .guide)
+                    .accessibilityHidden(layoutMode != .guide)
                 }
+                .id(contentSort.rawValue)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .onAppear { epgCache.activate(section: token) }
                 .onChange(of: token) { _, newToken in
                     epgCache.activate(section: newToken)

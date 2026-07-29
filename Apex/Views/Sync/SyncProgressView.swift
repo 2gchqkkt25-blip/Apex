@@ -91,16 +91,10 @@ struct SyncProgressView: View {
 
                 if SyncStep.includesEPG(for: playlist.sourceType) {
                     try Task.checkCancellation()
-                    #if os(tvOS)
-                    // Run a lightweight inline EPG pass on tvOS using only the 3
-                    // lightest feeds (~30MB total). This is small enough to parse
-                    // without jetsam risk while giving the store data for most
-                    // channels before the user opens Live TV. A background pass
-                    // with remaining feeds fills gaps later.
+                    // Lightweight inline guide pass on every platform (3 light
+                    // feeds). Full/bundled fill runs after the sheet dismisses so
+                    // playlist sync isn't blocked on minutes of XMLTV parse.
                     await runEPGStep(mode: .tvOSQuick)
-                    #else
-                    await runEPGStep()
-                    #endif
                 }
 
                 await schedulePostSyncIndexing()
@@ -153,7 +147,8 @@ struct SyncProgressView: View {
         EPGSyncService.shared.forceGuideRefresh()
     }
 
-    /// Indexing (all platforms) plus, on tvOS, the deferred guide refresh.
+    /// Indexing (all platforms) plus deferred guide fill after the light inline
+    /// EPG pass. Background work runs after the sheet can dismiss.
     private func schedulePostSyncIndexing() async {
         #if os(tvOS)
         await MainActor.run {
@@ -176,6 +171,14 @@ struct SyncProgressView: View {
         #else
         await MainActor.run {
             ContentIndexingService.shared.kick(after: .seconds(3))
+        }
+        // Same pattern as tvOS: finish the guide after playlist sync so the
+        // sync sheet isn't blocked on a full XMLTV pass.
+        Task.detached(priority: .utility) {
+            try? await Task.sleep(for: .seconds(3))
+            await MainActor.run {
+                EPGSyncService.shared.syncBundledInBackground()
+            }
         }
         #endif
     }

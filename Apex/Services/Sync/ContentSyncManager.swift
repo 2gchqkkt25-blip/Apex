@@ -192,9 +192,7 @@ actor ContentSyncManager {
         try await syncAllCategories(for: playlist, playlistId: playlistId, progress: progress, full: full)
 
         try await syncMovies(for: playlist, playlistId: playlistId, progress: progress)
-        try await Task.sleep(for: .seconds(2))
         try await syncSeries(for: playlist, playlistId: playlistId, progress: progress)
-        try await Task.sleep(for: .seconds(2))
         try await syncLiveStreams(for: playlist, playlistId: playlistId, progress: progress)
     }
 

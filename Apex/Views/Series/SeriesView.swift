@@ -38,19 +38,10 @@ struct SeriesView: View {
 
     private let previewLimit = 20
 
-    // How many categories render as full inline preview rows. Each preview row
-    // carries its own live `@Query`, so capping them keeps the browse screen
-    // fast; the remaining categories surface as lightweight name tiles below.
-    #if os(iOS)
-        private let previewCategoryLimit = 4
-    #else
-        private let previewCategoryLimit = 4
-    #endif
-
     var body: some View {
         // Resolve once per render — `sortedCategories` filters + sorts every
-        // playlist's categories, so reading it three times (the emptiness check
-        // plus the preview/remaining splits) tripled that work.
+        // playlist's categories, so reading it twice (emptiness + ForEach)
+        // would duplicate that work.
         let sorted = sortedCategories
         NavigationStack(path: navigationPath) {
             Group {
@@ -81,7 +72,9 @@ struct SeriesView: View {
                             SeriesCollectionRow(kind: .favorites, playlistPrefix: playlistPrefix, animationNamespace: animationNamespace)
                             SeriesCollectionRow(kind: .recentlyAdded, playlistPrefix: playlistPrefix, animationNamespace: animationNamespace)
 
-                            ForEach(sorted.prefix(previewCategoryLimit)) { category in
+                            // One poster rail per category. LazyVStack + tab unmount
+                            // keep only on-screen rows (and their @Query) in memory.
+                            ForEach(sorted) { category in
                                 SeriesCategoryPreview(category: category, limit: previewLimit, sort: contentSort, animationNamespace: animationNamespace)
                                     .id("\(category.id)-\(contentSort.rawValue)")
                             }

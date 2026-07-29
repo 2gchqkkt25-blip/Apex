@@ -17,6 +17,7 @@ struct EPGSettingsView: View {
     @State private var epgSync = EPGSyncService.shared
     @AppStorage(SyncFrequency.epgStorageKey) private var freqRaw = SyncFrequency.epgDefaultValue.rawValue
     @AppStorage(LiveTVLayoutMode.storageKey) private var defaultViewRaw = LiveTVLayoutMode.list.rawValue
+    @AppStorage(LiveTVPreviewSettings.enabledKey) private var previewEnabled = LiveTVPreviewSettings.enabledDefault
 
     @State private var showingAdd = false
     #if os(tvOS)
@@ -111,10 +112,12 @@ struct EPGSettingsView: View {
                     }
                 }
                 .pickerStyle(.menu)
+
+                Toggle("Channel Preview", isOn: $previewEnabled)
             } header: {
                 Text("Live TV")
             } footer: {
-                Text("Choose whether Live TV opens in the channel list or the programme guide by default.")
+                Text("Default view chooses list or guide. Channel Preview plays a corner window when you pick a channel on Wi‑Fi so you can keep browsing; turn it off to open fullscreen immediately.")
             }
         }
 
@@ -324,6 +327,29 @@ struct EPGSettingsView: View {
                 }
 
                 Text("Choose whether Live TV opens in the channel list or the programme guide.")
+                    .font(.system(size: 20))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, TVSettingsMetrics.rowHPadding)
+                    .padding(.top, 6)
+
+                TVSettingsSectionLabel("Channel Preview")
+                    .padding(.top, 16)
+
+                Button {
+                    previewEnabled.toggle()
+                } label: {
+                    HStack(spacing: 16) {
+                        Image(systemName: "pip.enter")
+                            .font(.system(size: 22))
+                        Text("Channel Preview")
+                        Spacer(minLength: 0)
+                        Text(previewEnabled ? "On" : "Off")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .buttonStyle(TVSettingsRowButtonStyle())
+
+                Text("When on, picking a channel on Wi‑Fi opens a corner preview so you can keep browsing. When off, channels open fullscreen immediately.")
                     .font(.system(size: 20))
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, TVSettingsMetrics.rowHPadding)

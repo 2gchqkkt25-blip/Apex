@@ -2,13 +2,23 @@
 //  LiveTVMiniPreview.swift
 //  Apex
 //
-//  Corner floating AVPlayer while browsing Live TV. Wi‑Fi only — on cellular
+//  Corner floating player while browsing Live TV. Wi‑Fi only — on cellular
 //  the host falls through to fullscreen playback. Tap / Select the preview to
 //  promote it to the full player; pick another channel to retarget the float.
 //
+//  Uses VLCKit for the float so IPTV/MPEG-TS loads reliably, without sharing
+//  KSPlayer's FFmpeg TLS session with the fullscreen player (that overlap was
+//  crashing on expand). Fullscreen keeps KSPlayer as the primary engine.
+//
 
 import AVFoundation
+import OSLog
 import SwiftUI
+import VLCKitSPM
+
+#if os(macOS)
+    import AppKit
+#endif
 
 /// Floating live preview shown over the Live TV browse surface.
 struct LiveTVMiniPreview: View {
@@ -19,7 +29,10 @@ struct LiveTVMiniPreview: View {
     /// Falls back to a platform default when omitted.
     var width: CGFloat? = nil
 
-    @StateObject private var coordinator = AVPlayerCoordinator()
+    @StateObject private var vlcCoordinator = VLCPlayerCoordinator()
+    /// True once we've begun closing or promoting — ignores late failure
+    /// callbacks so they don't re-enter expand.
+    @State private var isHandingOff = false
     @ObservedObject private var network = NetworkMonitor.shared
 
     private var previewWidth: CGFloat {
@@ -30,42 +43,44 @@ struct LiveTVMiniPreview: View {
         #if os(tvOS)
             preferredWidth(screenWidth: UIScreen.main.bounds.width)
         #elseif os(macOS)
-            300
+            360
         #else
-            220
+            preferredWidth(screenWidth: UIScreen.main.bounds.width)
         #endif
     }
 
-    /// Size the PiP from the display / content pane so larger screens get a
-    /// proportionally larger preview (clamped per platform).
+    /// Size the PiP from the display / content pane. tvOS stays large for
+    /// 10-foot viewing; macOS scales up on big monitors; iOS scales for
+    /// phone (compact) vs iPad (regular) so the info pane still fits.
     static func preferredWidth(screenWidth: CGFloat, paneWidth: CGFloat? = nil) -> CGFloat {
         #if os(tvOS)
             let basis = max(screenWidth, paneWidth ?? 0)
-            // ~28% of the screen — large enough to watch, small enough to leave
-            // most of the guide visible beside it.
-            let ideal = basis * 0.28
-            return min(max(ideal, 420), 720)
+            let ideal = basis * 0.20
+            return min(max(ideal, 320), 480)
         #elseif os(macOS)
-            let basis = max(paneWidth ?? 0, screenWidth * 0.55)
-            let ideal = basis * 0.28
-            return min(max(ideal, 280), 480)
+            // Prefer the content pane when known; otherwise ~24% of the display.
+            let basis = paneWidth ?? screenWidth
+            let ideal = basis * 0.24
+            return min(max(ideal, 320), 520)
         #else
-            _ = screenWidth
-            _ = paneWidth
-            return defaultWidth
+            let basis = paneWidth ?? screenWidth
+            // Phone: leave room for the info pane; iPad: closer to macOS scale.
+            if basis < 700 {
+                let ideal = basis * 0.38
+                return min(max(ideal, 160), 220)
+            }
+            let ideal = basis * 0.24
+            return min(max(ideal, 220), 320)
         #endif
     }
 
-    /// Fixed 16:9 video height — sized up front so the UIKit player host
-    /// never mounts at full-overlay size and then shrinks into place.
     private var videoHeight: CGFloat {
         previewWidth * 9 / 16
     }
 
-    /// Title bar under the video — keep total card height fixed for layout.
     private var titleBarHeight: CGFloat {
         #if os(tvOS)
-            52
+            44
         #else
             40
         #endif
@@ -73,6 +88,19 @@ struct LiveTVMiniPreview: View {
 
     private var totalHeight: CGFloat {
         videoHeight + titleBarHeight
+    }
+
+    /// Host layout helpers (e.g. tvOS absolute corner pin) without building the view.
+    static func totalHeight(forWidth width: CGFloat) -> CGFloat {
+        #if os(tvOS)
+            width * 9 / 16 + 44
+        #else
+            width * 9 / 16 + 40
+        #endif
+    }
+
+    private var isWaitingForFirstFrame: Bool {
+        !vlcCoordinator.hasStartedPlayback
     }
 
     var body: some View {
@@ -83,21 +111,67 @@ struct LiveTVMiniPreview: View {
                 touchBody
             #endif
         }
-        // Hard size — tvOS Buttons otherwise expand to the parent proposal.
         .frame(width: previewWidth, height: totalHeight)
         .task(id: media.id) {
-            coordinator.startupTimeout = 20
-            coordinator.configure(media: media)
+            await preparePlayback()
         }
         .onChange(of: network.isExpensive) { _, expensive in
-            if expensive || network.isConstrained { onClose() }
+            if expensive || network.isConstrained { requestClose() }
         }
         .onChange(of: network.isConstrained) { _, constrained in
-            if constrained || network.isExpensive { onClose() }
+            if constrained || network.isExpensive { requestClose() }
         }
         .onDisappear {
-            coordinator.tearDown()
+            tearDownPlayback()
         }
+    }
+
+    // MARK: - Lifecycle
+
+    @MainActor
+    private func preparePlayback() async {
+        guard !isHandingOff else { return }
+        activateAudioSessionIfNeeded()
+        vlcCoordinator.startupTimeout = 20
+        vlcCoordinator.onPlaybackFailure = {
+            Logger.player.error("LiveTV mini preview: VLC failed — expanding")
+            onExpand()
+        }
+        vlcCoordinator.configureLivePreview(media: media)
+    }
+
+    @MainActor
+    private func requestExpand() {
+        guard !isHandingOff else { return }
+        isHandingOff = true
+        stopPreviewEngine()
+        onExpand()
+    }
+
+    @MainActor
+    private func requestClose() {
+        guard !isHandingOff else { return }
+        isHandingOff = true
+        stopPreviewEngine()
+        onClose()
+    }
+
+    private func tearDownPlayback() {
+        isHandingOff = true
+        stopPreviewEngine()
+    }
+
+    private func stopPreviewEngine() {
+        vlcCoordinator.onPlaybackFailure = nil
+        vlcCoordinator.tearDown()
+    }
+
+    private func activateAudioSessionIfNeeded() {
+        #if os(iOS) || os(tvOS)
+            let session = AVAudioSession.sharedInstance()
+            try? session.setCategory(.playback, mode: .moviePlayback, options: [])
+            try? session.setActive(true, options: [])
+        #endif
     }
 
     // MARK: - iOS / macOS
@@ -105,7 +179,7 @@ struct LiveTVMiniPreview: View {
     #if !os(tvOS)
         private var touchBody: some View {
             card
-                .onTapGesture(perform: onExpand)
+                .onTapGesture(perform: requestExpand)
                 .accessibilityElement(children: .contain)
                 .accessibilityAddTraits(.isButton)
                 .accessibilityLabel("Preview \(media.title)")
@@ -117,15 +191,18 @@ struct LiveTVMiniPreview: View {
 
     #if os(tvOS)
         private var tvBody: some View {
-            Button(action: onExpand) {
+            // Plain button + hard frame — `.bordered`/card styles expand into
+            // available width on tvOS and visually center the PiP mid-pane.
+            Button(action: requestExpand) {
                 card
             }
-            .buttonStyle(TVCardButtonStyle(focusScale: 1.04))
+            .buttonStyle(.plain)
             .frame(width: previewWidth, height: totalHeight)
+            .focusable(true)
             .accessibilityLabel("Watch \(media.title)")
             .accessibilityHint("Opens fullscreen player")
             .overlay(alignment: .topTrailing) {
-                Button(action: onClose) {
+                Button(action: requestClose) {
                     Image(systemName: "xmark")
                         .font(.system(size: 18, weight: .bold))
                         .foregroundStyle(.white)
@@ -140,8 +217,6 @@ struct LiveTVMiniPreview: View {
 
     // MARK: - Card
 
-    /// Explicit VStack — a bare ViewBuilder TupleView overlays children, which
-    /// put the channel name across the middle of the video.
     private var card: some View {
         VStack(spacing: 0) {
             videoArea
@@ -159,13 +234,13 @@ struct LiveTVMiniPreview: View {
 
     private var videoArea: some View {
         ZStack(alignment: .topTrailing) {
-            MiniPreviewVideoContainer(coordinator: coordinator)
+            MiniPreviewVLCContainer(coordinator: vlcCoordinator)
                 .frame(width: previewWidth, height: videoHeight)
                 .background(Color.black)
                 .clipped()
                 .allowsHitTesting(false)
 
-            if coordinator.isBuffering, !coordinator.hasStartedPlayback {
+            if isWaitingForFirstFrame {
                 ProgressView()
                     .tint(.white)
                     .frame(width: previewWidth, height: videoHeight)
@@ -174,7 +249,7 @@ struct LiveTVMiniPreview: View {
             }
 
             #if !os(tvOS)
-                Button(action: onClose) {
+                Button(action: requestClose) {
                     Image(systemName: "xmark")
                         .font(.system(size: 11, weight: .bold))
                         .foregroundStyle(.white)
@@ -225,89 +300,38 @@ struct LiveTVMiniPreview: View {
     }
 }
 
-// MARK: - Video container
+// MARK: - VLC surface
 
 #if os(macOS)
-    private struct MiniPreviewVideoContainer: NSViewRepresentable {
-        let coordinator: AVPlayerCoordinator
+    /// Non-layer-backed host — VLCKit's macOS output uses OpenGL and aborts when
+    /// nested in a layer-backed tree (same constraint as `VLCVideoContainer`).
+    private struct MiniPreviewVLCContainer: NSViewRepresentable {
+        let coordinator: VLCPlayerCoordinator
 
-        func makeNSView(context _: Context) -> MiniPreviewHostNSView {
-            let view = MiniPreviewHostNSView()
-            coordinator.attach(layer: view.playerLayer)
+        func makeNSView(context _: Context) -> NSView {
+            let view = NSView(frame: .zero)
+            coordinator.attach(hostView: view)
             return view
         }
 
-        func updateNSView(_: MiniPreviewHostNSView, context _: Context) {}
-    }
-
-    private final class MiniPreviewHostNSView: NSView {
-        let playerLayer = AVPlayerLayer()
-
-        override init(frame frameRect: NSRect) {
-            super.init(frame: frameRect)
-            wantsLayer = true
-            playerLayer.videoGravity = .resizeAspect
-            playerLayer.frame = bounds
-            layer?.addSublayer(playerLayer)
-            layer?.backgroundColor = NSColor.black.cgColor
-        }
-
-        @available(*, unavailable)
-        required init?(coder _: NSCoder) {
-            fatalError("init(coder:) has not been implemented")
-        }
-
-        override var intrinsicContentSize: NSSize {
-            NSSize(width: NSView.noIntrinsicMetric, height: NSView.noIntrinsicMetric)
-        }
-
-        override func layout() {
-            super.layout()
-            playerLayer.frame = bounds
-        }
+        func updateNSView(_: NSView, context _: Context) {}
     }
 #else
-    private struct MiniPreviewVideoContainer: UIViewRepresentable {
-        let coordinator: AVPlayerCoordinator
+    private struct MiniPreviewVLCContainer: UIViewRepresentable {
+        let coordinator: VLCPlayerCoordinator
 
-        func makeUIView(context _: Context) -> MiniPreviewHostUIView {
-            let view = MiniPreviewHostUIView()
+        func makeUIView(context _: Context) -> UIView {
+            let view = UIView()
             view.backgroundColor = .black
             view.clipsToBounds = true
             view.setContentHuggingPriority(.defaultLow, for: .horizontal)
             view.setContentHuggingPriority(.defaultLow, for: .vertical)
             view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
             view.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
-            coordinator.attach(layer: view.playerLayer)
+            coordinator.attach(hostView: view)
             return view
         }
 
-        func updateUIView(_: MiniPreviewHostUIView, context _: Context) {}
-    }
-
-    private final class MiniPreviewHostUIView: UIView {
-        // swiftlint:disable:next static_over_final_class
-        override class var layerClass: AnyClass {
-            AVPlayerLayer.self
-        }
-
-        var playerLayer: AVPlayerLayer {
-            // swiftlint:disable:next force_cast
-            layer as! AVPlayerLayer
-        }
-
-        override init(frame: CGRect) {
-            super.init(frame: frame)
-            playerLayer.videoGravity = .resizeAspect
-        }
-
-        @available(*, unavailable)
-        required init?(coder _: NSCoder) {
-            fatalError("init(coder:) has not been implemented")
-        }
-
-        override var intrinsicContentSize: CGSize {
-            CGSize(width: UIView.noIntrinsicMetric, height: UIView.noIntrinsicMetric)
-        }
+        func updateUIView(_: UIView, context _: Context) {}
     }
 #endif

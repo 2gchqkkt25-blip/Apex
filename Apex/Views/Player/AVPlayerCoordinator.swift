@@ -147,17 +147,24 @@ final class AVPlayerCoordinator: NSObject, ObservableObject {
     // MARK: - Configure / reload
 
     func configure(media: PlayableMedia) {
-        load(media: media)
+        load(media: media, livePreview: false)
+    }
+
+    /// Live browse preview — don't wait to fill a deep buffer (which can hang
+    /// forever on IPTV MPEG-TS), and re-bind the layer after any prior tearDown.
+    func configureLivePreview(media: PlayableMedia) {
+        player.automaticallyWaitsToMinimizeStalling = false
+        load(media: media, livePreview: true)
     }
 
     /// Swap the current stream for a different one without tearing down the
     /// player or its render surface — used when the viewer picks another episode
     /// or surfs to another live channel.
     func reload(media: PlayableMedia) {
-        load(media: media)
+        load(media: media, livePreview: false)
     }
 
-    private func load(media: PlayableMedia) {
+    private func load(media: PlayableMedia, livePreview: Bool) {
         teardownItemObservers()
         trackLoadTask?.cancel()
 
@@ -177,9 +184,18 @@ final class AVPlayerCoordinator: NSObject, ObservableObject {
         didReportFailure = false
         startStartupWatchdog()
 
+        // Re-bind after tearDown cleared `layer.player` without remaking the view.
+        if let playerLayer {
+            playerLayer.player = player
+        }
+
         let asset = AVURLAsset(url: media.url)
         let newItem = AVPlayerItem(asset: asset)
-        newItem.preferredForwardBufferDuration = media.isLive ? 4 : 8
+        if livePreview {
+            newItem.preferredForwardBufferDuration = 1
+        } else {
+            newItem.preferredForwardBufferDuration = media.isLive ? 4 : 8
+        }
         item = newItem
 
         attachItemObservers(to: newItem)
@@ -190,7 +206,7 @@ final class AVPlayerCoordinator: NSObject, ObservableObject {
 
         player.replaceCurrentItem(with: newItem)
         // swiftlint:disable:next line_length
-        Logger.player.log("AVPlayer load: live=\(media.isLive, privacy: .public) startTime=\(media.startTime, format: .fixed(precision: 1), privacy: .public)s url=\(media.url.absoluteString, privacy: .private(mask: .hash))")
+        Logger.player.log("AVPlayer load: live=\(media.isLive, privacy: .public) preview=\(livePreview, privacy: .public) startTime=\(media.startTime, format: .fixed(precision: 1), privacy: .public)s url=\(media.url.absoluteString, privacy: .private(mask: .hash))")
         player.playImmediately(atRate: selectedRate)
     }
 
@@ -227,7 +243,7 @@ final class AVPlayerCoordinator: NSObject, ObservableObject {
     /// Re-prepare the current stream after a failure (the Try Again button).
     func retryAfterFailure() {
         guard let currentMedia else { return }
-        load(media: currentMedia)
+        load(media: currentMedia, livePreview: false)
     }
 
     // MARK: - Teardown

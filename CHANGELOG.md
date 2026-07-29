@@ -6,16 +6,34 @@ All notable changes to Apex Stream Player.
 
 ## Unreleased
 
+---
+
+## Build 49 (1.2.0) — July 28, 2026
+
 ### Features
 
-- **In-player Live TV Guide** — While watching a live channel, open Guide from the player controls to browse a compact multi-channel EPG timeline over the video and switch channels without leaving playback.
-  - **tvOS:** Guide tab on the controls pill; **Up** from play focuses Guide (channel surfing only while controls are hidden). Timeline matches the main Live TV guide; focus moves through channel rows and programme cells.
+- **In-player Live TV Guide** — While watching a live channel, open Guide from the player controls to browse the EPG timeline over the video and switch channels without leaving playback.
+  - **tvOS:** Guide tab on the controls pill; **Up** from play focuses Guide (channel surfing only while controls are hidden).
   - **iOS / macOS:** Guide button in the track pill expands a panel over the video. Tap a channel or programme to switch.
-  - Shared UI: `PlayerEPGGuidePanel` (same grid idea as `EPGGuideView`).
-- **Live TV mini preview** — On Wi‑Fi, selecting a channel in Live TV browse opens a live AVPlayer preview so you can keep browsing. Tap / Select the preview (or the same channel again on tvOS) for fullscreen; pick another channel to retarget it. Cellular, Stalker/Stremio, and external-player setups still open fullscreen directly.
-  - **tvOS / macOS:** In-flow column on the leading edge of the guide/list (guide shrinks beside it — nothing covered). Width scales with the display / window (~28%, clamped).
-  - **iOS:** Floating top-leading overlay so the phone guide keeps full width.
-  - Implementation: `LiveTVMiniPreview` + `AVPlayerCoordinator`.
+- **Live TV mini preview** — On Wi‑Fi, selecting a channel in Live TV browse opens a live preview so you can keep browsing. Tap / Select the preview (or the same channel again on tvOS) for fullscreen; pick another channel to retarget it. Cellular, Stalker/Stremio, and external-player setups still open fullscreen directly.
+  - Preview sits in a top row above the guide/list (doesn’t cover programme cells), with channel name, now/next programme, and synopsis beside the video.
+  - Works on **tvOS, iOS, and macOS**. Preview is sized for each platform; Mac and iPad get a larger PiP than iPhone.
+  - Settings → TV Guide → **Channel Preview** (all platforms). On by default; turn off to open channels fullscreen immediately.
+
+### Bug Fixes
+
+- **Crash expanding Live TV mini preview** — Expanding the preview to fullscreen no longer crashes on IPTV streams.
+- **macOS Live TV toolbar vanishes when mini preview plays** — Sync / Settings / List·Guide stay visible while the preview is open.
+- **macOS window stuck letterboxed after mini preview** — Leaving fullscreen restores a normal window size again.
+- **macOS channel logos look soft / unclear** — Channel icons in Live TV list, preview, and the EPG guide are sharper and larger on Mac.
+
+### Improvements
+
+- **Faster playlist sync sheet** — Removed artificial pauses between movie/series/live sync phases. Inline TV guide during playlist sync loads faster on all platforms; the rest of the guide fills in after the sheet dismisses.
+
+### Release
+
+- Build number **49** (1.2.0).
 
 ---
 

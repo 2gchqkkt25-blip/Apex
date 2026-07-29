@@ -360,18 +360,67 @@ struct PlatformImageView: View {
     private struct PlatformImageViewRepresentable: NSViewRepresentable {
         let image: NSImage
 
-        func makeNSView(context: Context) -> NSImageView {
-            let view = NSImageView()
+        func makeNSView(context: Context) -> RetinaAwareNSImageView {
+            let view = RetinaAwareNSImageView()
             view.imageScaling = .scaleProportionallyUpOrDown
             view.imageAlignment = .alignCenter
             view.setContentHuggingPriority(.defaultLow, for: .horizontal)
             view.setContentHuggingPriority(.defaultLow, for: .vertical)
+            view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            view.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
             return view
         }
 
-        func updateNSView(_ view: NSImageView, context: Context) {
+        func updateNSView(_ view: RetinaAwareNSImageView, context: Context) {
             image.isTemplate = false
             view.image = image
+            view.syncBackingScale()
+        }
+    }
+
+    /// SwiftUI-hosted `NSImageView` often keeps `contentsScale` at 1.0, so
+    /// channel logos look soft on Retina Macs. Re-sync whenever the window or
+    /// screen scale changes.
+    private final class RetinaAwareNSImageView: NSImageView {
+        override init(frame frameRect: NSRect) {
+            super.init(frame: frameRect)
+            wantsLayer = true
+            layerContentsRedrawPolicy = .onSetNeedsDisplay
+        }
+
+        @available(*, unavailable)
+        required init?(coder: NSCoder) {
+            fatalError("init(coder:) has not been implemented")
+        }
+
+        override func layout() {
+            super.layout()
+            syncBackingScale()
+        }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            syncBackingScale()
+        }
+
+        override func viewDidChangeBackingProperties() {
+            super.viewDidChangeBackingProperties()
+            syncBackingScale()
+        }
+
+        func syncBackingScale() {
+            let scale = window?.backingScaleFactor
+                ?? NSScreen.main?.backingScaleFactor
+                ?? 2
+            if layer?.contentsScale != scale {
+                layer?.contentsScale = scale
+            }
+            needsDisplay = true
+        }
+
+        override func draw(_ dirtyRect: NSRect) {
+            NSGraphicsContext.current?.imageInterpolation = .high
+            super.draw(dirtyRect)
         }
     }
 #endif

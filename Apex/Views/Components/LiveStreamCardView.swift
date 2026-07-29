@@ -23,7 +23,12 @@ struct LiveStreamCardView: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            ChannelLogoView(url: stream.iconURL, size: 60, cornerRadius: 8, contentPadding: 8)
+            ChannelLogoView(
+                url: stream.iconURL,
+                size: logoSize,
+                cornerRadius: logoCorner,
+                contentPadding: logoPadding
+            )
                 .id("\(stream.id)-\(stream.streamIcon ?? "")")
 
             VStack(alignment: .leading, spacing: 4) {
@@ -105,6 +110,30 @@ struct LiveStreamCardView: View {
                 .foregroundStyle(.secondary)
         }
         .padding(.vertical, 8)
+    }
+
+    private var logoSize: CGFloat {
+        #if os(macOS)
+            76
+        #else
+            60
+        #endif
+    }
+
+    private var logoCorner: CGFloat {
+        #if os(macOS)
+            10
+        #else
+            8
+        #endif
+    }
+
+    private var logoPadding: CGFloat {
+        #if os(macOS)
+            4
+        #else
+            8
+        #endif
     }
 }
 

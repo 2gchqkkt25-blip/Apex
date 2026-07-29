@@ -58,13 +58,27 @@ private struct ChannelLogoContent: View {
                 .fill(logoPlate)
 
             if let resolvedImage {
-                // `UIImageView` via `PlatformImageView` — SwiftUI `Image(uiImage:)`
-                // often draws blank inside `LazyVStack` / `ScrollView` on iOS.
-                PlatformImageView(image: resolvedImage)
-                    .frame(
-                        width: max(frameWidth - contentPadding * 2, 1),
-                        height: max(frameHeight - contentPadding * 2, 1)
-                    )
+                #if os(macOS)
+                    // Prefer SwiftUI `Image` on Mac — `NSImageView` hosted under the
+                    // EPG column's `.offset` often rasterizes soft on Retina.
+                    Image(nsImage: resolvedImage)
+                        .resizable()
+                        .interpolation(.high)
+                        .antialiased(true)
+                        .aspectRatio(contentMode: .fit)
+                        .frame(
+                            width: max(frameWidth - contentPadding * 2, 1),
+                            height: max(frameHeight - contentPadding * 2, 1)
+                        )
+                #else
+                    // `UIImageView` via `PlatformImageView` — SwiftUI `Image(uiImage:)`
+                    // often draws blank inside `LazyVStack` / `ScrollView` on iOS.
+                    PlatformImageView(image: resolvedImage)
+                        .frame(
+                            width: max(frameWidth - contentPadding * 2, 1),
+                            height: max(frameHeight - contentPadding * 2, 1)
+                        )
+                #endif
             } else if failed || url == nil {
                 Image(systemName: "antenna.radiowaves.left.and.right")
                     .font(.system(size: min(frameWidth, frameHeight) * 0.34))

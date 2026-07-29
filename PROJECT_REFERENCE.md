@@ -327,7 +327,7 @@ Without these keys, the app works but metadata is limited to what the IPTV provi
 
 - **iOS / iPad / macOS:** "Browse by Genre" (Movie + Series) and "All Categories" (Movie + Series) moved from Movies/Series tabs into the **Search tab's empty state** (when no query is entered).
 - **tvOS:** Unchanged — existing `CategoryPosterGridSection` (poster tiles) remains.
-- **Movies/Series tabs:** Now show only Recently Watched, Favorites, Recently Added, and the first 4 category preview rows. Cleaner for browsing; discovery lives in Search.
+- **Movies/Series tabs:** Recently Watched, Favorites, Recently Added, then a **poster preview rail for every category** (`MovieCategoryPreview` / `SeriesCategoryPreview`, capped items per row + Show All). `LazyVStack` + inactive-tab unmount keep off-screen `@Query` rows out of memory.
 - Navigation destinations for `GenreSelection` added to SearchView (navigates to `MovieGenreView` / `SeriesGenreView`).
 
 ### ✅ Fixed — Build Error (terminal crash recovery)
@@ -974,7 +974,7 @@ Settings → Appearance (between Premium and Profiles)
 - **Empty search state:** When the search field is empty, Search shows two poster grids — **Movie Categories** and **Series Categories** — listing every category for the active playlist (respects category sort order and parental restrictions).
 - **Poster tiles:** Each category tile shows artwork from a title in that category (first available movie poster or series cover), with the category name over a bottom gradient. Focus ring + lift matches other browse cards. Tapping navigates to the full category grid (`MovieCategoryView` / `SeriesCategoryView`).
 - **Search unchanged:** Typing in the search field switches to normal text search results (movies, series, live TV).
-- **iOS / macOS unchanged:** "All Categories" text tiles remain on Movies and Series tabs.
+- **iOS / macOS:** Movies/Series tabs show a poster preview rail for every category (not name tiles). Search empty state still offers genre/category browse.
 - **Files:** `CategoryPosterTile`, `CategoryPosterGridSection`, `CategoryArtwork` in `CategoryContentGrid.swift`; `SearchView.swift` (tvOS category browse + `navigationDestination(for: Category.self)`); `#if !os(tvOS)` guard on `CategoryGridSection` in `MoviesView.swift` / `SeriesView.swift`.
 
 ### iPadOS System Theme Contrast Fixes (June 30, 2026)
@@ -1622,14 +1622,14 @@ See **What's Been Built → iOS Device — Large Library Fix** above for full de
 | Feature | Notes |
 |---------|-------|
 | **In-player EPG mini-guide overlay** | Shipped. Guide over live video without leaving playback. tvOS: Guide tab on controls (Up from play focuses it; surfing only when controls hidden). iOS/macOS: Guide button in track pill. Shared `PlayerEPGGuidePanel` timeline (same idea as main `EPGGuideView`). See `CHANGELOG.md` Unreleased. |
-| **Live TV mini preview** | Shipped on **iOS, macOS, and tvOS**. Wi‑Fi-only `LiveTVMiniPreview` (`AVPlayerCoordinator`). **tvOS/macOS:** in-flow leading column beside guide/list; width ~28% of screen/pane (clamped). **iOS:** floating top-leading overlay. Tap/Select → fullscreen; same channel again on tvOS also expands; other channel retargets. Cellular / Stalker / Stremio / external player still go fullscreen. |
+| **Live TV mini preview** | Shipped on **iOS, macOS, and tvOS**. Wi‑Fi-only `LiveTVMiniPreview` (**VLCKit** preview / **KSPlayer** fullscreen). **All platforms:** in-flow top row above guide/list — info pane left (`LiveTVPreviewInfoPane`), PiP right (macOS previously floated). Tap/Select → fullscreen; same channel again on tvOS also expands; other channel retargets. Cellular / Stalker / Stremio / external player still go fullscreen. Settings → TV Guide → Channel Preview. |
 
 ### Priority 1 — High Impact (next up)
 
 | Feature | Difficulty | Description |
 |---------|-----------|-------------|
 | **Unified Library (Playlist Merge)** | Medium (~3-5 days) | Merge multiple playlists into one view. Dedup by TMDB ID or channel name. Show content once with multi-source failover. If stream A fails → try stream B automatically. User sets provider priority. Toggle on/off in Settings. Safe approach: merge at view level only (merge index), not in SwiftData — no extra memory, no crashes. |
-| **Hybrid SQLite Layer** | Medium-Hard (~1 week) | Replace SwiftData `@Query` for catalog browse with GRDB.swift cursor-based reads. Constant memory regardless of playlist size. Only needed if tab-unmount approach still isn't enough for 50K+ item playlists. |
+| **Hybrid SQLite Layer** | Medium-Hard (~1 week) | Replace SwiftData `@Query` for catalog **browse** with GRDB.swift cursor-based reads. Constant memory for huge playlists. **Does not speed playlist sync** (sync is network + SwiftData upsert); dual-writing would add sync work. Only needed if tab-unmount still isn't enough for 50K+ item playlists. |
 
 ### Priority 2 — Media Server Integration
 

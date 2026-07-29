@@ -50,12 +50,12 @@ struct EPGMetrics {
         #elseif os(macOS)
             EPGMetrics(
                 pointsPerMinute: 3.4,
-                rowHeight: 58,
-                rowSpacing: 4,
-                channelColumnWidth: 210,
-                headerHeight: 36,
-                blockCornerRadius: 7,
-                blockInset: 10
+                rowHeight: 72,
+                rowSpacing: 6,
+                channelColumnWidth: 248,
+                headerHeight: 40,
+                blockCornerRadius: 8,
+                blockInset: 12
             )
         #else
             EPGMetrics(
@@ -86,12 +86,12 @@ struct EPGMetrics {
         #elseif os(macOS)
             EPGMetrics(
                 pointsPerMinute: 3.2,
-                rowHeight: 44,
-                rowSpacing: 3,
-                channelColumnWidth: 160,
-                headerHeight: 28,
-                blockCornerRadius: 6,
-                blockInset: 8
+                rowHeight: 56,
+                rowSpacing: 4,
+                channelColumnWidth: 180,
+                headerHeight: 30,
+                blockCornerRadius: 7,
+                blockInset: 10
             )
         #else
             EPGMetrics(
@@ -197,6 +197,9 @@ struct EPGChannelCell: View {
     private var logoSide: CGFloat {
         #if os(tvOS)
             72
+        #elseif os(macOS)
+            // Fill most of the taller Mac guide row so logos stay crisp.
+            min(max(metrics.rowHeight - 14, 48), 64)
         #else
             38
         #endif
@@ -206,10 +209,26 @@ struct EPGChannelCell: View {
         ChannelLogoView(
             url: row.logoURL,
             size: logoSide,
-            cornerRadius: 7,
-            contentPadding: 4
+            cornerRadius: logoCorner,
+            contentPadding: logoPadding
         )
         .id("\(row.id)-\(row.stream.streamIcon ?? "")")
+    }
+
+    private var logoCorner: CGFloat {
+        #if os(macOS)
+            9
+        #else
+            7
+        #endif
+    }
+
+    private var logoPadding: CGFloat {
+        #if os(macOS)
+            2
+        #else
+            4
+        #endif
     }
 
     private var nameFont: Font {
