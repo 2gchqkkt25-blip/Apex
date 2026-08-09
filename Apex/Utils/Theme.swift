@@ -205,7 +205,10 @@ extension View {
         let fill = ThemeManager.shared.colors.prefersGlass
             ? Color.clear
             : ThemeManager.shared.colors.background
-        return background(fill).ignoresSafeArea()
+        // Only the fill may extend under the bars. Applying `ignoresSafeArea()`
+        // to the whole view strips the safe area from every page's content —
+        // on macOS that put all tab content underneath the titlebar/toolbar.
+        return background(fill.ignoresSafeArea())
     }
 
     /// Makes a List or Form background transparent so the theme background

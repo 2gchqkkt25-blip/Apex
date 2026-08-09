@@ -78,6 +78,12 @@ struct MainTabView: View {
             .environment(router)
             .environment(\.contentRestriction, contentRestriction)
             .themeBackground()
+        #if os(macOS)
+            // Window-level: keep the titlebar/tab strip from auto-hiding in
+            // system fullscreen so Search (and other tabs) stay usable.
+            .toolbarBackgroundVisibility(.visible, for: .windowToolbar)
+            .windowToolbarFullScreenVisibility(.visible)
+        #endif
         #if os(iOS)
             .tabBarMinimizeOnScrollDownIfAvailable()
         #endif
@@ -183,9 +189,19 @@ struct MainTabView: View {
                     lazyTab(.liveTV, selection: selection.wrappedValue) { LiveTVView() }
                 }
 
-                Tab(value: AppTab.search, role: .search) {
-                    lazyTab(.search, selection: selection.wrappedValue) { SearchView() }
-                }
+                #if os(macOS)
+                    // A regular Search tab owns `.searchable` + the type filter.
+                    // `role: .search` parks the field in the window search chrome
+                    // and hides the All / Movies / Series / Live TV control (or
+                    // duplicates it under the main tabs).
+                    Tab("Search", systemImage: "magnifyingglass", value: AppTab.search) {
+                        lazyTab(.search, selection: selection.wrappedValue) { SearchView() }
+                    }
+                #else
+                    Tab(value: AppTab.search, role: .search) {
+                        lazyTab(.search, selection: selection.wrappedValue) { SearchView() }
+                    }
+                #endif
             }
             .onChange(of: selection.wrappedValue) { _, tab in
                 activatedTabs.insert(tab)

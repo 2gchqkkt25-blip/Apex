@@ -110,6 +110,9 @@ final class VLCPlayerCoordinator: NSObject, ObservableObject {
     private var startupWatchdog: Task<Void, Never>?
     /// Guards `onPlaybackFailure` so a failure is reported at most once per load.
     private var didReportFailure = false
+    /// Original Xtream `.m3u8` when live preview started on `.ts`. Used once if
+    /// MPEG-TS never produces a first frame, so HLS-only panels keep working.
+    private var livePreviewHLSFallbackURL: URL?
     /// VLC may repeat `.ended` delegate notifications while tearing down an
     /// item. Keep auto-advance idempotent for each configured media item.
     private var didReportPlaybackEnd = false
@@ -142,6 +145,7 @@ final class VLCPlayerCoordinator: NSObject, ObservableObject {
         needsResume = !media.isLive && media.startTime > 1
         options = VLCPlayerOptions.load()
         mediaURL = media.url
+        livePreviewHLSFallbackURL = nil
         retry.reset()
         hasStartedPlayback = false
         didReportFailure = false
@@ -208,6 +212,7 @@ final class VLCPlayerCoordinator: NSObject, ObservableObject {
         videoInfo = nil
         options = VLCPlayerOptions.load()
         mediaURL = media.url
+        livePreviewHLSFallbackURL = nil
         lastKnownTime = 0
         retry.reset()
         hasStartedPlayback = false
@@ -288,11 +293,33 @@ final class VLCPlayerCoordinator: NSObject, ObservableObject {
     /// the failure overlay.
     private func reportFailure() {
         guard !didReportFailure else { return }
+        if !hasStartedPlayback, tryLivePreviewHLSFallback() { return }
         didReportFailure = true
         cancelStartupWatchdog()
         retry.cancel()
         Logger.player.error("playback failure reported")
         onPlaybackFailure?()
+    }
+
+    /// If Xtream `.ts` never started, retry the original `.m3u8` with the same
+    /// preview options that already worked on device. One shot — then fail out.
+    private func tryLivePreviewHLSFallback() -> Bool {
+        guard let fallback = livePreviewHLSFallbackURL else { return false }
+        livePreviewHLSFallbackURL = nil
+        cancelStartupWatchdog()
+        retry.cancel()
+        mediaURL = fallback
+        hasStartedPlayback = false
+        didReportFailure = false
+        startStartupWatchdog()
+
+        guard let vlcMedia = VLCMedia(url: fallback) else { return false }
+        applyLivePreviewOptions(to: vlcMedia)
+        mediaPlayer.media = vlcMedia
+        Logger.player.log("configureLivePreview: MPEG-TS failed, falling back to HLS")
+        mediaPlayer.play()
+        isPlaying = true
+        return true
     }
 
     /// Re-prepare the current stream after a failure (the Try Again button).
@@ -395,11 +422,18 @@ final class VLCPlayerCoordinator: NSObject, ObservableObject {
         cancelStartupWatchdog()
         Logger.player.log("tearDown")
         mediaPlayer.delegate = nil
+        // `stop()` is asynchronous (queued on VLC's player thread) and closing
+        // the input is what makes the HLS PlaylistManager thread exit. Do NOT
+        // also clear `mediaPlayer.media` here: mutating the media while the
+        // stop is still in flight races the player thread's media-changed
+        // handler and trips libvlc's retain assert (SIGABRT in
+        // libvlc_media_retain via vlc_player_OpenNextMedia).
         if mediaPlayer.isPlaying { mediaPlayer.stop() }
         mediaPlayer.drawable = nil
         pipController = nil
         didConfigure = false
         mediaURL = nil
+        livePreviewHLSFallbackURL = nil
         hasStartedPlayback = false
         isPlaying = false
         onPlaybackFailure = nil
@@ -408,8 +442,10 @@ final class VLCPlayerCoordinator: NSObject, ObservableObject {
     /// Lightweight live browse preview — short network cache so IPTV MPEG-TS
     /// starts quickly without the deep buffers used for fullscreen VOD/live.
     func configureLivePreview(media: PlayableMedia) {
+        let preview = media.preferringMPEGTSForLivePreview()
+        livePreviewHLSFallbackURL = preview.url != media.url ? media.url : nil
         if didConfigure {
-            reloadLivePreview(media: media)
+            reloadLivePreview(media: preview)
             return
         }
         didConfigure = true
@@ -419,7 +455,7 @@ final class VLCPlayerCoordinator: NSObject, ObservableObject {
         startTime = 0
         needsResume = false
         options = VLCPlayerOptions.load()
-        mediaURL = media.url
+        mediaURL = preview.url
         retry.reset()
         hasStartedPlayback = false
         didReportFailure = false
@@ -429,13 +465,13 @@ final class VLCPlayerCoordinator: NSObject, ObservableObject {
         startStartupWatchdog()
         mediaPlayer.delegate = self
 
-        guard let vlcMedia = VLCMedia(url: media.url) else {
+        guard let vlcMedia = VLCMedia(url: preview.url) else {
             reportFailure()
             return
         }
         applyLivePreviewOptions(to: vlcMedia)
         mediaPlayer.media = vlcMedia
-        Logger.player.log("configureLivePreview: url=\(media.url.absoluteString, privacy: .private(mask: .hash))")
+        Logger.player.log("configureLivePreview: url=\(preview.url.absoluteString, privacy: .private(mask: .hash))")
         mediaPlayer.play()
         isPlaying = true
     }

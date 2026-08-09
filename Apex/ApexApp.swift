@@ -27,6 +27,9 @@ struct ApexApp: App {
     @State private var profileManager: ProfileManager
     @State private var playlistSwitch = PlaylistSwitchModel()
     @State private var parentalControls: ParentalControls
+    #if os(macOS)
+        @NSApplicationDelegateAdaptor(ApexMacAppDelegate.self) private var macAppDelegate
+    #endif
 
     init() {
         let (catalog, cloud) = Self.makeModelContainers()
@@ -292,6 +295,7 @@ struct ApexApp: App {
             .modelContainer(catalogContainer)
             .windowStyle(.hiddenTitleBar)
             .windowResizability(.contentMinSize)
+            .defaultLaunchBehavior(.suppressed)
         #endif
     }
 }

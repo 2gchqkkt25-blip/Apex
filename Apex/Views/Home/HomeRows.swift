@@ -7,6 +7,7 @@
 //  file focused on data loading and screen composition.
 //
 
+import SwiftData
 import SwiftUI
 
 // MARK: - Row
@@ -52,6 +53,7 @@ private struct HomeItemCell: View {
     var onRemove: ((HomeMediaItem) -> Void)?
     var onVote: ((HomeMediaItem, RecommendationVote) -> Void)?
     var animationNamespace: Namespace.ID?
+    @Environment(\.modelContext) private var modelContext
 
     var body: some View {
         Group {
@@ -61,7 +63,7 @@ private struct HomeItemCell: View {
                     HomePosterCard(
                         title: item.title,
                         imageURL: item.imageURL,
-                        progress: item.progress,
+                        progress: item.resumeProgress(in: modelContext),
                         rating: item.posterRating,
                         isFavorite: movie.isFavorite
                     )
@@ -73,7 +75,7 @@ private struct HomeItemCell: View {
                     HomePosterCard(
                         title: item.title,
                         imageURL: item.imageURL,
-                        progress: item.progress,
+                        progress: item.resumeProgress(in: modelContext),
                         rating: item.posterRating,
                         isFavorite: series.isFavorite
                     )

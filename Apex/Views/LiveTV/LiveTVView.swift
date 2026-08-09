@@ -501,7 +501,13 @@ struct LiveTVView: View {
         guard let previewMedia else { return }
         let media = previewMedia
         self.previewMedia = nil
-        openFullscreen(media)
+        Task { @MainActor in
+            // Mini preview already stopped VLC when the user tapped it; list
+            // retaps only nil `previewMedia`. Yield so PlaylistManager exits
+            // before KSPlayer opens the same live URL.
+            try? await Task.sleep(for: .milliseconds(200))
+            openFullscreen(media)
+        }
     }
 
     private func playChannel(_ stream: LiveStream) {
@@ -625,9 +631,6 @@ struct CategorySidebar: View {
                     }
                     .padding(.horizontal, 8)
                 }
-                #if os(macOS)
-                .contentMargins(.top, 52, for: .scrollContent)
-                #endif
             } else {
                 // Normal mode: category selection
                 ScrollView {
@@ -679,9 +682,6 @@ struct CategorySidebar: View {
                     }
                     .padding(.horizontal, 8)
                 }
-                #if os(macOS)
-                .contentMargins(.top, 52, for: .scrollContent)
-                #endif
             }
         }
         #if os(macOS)

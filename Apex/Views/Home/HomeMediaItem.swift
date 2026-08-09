@@ -8,6 +8,7 @@
 //
 
 import Foundation
+import SwiftData
 
 enum HomeMediaItem: Identifiable, Hashable {
     case movie(Movie)
@@ -69,21 +70,44 @@ enum HomeMediaItem: Identifiable, Hashable {
     }
 
     /// Resume fraction for partially-watched movies or series (0...1), otherwise nil.
-    var progress: Double? {
+    ///
+    /// Series progress is loaded from the store by episode id — never via
+    /// `series.episodes`. Walking that relationship during SwiftUI prefetch
+    /// traps on `_InvalidFutureBackingData` after prune / CloudKit merge.
+    func resumeProgress(in context: ModelContext) -> Double? {
         switch self {
         case let .movie(movie):
-            guard let duration = movie.durationSecs, duration > 0,
-                  movie.watchProgress > 0, !movie.isWatched else { return nil }
-            return min(movie.watchProgress / Double(duration), 1)
+            Self.movieResumeFraction(movie)
         case let .series(series):
-            let inProgressEpisodes = series.episodes
-                .filter { $0.watchProgress > 0 && !$0.isWatched }
-                .sorted { ($0.lastWatchedDate ?? .distantPast) > ($1.lastWatchedDate ?? .distantPast) }
-            guard let activeEpisode = inProgressEpisodes.first,
-                  let duration = activeEpisode.durationSecs, duration > 0 else { return nil }
-            return min(activeEpisode.watchProgress / Double(duration), 1)
+            Self.seriesResumeFraction(seriesId: series.id, in: context)
         case .live:
-            return nil
+            nil
         }
+    }
+
+    static func movieResumeFraction(_ movie: Movie) -> Double? {
+        guard let duration = movie.durationSecs, duration > 0,
+              movie.watchProgress > 0, !movie.isWatched else { return nil }
+        return min(movie.watchProgress / Double(duration), 1)
+    }
+
+    /// In-progress episode for `seriesId`, using the `{seriesId}-episode-…` id
+    /// convention (Xtream / Stalker / M3U). Does not materialize `Series.episodes`.
+    static func seriesResumeFraction(seriesId: String, in context: ModelContext) -> Double? {
+        guard !seriesId.isEmpty else { return nil }
+        let idPrefix = seriesId + "-episode-"
+        var descriptor = FetchDescriptor<Episode>(
+            predicate: #Predicate { episode in
+                episode.id.starts(with: idPrefix)
+                    && episode.watchProgress > 0
+                    && episode.isWatched == false
+            },
+            sortBy: [SortDescriptor(\.lastWatchedDate, order: .reverse)]
+        )
+        descriptor.fetchLimit = 1
+        guard let episode = (try? context.fetch(descriptor))?.first,
+              let duration = episode.durationSecs, duration > 0
+        else { return nil }
+        return min(episode.watchProgress / Double(duration), 1)
     }
 }

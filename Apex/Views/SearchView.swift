@@ -8,6 +8,10 @@
 import SwiftData
 import SwiftUI
 
+#if os(macOS)
+    import AppKit
+#endif
+
 struct SearchView: View {
     @Namespace private var animationNamespace
     @Environment(\.modelContext) private var modelContext
@@ -92,9 +96,9 @@ struct SearchView: View {
             Group {
                 if trimmedQuery.isEmpty {
                     #if os(tvOS)
-                    tvOSCategoryBrowse
+                        tvOSCategoryBrowse
                     #else
-                    categoryBrowse
+                        categoryBrowse
                     #endif
                 } else {
                     searchResultsList
@@ -105,6 +109,9 @@ struct SearchView: View {
                 .scrollContentBackground(.hidden)
             #endif
             .background(themeManager.colors.background)
+            #if os(macOS)
+                .toolbarBackground(.visible, for: .windowToolbar)
+            #endif
             .searchable(text: $searchText, prompt: "Movies, Series, Live TV...")
             #if os(iOS)
                 .searchToolbarMinimizeIfAvailable()
@@ -278,6 +285,77 @@ struct SearchView: View {
     }
     #endif
 
+    /// Capsule buttons (not a segmented `Picker`) so macOS still receives clicks
+    /// while the toolbar search field is focused.
+    @ViewBuilder
+    private var searchFilterPicker: some View {
+        HStack(spacing: 8) {
+            ForEach(ContentFilter.allCases) { filter in
+                Button {
+                    #if os(macOS)
+                        // Search field steals the click otherwise (resigns focus
+                        // and never delivers it to the control).
+                        NSApp.keyWindow?.makeFirstResponder(nil)
+                    #endif
+                    selectedFilter = filter
+                } label: {
+                    Text(filter.label)
+                        .font(.subheadline.weight(selectedFilter == filter ? .semibold : .regular))
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 7)
+                        .background(
+                            Capsule().fill(
+                                selectedFilter == filter
+                                    ? themeManager.colors.accent.opacity(0.35)
+                                    : Color.primary.opacity(0.08)
+                            )
+                        )
+                }
+                .buttonStyle(.plain)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 4)
+        .padding(.vertical, 4)
+    }
+
+    @ViewBuilder
+    private var searchResultRows: some View {
+        // Only show "No Results" once a query has actually been run, so it
+        // doesn't flash while the input is debouncing.
+        if results.isEmpty {
+            if !debouncedSearchText.isEmpty {
+                ContentUnavailableView.search
+            }
+        } else {
+            Section {
+                ForEach(results) { result in
+                    switch result {
+                    case let .movie(movie):
+                        NavigationLink(value: movie) {
+                            SearchResultRow(result: result)
+                                .matchedTransitionSourceIfAvailable(id: movie.id, in: animationNamespace)
+                        }
+                    case let .series(series):
+                        NavigationLink(value: series) {
+                            SearchResultRow(result: result)
+                                .matchedTransitionSourceIfAvailable(id: series.id, in: animationNamespace)
+                        }
+                    case let .liveStream(stream):
+                        Button {
+                            playChannel(stream)
+                        } label: {
+                            SearchResultRow(result: result)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            } header: {
+                Text("\(results.count) Results")
+            }
+        }
+    }
+
     @ViewBuilder
     private var searchResultsList: some View {
         List {
@@ -288,49 +366,15 @@ struct SearchView: View {
                     description: Text("Search for movies, series, or live TV channels")
                 )
             } else {
-                    // Filter Picker
-                    Picker("Filter", selection: $selectedFilter) {
-                        ForEach(ContentFilter.allCases) { filter in
-                            Text(filter.label).tag(filter)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .listRowInsets(EdgeInsets())
-                    .listRowBackground(Color.clear)
-
-                    // Results — only show "No Results" once a query has actually
-                    // been run, so it doesn't flash while the input is debouncing.
-                    if results.isEmpty {
-                        if !debouncedSearchText.isEmpty {
-                            ContentUnavailableView.search
-                        }
-                    } else {
-                        Section {
-                            ForEach(results) { result in
-                                switch result {
-                                case let .movie(movie):
-                                    NavigationLink(value: movie) {
-                                        SearchResultRow(result: result)
-                                            .matchedTransitionSourceIfAvailable(id: movie.id, in: animationNamespace)
-                                    }
-                                case let .series(series):
-                                    NavigationLink(value: series) {
-                                        SearchResultRow(result: result)
-                                            .matchedTransitionSourceIfAvailable(id: series.id, in: animationNamespace)
-                                    }
-                                case let .liveStream(stream):
-                                    Button {
-                                        playChannel(stream)
-                                    } label: {
-                                        SearchResultRow(result: result)
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                            }
-                        } header: {
-                            Text("\(results.count) Results")
-                        }
-                    }
+                Section {
+                    searchFilterPicker
+                        .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
+                        .listRowBackground(Color.clear)
+                    #if !os(tvOS)
+                        .listRowSeparator(.hidden)
+                    #endif
+                }
+                searchResultRows
             }
         }
     }

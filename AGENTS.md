@@ -93,6 +93,18 @@ Two separate `ModelContainer`s:
 - Never call `layer.prepareToPlay()` on a running session — use `player.replace()` (`rebuildStream(on:)`) to avoid a UAF crash.
 - Frozen image + healthy audio on live TV = MPEG-TS 2³³ clock wrap; fixed by the `noteClockDrift()` watchdog.
 
+### VLCKit (Live TV mini preview)
+- `stop()` is **asynchronous** (queued on VLC's player thread). Never mutate `mediaPlayer.media` (including setting it to `nil`) right after `stop()` — it races the media-changed handler and aborts in `libvlc_media_retain`. `stop()` alone closes the input and ends the HLS PlaylistManager thread.
+
+### SwiftUI safe areas
+- To extend a background under the bars, scope `ignoresSafeArea()` to the fill — `background(fill.ignoresSafeArea())` — never to the container view. Applying it to the view strips the safe area from all of its content; on macOS that draws every page under the titlebar (Build 50→51 regression).
+
+### VLCKit (Live TV mini preview)
+- `stop()` is **asynchronous** (queued on VLC's player thread). Never mutate `mediaPlayer.media` (including setting it to `nil`) right after `stop()` — it races the media-changed handler and aborts in `libvlc_media_retain`. `stop()` alone closes the input and ends the HLS PlaylistManager thread.
+
+### SwiftUI safe areas
+- To extend a background under the bars, scope `ignoresSafeArea()` to the fill — `background(fill.ignoresSafeArea())` — never to the container view. Applying it to the view strips the safe area from all of its content; on macOS that draws every page under the titlebar (Build 50→51 regression).
+
 ### Localization
 String Catalogs (English + German). Run `xcstringstool sync` and include the tvOS stringsdata. Normalize `.xcstrings` with `Scripts/normalize-xcstrings.swift` (pre-commit hook) to avoid format churn.
 

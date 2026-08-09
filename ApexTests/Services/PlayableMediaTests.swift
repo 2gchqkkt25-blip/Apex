@@ -101,6 +101,46 @@ struct PlayableMediaTests {
         #expect(media?.posterURL == nil)
     }
 
+    @Test func `live preview rewrites Xtream HLS to MPEG-TS`() throws {
+        let media = try #require(PlayableMedia.from(
+            stream: LiveStream(id: "l-ts", streamId: 200, name: "News"),
+            playlist: makePlaylist()
+        ))
+        #expect(media.url.absoluteString.hasSuffix("/200.m3u8"))
+        let preview = media.preferringMPEGTSForLivePreview()
+        #expect(preview.url.absoluteString == "http://example.com:8080/live/user/pass/200.ts")
+        #expect(preview.id == media.id)
+        #expect(preview.contentRef == media.contentRef)
+    }
+
+    @Test func `live preview keeps non-Xtream HLS unchanged`() throws {
+        let media = try PlayableMedia(
+            id: "live-m3u",
+            url: #require(URL(string: "http://cdn.example.com/playlist.m3u8")),
+            title: "M3U",
+            subtitle: nil,
+            posterURL: nil,
+            kind: .live,
+            startTime: 0,
+            contentRef: .live("l-m3u")
+        )
+        #expect(media.preferringMPEGTSForLivePreview().url == media.url)
+    }
+
+    @Test func `live preview leaves VOD URLs unchanged`() throws {
+        let media = try PlayableMedia(
+            id: "vod-1",
+            url: #require(URL(string: "http://example.com:8080/movie/user/pass/1.m3u8")),
+            title: "Movie",
+            subtitle: nil,
+            posterURL: nil,
+            kind: .vod,
+            startTime: 0,
+            contentRef: .movie("m-1")
+        )
+        #expect(media.preferringMPEGTSForLivePreview().url == media.url)
+    }
+
     // MARK: - catchup(stream:playlist:...)
 
     @Test func `catchup builds seekable vod media for archive channel`() throws {

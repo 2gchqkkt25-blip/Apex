@@ -89,18 +89,6 @@
       "idiom" : "mac",
       "scale" : "2x",
       "size" : "512x512"
-    },
-    {
-      "filename" : "ApexIcon-1024.png",
-      "idiom" : "tv",
-      "scale" : "1x",
-      "size" : "128x128"
-    },
-    {
-      "filename" : "ApexIcon-1024.png",
-      "idiom" : "tv",
-      "scale" : "2x",
-      "size" : "128x128"
     }
   ],
   "info" : {

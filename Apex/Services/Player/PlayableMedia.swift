@@ -44,6 +44,22 @@ struct PlayableMedia: Identifiable, Hashable, Codable {
             contentRef: contentRef
         )
     }
+
+    /// Live browse preview runs in VLCKit (must not share KSPlayer's FFmpeg TLS).
+    /// Xtream live URLs default to `.m3u8` for fullscreen KSPlayer; VLC's adaptive
+    /// HLS demuxer asserts on gappy IPTV playlists (`SegmentList::updateWith`).
+    /// MPEG-TS `.ts` uses the demux VLC was chosen for.
+    nonisolated func preferringMPEGTSForLivePreview() -> PlayableMedia {
+        guard isLive else { return self }
+        let path = url.path
+        guard path.localizedCaseInsensitiveContains("/live/"),
+              path.lowercased().hasSuffix(".m3u8"),
+              var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        else { return self }
+        components.path = String(path.dropLast(5)) + ".ts"
+        guard let tsURL = components.url else { return self }
+        return replacingURL(tsURL)
+    }
 }
 
 extension PlayableMedia {

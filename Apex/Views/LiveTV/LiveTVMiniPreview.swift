@@ -9,6 +9,8 @@
 //  Uses VLCKit for the float so IPTV/MPEG-TS loads reliably, without sharing
 //  KSPlayer's FFmpeg TLS session with the fullscreen player (that overlap was
 //  crashing on expand). Fullscreen keeps KSPlayer as the primary engine.
+//  Xtream preview tries `.ts` first (avoids VLC adaptive HLS asserts) and falls
+//  back to the original `.m3u8` if MPEG-TS never starts.
 //
 
 import AVFoundation
@@ -134,8 +136,8 @@ struct LiveTVMiniPreview: View {
         activateAudioSessionIfNeeded()
         vlcCoordinator.startupTimeout = 20
         vlcCoordinator.onPlaybackFailure = {
-            Logger.player.error("LiveTV mini preview: VLC failed — expanding")
-            onExpand()
+            Logger.player.error("LiveTV mini preview: VLC failed — stopping then expanding")
+            requestExpand()
         }
         vlcCoordinator.configureLivePreview(media: media)
     }

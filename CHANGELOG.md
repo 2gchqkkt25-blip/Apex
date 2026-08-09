@@ -4,7 +4,19 @@ All notable changes to Apex Stream Player.
 
 ---
 
-## Unreleased
+## Build 51 (1.2.0) — August 8, 2026
+
+### Bug Fixes
+
+- **Home crash while scrolling (`_InvalidFutureBackingData`)** — Resume bars no longer walk `series.episodes` during SwiftUI prefetch. TestFlight 1.2.0 (50) trapped on `Episode.watchProgress` when a pruned/faulted episode was still in the relationship. Progress is fetched from the store by episode id instead.
+- **Live TV mini preview VLC abort on HLS refresh** — Preview stays on VLCKit (must not share KSPlayer’s FFmpeg TLS). Xtream preview tries MPEG-TS `.ts` first and falls back to the original `.m3u8` if `.ts` never starts, so HLS-only panels keep working. VLC is fully stopped before KSPlayer fullscreen starts.
+- **Crash expanding mini preview to fullscreen (all platforms)** — Teardown cleared `mediaPlayer.media` right after the asynchronous `stop()`, racing VLC’s player thread and tripping the `libvlc_media_retain` assert (SIGABRT). `stop()` alone closes the input; the media clear was removed.
+- **Content drawn under the macOS titlebar (search filters, browse grids)** — `themeBackground()` applied `ignoresSafeArea()` to the whole tab view instead of just the background fill, stripping the safe area from every page. The search All / Movies / Series / Live TV filters (and other top-of-page content) now sit below the toolbar in windowed and fullscreen modes, and the Live TV sidebar no longer needs its 52 pt margin workaround. Filter taps also resign the search field so the click lands on the filter.
+- **macOS Quit does nothing** — A hidden player `WindowGroup` plus fullscreen / VLC teardown left terminate hanging. Quit and closing the last window now exit the app.
+
+### Improvements
+
+- **App icon** — New Apex “A” artwork across iOS, macOS, and tvOS. tvOS Home Screen / App Store icons are full-bleed 5:3 layered stacks (not a letterboxed square — that caused the black side bars last time). The square 128×128 tvOS fallback was removed so it cannot be selected again.
 
 ---
 
