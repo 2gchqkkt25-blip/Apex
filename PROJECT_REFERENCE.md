@@ -13,7 +13,7 @@
 | **App** | **Apex** — IPTV player by StreamInfinity |
 | **Forked from** | [Lume](https://github.com/bilipp/Lume) |
 | **License** | AGPL-3.0 (source must stay public) |
-| **Location** | `/Users/christopherbird/IPTV app/IPTV player/` |
+| **Location** | `/Volumes/HomeDrive/Apex/IPTV app/IPTV player/` |
 | **Cloned** | June 28, 2026 |
 
 ---
@@ -22,6 +22,7 @@
 
 - Browse & stream **Live TV**, **Movies**, and **Series**
 - Content from **Xtream Codes**, **M3U/M3U8 playlists**, **Stalker portals**, or **Stremio addons**
+- Personal media libraries from **Plex, Jellyfin, and Emby** in the dedicated **Media** tab
 - **EPG guide** with full time-grid view — plus **in-player Guide** while watching live TV
 - **Live TV mini preview** while browsing (Wi‑Fi)
 - **TMDB/OMDb metadata** — posters, ratings, cast, descriptions
@@ -36,7 +37,7 @@
 ## How to Build & Run
 
 ```bash
-open "/Users/christopherbird/IPTV app/IPTV player/Apex.xcodeproj"
+open "/Volumes/HomeDrive/Apex/IPTV app/IPTV player/Apex.xcodeproj"
 ```
 
 - Requires Xcode 16+ (Swift 6)
@@ -1599,19 +1600,7 @@ See **What's Been Built → iOS Device — Large Library Fix** above for full de
 
 | Service | Difficulty | Notes |
 |---------|-----------|-------|
-| **Jellyfin** | Medium (~2-3 days) | Start here — open-source, simple API key auth, clean REST API. Fetch libraries → movies/series/episodes. Direct play URLs with auth token. Server handles transcoding. |
-| **Emby** | Medium (~2 days after Jellyfin) | Nearly identical API to Jellyfin (forked from it). Same auth pattern, same library/stream structure. Minimal incremental work. |
-| **Plex** | Medium-Hard (~3-5 days) | Unique PIN-based auth flow (user authorizes on plex.tv, app polls for token). Larger user base. Libraries + direct play similar to Jellyfin once authenticated. |
-
-**Shared approach for all three:**
-- New `PlaylistSourceType` cases (`.jellyfin`, `.emby`, `.plex`)
-- Login flow in Add Playlist (server URL + credentials/API key)
-- Sync pipeline fetches libraries → content → episodes (same pattern as Xtream/Stremio)
-- Playback uses direct HTTP stream URLs with auth token (no special resolution needed)
-- Metadata already provided by the server (posters, ratings, descriptions — no TMDB needed)
-- Watch state + resume position sync back to server (mark watched, resume where left off)
-
-**Recommended order:** Jellyfin → Emby → Plex (builds on each other, increasing complexity)
+| *(none — media servers shipped in Media tab)* | — | Jellyfin, Emby, and Plex are implemented under **Media** (not `PlaylistSourceType`). See Completed table above. |
 
 ---
 
@@ -1619,12 +1608,14 @@ See **What's Been Built → iOS Device — Large Library Fix** above for full de
 
 > Features prioritized for future builds. Difficulty estimates assume the current architecture.
 
-### Completed (unreleased — Jul 27, 2026)
+### Completed (unreleased — Aug 31, 2026)
 
 | Feature | Notes |
 |---------|-------|
+| **Media Servers (Jellyfin / Emby / Plex)** | Shipped. Dedicated **Media** tab (separate from IPTV). Connect cards + Settings → Media Servers. Library sync into the local catalog with `{serverUUID}-movie-…` ids (invisible to IPTV tabs). Playback: direct play → remux → HLS transcode, **AVPlayer-first**. Plex PIN auth on all platforms. Progress + watched state report back to the server. Connection configuration mirrors through CloudKit; catalog data remains local per device. Coordinated deletion removes local catalog rows and the mirror. Plex playback verified on tvOS + iOS; Jellyfin verified on tvOS, iOS, and macOS (Aug 31). |
 | **In-player EPG mini-guide overlay** | Shipped. Guide over live video without leaving playback. tvOS: Guide tab on controls (Up from play focuses it; surfing only when controls hidden). iOS/macOS: Guide button in track pill. Shared `PlayerEPGGuidePanel` timeline (same idea as main `EPGGuideView`). See `CHANGELOG.md` Unreleased. |
 | **Live TV mini preview** | Shipped on **iOS, macOS, and tvOS**. Wi‑Fi-only `LiveTVMiniPreview` (**VLCKit** preview / **KSPlayer** fullscreen — separate stacks so expand does not share FFmpeg TLS). Xtream preview tries MPEG-TS `.ts` then falls back to `.m3u8`. **All platforms:** in-flow top row above guide/list — info pane left (`LiveTVPreviewInfoPane`), PiP right (macOS previously floated). Tap/Select → fullscreen; same channel again on tvOS also expands; other channel retargets. Cellular / Stalker / Stremio / external player still go fullscreen. Settings → TV Guide → Channel Preview. |
+| **macOS signing + distribution** | Done — macOS build signed and shipping via TestFlight. |
 
 ### Priority 1 — High Impact (next up)
 
@@ -1635,11 +1626,7 @@ See **What's Been Built → iOS Device — Large Library Fix** above for full de
 
 ### Priority 2 — Media Server Integration
 
-| Feature | Difficulty | Description |
-|---------|-----------|-------------|
-| **Jellyfin** | Medium (~2-3 days) | First media server. Open-source, simple auth, clean API. |
-| **Emby** | Low (~2 days) | Near-identical to Jellyfin. Incremental after Jellyfin. |
-| **Plex** | Medium (~3-5 days) | PIN-based auth. Largest user base. |
+✅ **Done** — see **Media Servers (Jellyfin / Emby / Plex)** in Completed above. Dedicated Media tab; not merged into IPTV playlists.
 
 ### Priority 3 — Quality of Life
 
@@ -1656,7 +1643,6 @@ See **What's Been Built → iOS Device — Large Library Fix** above for full de
 
 | Feature | Difficulty | Description |
 |---------|-----------|-------------|
-| **macOS signing + distribution** | Low (setup) | Requires Apple Developer certs on build machine. No code changes. |
 | **iPad multi-window** | Medium (~2 days) | Split View support — watch live TV in one window, browse in another. |
 | **CarPlay** | Medium (~3 days) | Audio-only streams (radio channels) via CarPlay. Limited to audio per Apple guidelines. |
 | **Widgets (iOS/macOS)** | Medium (~2 days) | Home Screen widget showing what's on now / next up / continue watching. |
@@ -1698,4 +1684,4 @@ See **What's Been Built → iOS Device — Large Library Fix** above for full de
 
 ---
 
-*Last updated: July 20, 2026 (Build 46 — playback completion/autoplay reliability, Skip Intro stability, macOS subtitle and Next Episode refinements, tvOS large-library responsiveness, and release packaging hardening.)*
+*Last updated: August 31, 2026 (Build 52 — Media tab for Plex/Jellyfin/Emby, iPhone five-tab navigation, Apple TV HD transcode path).*

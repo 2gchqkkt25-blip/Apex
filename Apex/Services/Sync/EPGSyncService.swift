@@ -22,6 +22,17 @@ enum EPGSyncGate {
     nonisolated(unsafe) static var isActive = false
 }
 
+/// Prevents the content indexer from competing with a media-library import.
+enum MediaSyncGate {
+    nonisolated(unsafe) static var isActive = false
+}
+
+/// True while the Media connect UI is up (Plex PIN / server pick). Blocks EPG,
+/// iCloud reconcile, and image loads so Apple TV HD does not jetsam mid-connect.
+enum MediaConnectGate {
+    nonisolated(unsafe) static var isActive = false
+}
+
 @Observable
 final class EPGSyncService {
     static let shared = EPGSyncService()
@@ -214,6 +225,7 @@ final class EPGSyncService {
     /// Background trigger (launch / after a content sync): refreshes only if the
     /// guide is stale per the EPG frequency setting.
     func syncIfDue() {
+        guard !MediaConnectGate.isActive else { return }
         // Background guide refresh only on Wi‑Fi — 8–14 XMLTV feeds are too heavy
         // for cellular and compete with browse/playback on constrained links.
         guard NetworkMonitor.shared.shouldProceedWithHeavyNetworkWork() else { return }
@@ -242,6 +254,10 @@ final class EPGSyncService {
         // start a second concurrent EPG refresh on top of it.
         guard exclusiveSyncOwners == 0 else {
             Logger.database.info("EPG sync suppressed — playlist sync in progress")
+            return
+        }
+        guard !MediaConnectGate.isActive else {
+            Logger.database.info("EPG sync suppressed — media server connect in progress")
             return
         }
         // Coalesce: if a refresh is already in flight, let it finish rather than

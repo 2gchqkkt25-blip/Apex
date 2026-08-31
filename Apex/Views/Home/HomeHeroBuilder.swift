@@ -11,11 +11,31 @@ import Foundation
 import SwiftData
 
 enum HomeHeroBuilder {
-    private static let heroCap = 8
-    private static let minimumHeroCount = 3
+    private static var heroCap: Int {
+        #if os(tvOS)
+        DeviceMemoryTier.current.isConstrained ? 3 : 8
+        #else
+        8
+        #endif
+    }
+
+    private static var minimumHeroCount: Int {
+        #if os(tvOS)
+        DeviceMemoryTier.current.isConstrained ? 1 : 3
+        #else
+        3
+        #endif
+    }
+
     /// Max rows pulled when supplementing heroes or searching by title. Keeps
     /// post-sync Home loads from hydrating a 20k+ catalog on device.
-    private static let libraryFetchLimit = 80
+    private static var libraryFetchLimit: Int {
+        #if os(tvOS)
+        DeviceMemoryTier.current.isConstrained ? 40 : 80
+        #else
+        80
+        #endif
+    }
     private static let titleSearchFetchLimit = 100
 
     /// Interleaves trending movies and series the user owns into hero items.
@@ -173,18 +193,24 @@ enum HomeHeroBuilder {
 
     private static func fetchMovie(tmdbId: Int, playlistPrefix: String, in context: ModelContext) -> Movie? {
         var descriptor = FetchDescriptor<Movie>(
-            predicate: #Predicate { $0.tmdbId == tmdbId && $0.id.localizedStandardContains(playlistPrefix) }
+            predicate: #Predicate { $0.tmdbId == tmdbId }
         )
-        descriptor.fetchLimit = 1
-        return try? context.fetch(descriptor).first
+        descriptor.fetchLimit = 12
+        let candidates = (try? context.fetch(descriptor)) ?? []
+        return candidates.first {
+            HomeCatalogScope.includes($0.id, playlistPrefix: playlistPrefix.isEmpty ? nil : playlistPrefix)
+        }
     }
 
     private static func fetchSeries(tmdbId: Int, playlistPrefix: String, in context: ModelContext) -> Series? {
         var descriptor = FetchDescriptor<Series>(
-            predicate: #Predicate { $0.tmdbId == tmdbId && $0.id.localizedStandardContains(playlistPrefix) }
+            predicate: #Predicate { $0.tmdbId == tmdbId }
         )
-        descriptor.fetchLimit = 1
-        return try? context.fetch(descriptor).first
+        descriptor.fetchLimit = 12
+        let candidates = (try? context.fetch(descriptor)) ?? []
+        return candidates.first {
+            HomeCatalogScope.includes($0.id, playlistPrefix: playlistPrefix.isEmpty ? nil : playlistPrefix)
+        }
     }
 
     private static func matchMovieByTitle(
@@ -274,18 +300,115 @@ extension HomeHeroBuilder {
         playlistPrefix: String,
         restriction: ContentRestriction
     ) async -> TrendingCatalogMatch {
-        guard !playlistPrefix.isEmpty else {
-            return TrendingCatalogMatch(movieIDs: [], seriesIDs: [], heroSlots: [])
+        if !playlistPrefix.isEmpty {
+            let playlistMatch = await Task.detached(priority: .userInitiated) {
+                let context = ModelContext(container)
+                let slots = supplementHeroSlots(
+                    context: context,
+                    playlistPrefix: playlistPrefix,
+                    restriction: restriction,
+                    existing: []
+                )
+                return TrendingCatalogMatch(movieIDs: [], seriesIDs: [], heroSlots: slots)
+            }.value
+            if !playlistMatch.heroSlots.isEmpty {
+                return playlistMatch
+            }
         }
-        return await Task.detached(priority: .userInitiated) {
+        return await mediaServerLibraryHeroMatch(container: container, restriction: restriction)
+    }
+
+    /// Plex/Jellyfin/Emby items use `{serverUUID}-movie-…` ids — not the IPTV
+    /// playlist prefix Home normally scopes on.
+    nonisolated static func mediaServerLibraryHeroMatch(
+        container: ModelContainer,
+        restriction: ContentRestriction
+    ) async -> TrendingCatalogMatch {
+        await Task.detached(priority: .userInitiated) {
             let context = ModelContext(container)
-            let slots = supplementHeroSlots(
-                context: context,
-                playlistPrefix: playlistPrefix,
-                restriction: restriction,
-                existing: []
-            )
+            let slots = mediaServerHeroSlots(context: context, restriction: restriction)
             return TrendingCatalogMatch(movieIDs: [], seriesIDs: [], heroSlots: slots)
+        }.value
+    }
+
+    /// Top library picks for Home trending rows when TMDB is unavailable.
+    nonisolated static func libraryTrendingMatch(
+        container: ModelContainer,
+        playlistPrefix: String,
+        restriction: ContentRestriction,
+        limit: Int = 20
+    ) async -> TrendingCatalogMatch {
+        let rowLimit = min(limit, trendingRowLimit)
+        if !playlistPrefix.isEmpty {
+            let playlistMatch = await Task.detached(priority: .userInitiated) {
+                let context = ModelContext(container)
+
+                var movieDescriptor = FetchDescriptor<Movie>(
+                    predicate: #Predicate { $0.id.localizedStandardContains(playlistPrefix) },
+                    sortBy: [SortDescriptor(\.rating, order: .reverse)]
+                )
+                movieDescriptor.fetchLimit = rowLimit
+                let movieIDs = ((try? context.fetch(movieDescriptor)) ?? [])
+                    .filter { !restriction.hides(categoryID: $0.categoryId) }
+                    .map(\.id)
+
+                var seriesDescriptor = FetchDescriptor<Series>(
+                    predicate: #Predicate { $0.id.localizedStandardContains(playlistPrefix) }
+                )
+                seriesDescriptor.fetchLimit = rowLimit * 2
+                let seriesIDs = ((try? context.fetch(seriesDescriptor)) ?? [])
+                    .filter { !restriction.hides(categoryID: $0.categoryId) }
+                    .sorted { libraryScore($0) > libraryScore($1) }
+                    .prefix(rowLimit)
+                    .map(\.id)
+
+                return TrendingCatalogMatch(movieIDs: movieIDs, seriesIDs: seriesIDs, heroSlots: [])
+            }.value
+            if !playlistMatch.movieIDs.isEmpty || !playlistMatch.seriesIDs.isEmpty {
+                return playlistMatch
+            }
+        }
+        return await mediaServerLibraryTrendingMatch(
+            container: container,
+            restriction: restriction,
+            limit: rowLimit
+        )
+    }
+
+    nonisolated static func mediaServerLibraryTrendingMatch(
+        container: ModelContainer,
+        restriction: ContentRestriction,
+        limit: Int
+    ) async -> TrendingCatalogMatch {
+        await Task.detached(priority: .userInitiated) {
+            let context = ModelContext(container)
+
+            var movieDescriptor = FetchDescriptor<Movie>(
+                sortBy: [
+                    SortDescriptor(\.lastWatchedDate, order: .reverse),
+                    SortDescriptor(\.rating, order: .reverse)
+                ]
+            )
+            movieDescriptor.fetchLimit = libraryFetchLimit
+            let movieIDs = ((try? context.fetch(movieDescriptor)) ?? [])
+                .filter { $0.isMediaServerCatalogItem && !restriction.hides(categoryID: $0.categoryId) }
+                .prefix(limit)
+                .map(\.id)
+
+            var seriesDescriptor = FetchDescriptor<Series>(
+                sortBy: [
+                    SortDescriptor(\.lastWatchedDate, order: .reverse),
+                    SortDescriptor(\.rating, order: .reverse)
+                ]
+            )
+            seriesDescriptor.fetchLimit = libraryFetchLimit
+            let seriesIDs = ((try? context.fetch(seriesDescriptor)) ?? [])
+                .filter { $0.isMediaServerCatalogItem && !restriction.hides(categoryID: $0.categoryId) }
+                .sorted { libraryScore($0) > libraryScore($1) }
+                .prefix(limit)
+                .map(\.id)
+
+            return TrendingCatalogMatch(movieIDs: movieIDs, seriesIDs: seriesIDs, heroSlots: [])
         }.value
     }
 
@@ -366,11 +489,19 @@ extension HomeHeroBuilder {
             )
 
             return TrendingCatalogMatch(
-                movieIDs: Array(movieIDs.prefix(20)),
-                seriesIDs: Array(seriesIDs.prefix(20)),
+                movieIDs: Array(movieIDs.prefix(trendingRowLimit)),
+                seriesIDs: Array(seriesIDs.prefix(trendingRowLimit)),
                 heroSlots: heroSlots
             )
         }.value
+    }
+
+    private static var trendingRowLimit: Int {
+        #if os(tvOS)
+        DeviceMemoryTier.current.isConstrained ? 6 : 20
+        #else
+        20
+        #endif
     }
 
     nonisolated static func fetchMoviesByTmdbId(
@@ -384,7 +515,7 @@ extension HomeHeroBuilder {
         let descriptor = FetchDescriptor<Movie>(predicate: movieTmdbIdPredicate(ids: ids))
         var byId: [Int: Movie] = [:]
         for movie in (try? context.fetch(descriptor)) ?? [] {
-            guard playlistPrefix.isEmpty || movie.id.hasPrefix(playlistPrefix),
+            guard HomeCatalogScope.includes(movie.id, playlistPrefix: playlistPrefix.isEmpty ? nil : playlistPrefix),
                   !restriction.hides(categoryID: movie.categoryId),
                   let tmdbId = movie.tmdbId, byId[tmdbId] == nil
             else { continue }
@@ -404,7 +535,7 @@ extension HomeHeroBuilder {
         let descriptor = FetchDescriptor<Series>(predicate: seriesTmdbIdPredicate(ids: ids))
         var byId: [Int: Series] = [:]
         for series in (try? context.fetch(descriptor)) ?? [] {
-            guard playlistPrefix.isEmpty || series.id.hasPrefix(playlistPrefix),
+            guard HomeCatalogScope.includes(series.id, playlistPrefix: playlistPrefix.isEmpty ? nil : playlistPrefix),
                   !restriction.hides(categoryID: series.categoryId),
                   let tmdbId = series.tmdbId, byId[tmdbId] == nil
             else { continue }
@@ -462,7 +593,7 @@ extension HomeHeroBuilder {
         restriction: ContentRestriction,
         existing: [TrendingCatalogMatch.HeroSlot]
     ) -> [TrendingCatalogMatch.HeroSlot] {
-        guard existing.count < minimumHeroCount, !playlistPrefix.isEmpty else { return existing }
+        guard existing.count < heroCap else { return existing }
 
         var result = existing
         var usedIDs = Set(existing.map { slot in
@@ -472,48 +603,125 @@ extension HomeHeroBuilder {
             }
         })
 
+        if !playlistPrefix.isEmpty {
+            var movieDescriptor = FetchDescriptor<Movie>(
+                predicate: #Predicate { $0.id.localizedStandardContains(playlistPrefix) },
+                sortBy: [SortDescriptor(\.rating, order: .reverse)]
+            )
+            movieDescriptor.fetchLimit = libraryFetchLimit
+            let movies = ((try? context.fetch(movieDescriptor)) ?? [])
+                .filter { !restriction.hides(categoryID: $0.categoryId) }
+
+            for movie in movies {
+                guard result.count < heroCap else { break }
+                let heroID = "movie-\(movie.id)"
+                guard !usedIDs.contains(heroID) else { continue }
+                guard movie.tmdbId != nil || movie.backdropPath != nil || movie.iconURL != nil else { continue }
+                result.append(.init(
+                    media: .movie,
+                    catalogID: movie.id,
+                    backdropPath: movie.backdropPath,
+                    overview: movie.plot ?? movie.tagline ?? ""
+                ))
+                usedIDs.insert(heroID)
+            }
+
+            var seriesDescriptor = FetchDescriptor<Series>(
+                predicate: #Predicate { $0.id.localizedStandardContains(playlistPrefix) }
+            )
+            seriesDescriptor.fetchLimit = libraryFetchLimit
+            let seriesList = ((try? context.fetch(seriesDescriptor)) ?? [])
+                .filter { !restriction.hides(categoryID: $0.categoryId) }
+                .sorted { libraryScore($0) > libraryScore($1) }
+
+            for show in seriesList {
+                guard result.count < heroCap else { break }
+                let heroID = "series-\(show.id)"
+                guard !usedIDs.contains(heroID) else { continue }
+                guard show.tmdbId != nil || show.backdropPath != nil || !(show.cover ?? "").isEmpty else { continue }
+                result.append(.init(
+                    media: .series,
+                    catalogID: show.id,
+                    backdropPath: show.backdropPath,
+                    overview: show.plot ?? show.tagline ?? ""
+                ))
+                usedIDs.insert(heroID)
+            }
+        }
+
+        if result.count < heroCap {
+            for slot in mediaServerHeroSlots(context: context, restriction: restriction) {
+                guard result.count < heroCap else { break }
+                let heroID = switch slot.media {
+                case .movie: "movie-\(slot.catalogID)"
+                case .series: "series-\(slot.catalogID)"
+                }
+                guard usedIDs.insert(heroID).inserted else { continue }
+                result.append(slot)
+            }
+        }
+
+        return result
+    }
+
+    private static func mediaServerHeroSlots(
+        context: ModelContext,
+        restriction: ContentRestriction
+    ) -> [TrendingCatalogMatch.HeroSlot] {
+        var result: [TrendingCatalogMatch.HeroSlot] = []
+        var usedIDs = Set<String>()
+
         var movieDescriptor = FetchDescriptor<Movie>(
-            predicate: #Predicate { $0.id.localizedStandardContains(playlistPrefix) },
-            sortBy: [SortDescriptor(\.rating, order: .reverse)]
+            sortBy: [
+                SortDescriptor(\.lastWatchedDate, order: .reverse),
+                SortDescriptor(\.rating, order: .reverse)
+            ]
         )
         movieDescriptor.fetchLimit = libraryFetchLimit
         let movies = ((try? context.fetch(movieDescriptor)) ?? [])
-            .filter { !restriction.hides(categoryID: $0.categoryId) }
+            .filter { movie in
+                movie.isMediaServerCatalogItem
+                    && !restriction.hides(categoryID: movie.categoryId)
+                    && (movie.tmdbId != nil || movie.backdropPath != nil || movie.iconURL != nil)
+            }
 
         for movie in movies {
             guard result.count < heroCap else { break }
             let heroID = "movie-\(movie.id)"
-            guard !usedIDs.contains(heroID) else { continue }
-            guard movie.tmdbId != nil || movie.backdropPath != nil || movie.iconURL != nil else { continue }
+            guard usedIDs.insert(heroID).inserted else { continue }
             result.append(.init(
                 media: .movie,
                 catalogID: movie.id,
                 backdropPath: movie.backdropPath,
                 overview: movie.plot ?? movie.tagline ?? ""
             ))
-            usedIDs.insert(heroID)
         }
 
         var seriesDescriptor = FetchDescriptor<Series>(
-            predicate: #Predicate { $0.id.localizedStandardContains(playlistPrefix) }
+            sortBy: [
+                SortDescriptor(\.lastWatchedDate, order: .reverse),
+                SortDescriptor(\.rating, order: .reverse)
+            ]
         )
         seriesDescriptor.fetchLimit = libraryFetchLimit
         let seriesList = ((try? context.fetch(seriesDescriptor)) ?? [])
-            .filter { !restriction.hides(categoryID: $0.categoryId) }
+            .filter { series in
+                series.isMediaServerCatalogItem
+                    && !restriction.hides(categoryID: series.categoryId)
+                    && (series.tmdbId != nil || series.backdropPath != nil || !(series.cover ?? "").isEmpty)
+            }
             .sorted { libraryScore($0) > libraryScore($1) }
 
         for show in seriesList {
             guard result.count < heroCap else { break }
             let heroID = "series-\(show.id)"
-            guard !usedIDs.contains(heroID) else { continue }
-            guard show.tmdbId != nil || show.backdropPath != nil || !(show.cover ?? "").isEmpty else { continue }
+            guard usedIDs.insert(heroID).inserted else { continue }
             result.append(.init(
                 media: .series,
                 catalogID: show.id,
                 backdropPath: show.backdropPath,
                 overview: show.plot ?? show.tagline ?? ""
             ))
-            usedIDs.insert(heroID)
         }
 
         return result

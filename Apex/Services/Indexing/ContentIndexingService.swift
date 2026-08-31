@@ -82,9 +82,15 @@ final class ContentIndexingService {
     /// embedding model and the per-chunk saves (each forces a main-context merge
     /// that re-runs every `@Query`) shouldn't fight that first browse. `task` is
     /// claimed immediately, so a second kick during the delay coalesces to a no-op.
-    func kick(after delay: Duration = .zero) {
+    ///
+    /// On tvOS, indexing only runs when `allowOnTV` is true (Settings → Storage).
+    /// Automatic kicks were jetsam-killing large libraries while Home was idle.
+    func kick(after delay: Duration = .zero, allowOnTV: Bool = false) {
         guard let container, task == nil else { return }
-        guard !EPGSyncGate.isActive else { return }
+        #if os(tvOS)
+        guard allowOnTV else { return }
+        #endif
+        guard !EPGSyncGate.isActive, !MediaSyncGate.isActive, !MediaConnectGate.isActive else { return }
         // Skip on offline, cellular, or Low Data Mode — TMDB indexing is
         // hundreds of requests that can crash a large-library device on cell.
         guard NetworkMonitor.shared.shouldProceedWithHeavyNetworkWork() else { return }
@@ -100,12 +106,12 @@ final class ContentIndexingService {
             }
             do {
                 try await indexer.run(status: self)
-            } catch is CancellationError where EPGSyncGate.isActive {
+            } catch is CancellationError where EPGSyncGate.isActive || MediaSyncGate.isActive {
                 Logger.indexing.debug("Indexing paused for EPG sync")
                 state = .waiting
             } catch is CancellationError {
                 state = .interrupted
-            } catch let error as URLError where error.code == .cancelled && EPGSyncGate.isActive {
+            } catch let error as URLError where error.code == .cancelled && (EPGSyncGate.isActive || MediaSyncGate.isActive) {
                 Logger.indexing.debug("Indexing paused for EPG sync")
                 state = .waiting
             } catch is TextEmbedder.EmbedderError {
@@ -115,6 +121,30 @@ final class ContentIndexingService {
                 state = .interrupted
                 Logger.indexing.error("Indexing pass interrupted: \(error)")
             }
+        }
+    }
+
+    /// Cancels any in-flight pass so a home-media import owns the catalog store.
+    func prepareForMediaSync() {
+        MediaSyncGate.isActive = true
+        task?.cancel()
+        task = nil
+        if state == .indexing || state == .preparing {
+            state = .waiting
+        }
+    }
+
+    func mediaSyncFinished() {
+        MediaSyncGate.isActive = false
+        NotificationCenter.default.post(name: .apexMediaSyncDidFinish, object: nil)
+    }
+
+    /// Stops an in-flight pass after memory pressure (tvOS jetsam prevention).
+    func cancelForMemoryPressure() {
+        task?.cancel()
+        task = nil
+        if state == .indexing || state == .preparing || state == .waiting {
+            state = .interrupted
         }
     }
 

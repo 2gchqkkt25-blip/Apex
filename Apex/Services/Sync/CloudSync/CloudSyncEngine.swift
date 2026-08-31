@@ -12,6 +12,9 @@ nonisolated struct CloudSyncReconcileResult: Equatable {
     var contentPulled = 0
     var epgSourcesPushed = 0
     var epgSourcesPulled = 0
+    var mediaServersPushed = 0
+    var mediaServersPulled = 0
+    var mediaServersCreatedLocally = 0
     /// Cloud states whose local catalog item hasn't synced yet — left pending
     /// (shadow untouched) so a later pass applies them once the catalog lands.
     var contentPending = 0
@@ -23,6 +26,14 @@ nonisolated struct CloudSyncReconcileResult: Equatable {
     /// lost or recreated `default.store`): the stale shadow was dropped so this
     /// pass pulls the surviving cloud records back instead of pushing deletions.
     var recoveredFromEmptyLocalStore = false
+    /// Set when the CloudKit mirror was unreadable. No stores or shadow were
+    /// touched; a later pass retries once the mirror is readable again.
+    var skippedUntrustworthyCloudMirror = false
+    /// Set when the mirror came up entirely empty while the shadow still held
+    /// baselines (typically a CloudKit import that hadn't landed yet): the stale
+    /// shadow was dropped so this pass re-publishes local content rather than
+    /// deleting it.
+    var recoveredFromEmptyCloudMirror = false
 }
 
 /// A local catalog item paired with its current syncable state, gathered up-front
@@ -52,10 +63,20 @@ nonisolated struct LocalContentEntry {
 /// op routes to its own context; a reconcile saves both, then persists the shadow.
 actor CloudSyncEngine {
     /// The local-only catalog store (Playlist, Movie, Series, Episode, LiveStream).
-    let catalogContext: ModelContext
+    /// Replaced wholesale by `releaseHydratedRows()` between operations, so read
+    /// it fresh per use rather than caching it across a suspension point.
+    private(set) var catalogContext: ModelContext
     /// The CloudKit-mirrored store (SyncedPlaylist, UserContentState, UserProfile).
-    let cloudContext: ModelContext
+    private(set) var cloudContext: ModelContext
     let shadow: CloudSyncShadow
+
+    /// Retained so `releaseHydratedRows()` can rebuild the contexts above.
+    private let catalogContainer: ModelContainer
+    private let cloudContainer: ModelContainer
+    /// True for the DEBUG single-container init, where both store roles share one
+    /// context; the rebuild has to preserve that or tests would see the catalog
+    /// and mirror halves of a pass land in two contexts that never merge.
+    private let sharesOneContext: Bool
 
     /// The profile whose state the catalog currently projects. Read from
     /// `ActiveProfileStore` at the start of each reconcile, so content state is
@@ -65,11 +86,18 @@ actor CloudSyncEngine {
     var activeProfileID = UserProfile.defaultProfileID
 
     init(catalogContainer: ModelContainer, cloudContainer: ModelContainer, shadow: CloudSyncShadow = CloudSyncShadow()) {
-        catalogContext = ModelContext(catalogContainer)
-        catalogContext.autosaveEnabled = false
-        cloudContext = ModelContext(cloudContainer)
-        cloudContext.autosaveEnabled = false
+        self.catalogContainer = catalogContainer
+        self.cloudContainer = cloudContainer
+        sharesOneContext = false
+        catalogContext = Self.makeContext(catalogContainer)
+        cloudContext = Self.makeContext(cloudContainer)
         self.shadow = shadow
+    }
+
+    private static func makeContext(_ container: ModelContainer) -> ModelContext {
+        let context = ModelContext(container)
+        context.autosaveEnabled = false
+        return context
     }
 
     #if DEBUG
@@ -79,8 +107,10 @@ actor CloudSyncEngine {
         /// CloudKit's churn can't invalidate the catalog; the reconcile/merge logic
         /// the tests exercise routes identically either way.
         init(container: ModelContainer, shadow: CloudSyncShadow = CloudSyncShadow()) {
-            let ctx = ModelContext(container)
-            ctx.autosaveEnabled = false
+            catalogContainer = container
+            cloudContainer = container
+            sharesOneContext = true
+            let ctx = Self.makeContext(container)
             catalogContext = ctx
             cloudContext = ctx
             self.shadow = shadow
@@ -114,12 +144,36 @@ actor CloudSyncEngine {
             shadow.reset()
             result.recoveredFromEmptyLocalStore = true
         }
+
+        switch cloudMirrorReadiness() {
+        case .ready:
+            break
+        case .unreadable:
+            result.skippedUntrustworthyCloudMirror = true
+            return result
+        case .emptyButHadData:
+            // Symmetric to `.emptiedButHadData` above, and for the same reason:
+            // drop the stale baseline so every verdict this pass becomes a push
+            // rather than a deletion. Local content is then re-published to the
+            // mirror instead of being destroyed by an import that simply hadn't
+            // arrived yet. Safe in both directions — the mirror is empty, so
+            // there is nothing there for a push to overwrite.
+            Logger.sync.error("Cloud mirror empty but shadow had baselines — re-publishing local content instead of applying deletions")
+            shadow.reset()
+            result.recoveredFromEmptyCloudMirror = true
+        }
+
+        defer { releaseHydratedRows() }
         do {
             // Collapse any duplicate default profile a freshly-synced device
             // imported before its own bootstrap-created one could converge.
             try reconcileProfiles()
-            let livePrefixes = try reconcilePlaylists(into: &result)
-            try reconcileContent(livePrefixes: livePrefixes, into: &result)
+            let livePlaylistPrefixes = try reconcilePlaylists(into: &result)
+            let liveMediaServerPrefixes = try reconcileMediaServers(into: &result)
+            try reconcileContent(
+                livePrefixes: livePlaylistPrefixes.union(liveMediaServerPrefixes),
+                into: &result
+            )
             // Manual EPG sources sync as their own lightweight mirror; each
             // playlist's derived (linked) source is regenerated locally so it
             // appears on every device that has the playlist.
@@ -132,11 +186,32 @@ actor CloudSyncEngine {
             // 3-way merge is idempotent).
             try saveStores()
             shadow.persist()
-            Logger.sync.info("Reconcile pl +\(result.playlistsPushed) new \(result.playlistsCreatedLocally) ct +\(result.contentPushed)/\(result.contentPulled) pend \(result.contentPending) epg +\(result.epgSourcesPushed)/\(result.epgSourcesPulled)") // swiftlint:disable:this line_length
+            Logger.sync.info("Reconcile pl +\(result.playlistsPushed) new \(result.playlistsCreatedLocally) ms +\(result.mediaServersPushed)/\(result.mediaServersPulled)/new \(result.mediaServersCreatedLocally) ct +\(result.contentPushed)/\(result.contentPulled) pend \(result.contentPending) epg +\(result.epgSourcesPushed)/\(result.epgSourcesPulled)") // swiftlint:disable:this line_length
         } catch {
             Logger.sync.error("Reconcile failed: \(error.localizedDescription)")
         }
         return result
+    }
+
+    /// Drops every row the just-finished operation hydrated from both contexts.
+    ///
+    /// The contexts are created once and live for the whole process, so without
+    /// this each operation's rows stay in their identity maps indefinitely. A
+    /// reconcile pass touches all synced user state plus the catalog rows behind
+    /// it, and passes re-run on every playlist-sync completion — so on a large
+    /// catalog the maps grow without bound across a browsing session, which is
+    /// enough to walk a 2 GB Apple TV into jetsam with no playback involved.
+    ///
+    /// Safe on both outcomes: after a successful `saveStores()` nothing is
+    /// pending, and after a failed one the shadow is left untouched and the
+    /// three-way merge is idempotent, so dropping the half-applied changes is
+    /// exactly what the retrying pass expects. Callers must therefore not read
+    /// fetched models afterwards — every operation here returns value types.
+    /// `ModelContext` exposes no `reset()`, so the contexts are rebuilt instead —
+    /// dropping the old ones releases everything they had hydrated.
+    func releaseHydratedRows() {
+        catalogContext = Self.makeContext(catalogContainer)
+        cloudContext = sharesOneContext ? catalogContext : Self.makeContext(cloudContainer)
     }
 
     /// Persist pending changes in both stores, catalog first so a pulled cloud
@@ -162,12 +237,24 @@ actor CloudSyncEngine {
         var live = Set<String>()
         for id in ids {
             let key = id.uuidString
-            let verdict = CloudSyncMerge.reconcile(
+            var verdict = CloudSyncMerge.reconcile(
                 local: localByID[id].map(Self.values(from:)),
                 cloud: mirrorsByID[id].map(Self.values(from:)),
                 shadow: shadow.playlistShadow(key),
                 mergeConflict: PlaylistConfigValues.mergeConflict
             )
+            // `pullToLocal(nil)` means "the cloud mirror is gone, so delete locally".
+            // That is only safe when *this device* already deleted the playlist
+            // (`pushToCloud(nil)`). A missing mirror while the playlist is still
+            // here is how a slow/partial CloudKit import looks — and applying it
+            // wipes the catalog (`PlaylistDeletion.delete`). Keep iCloud on:
+            // refuse the wipe and re-publish the local playlist instead. A real
+            // delete on another device then reappears here until the user
+            // removes it on this device too — cheaper than losing the library.
+            if case .pullToLocal(.none) = verdict, let local = localByID[id] {
+                Logger.sync.error("Refusing iCloud playlist deletion for \(key, privacy: .public) — local playlist still present; re-publishing instead of wiping the catalog")
+                verdict = .pushToCloud(Self.values(from: local))
+            }
             applyPlaylistVerdict(verdict, id: id, local: localByID[id], mirror: mirrorsByID[id], into: &result)
 
             if Self.playlistRemains(verdict: verdict, hadLocal: localByID[id] != nil, hadCloud: mirrorsByID[id] != nil) {
@@ -180,20 +267,34 @@ actor CloudSyncEngine {
     // MARK: - Content state
 
     private func reconcileContent(livePrefixes: Set<String>, into result: inout CloudSyncReconcileResult) throws {
-        let mirrors = try fetchContentMirrors()
-        let localValues = try fetchLocalContentValues()
+        var mirrors = try fetchContentMirrors()
+        var localValues = try fetchLocalContentValues()
 
         var ids = Set(mirrors.keys).union(localValues.keys)
         ids.formUnion(shadow.contentShadowIDs())
 
+        rematchOrphanedContent(
+            mirrors: &mirrors,
+            localValues: &localValues,
+            ids: &ids
+        )
+
         for id in ids {
-            // Garbage-collect state whose owning playlist no longer exists on
-            // either side (deleted however). Clear the cloud record, reset any
-            // local orphan, and drop the shadow.
+            // Playlist UUID is baked into content ids. After delete + re-add the
+            // catalog has a new prefix, so an unmatched prefix is usually a
+            // pending rematch — not a user deletion. Keep the cloud record until
+            // a live catalog row claims it. Do not wipe recently watched.
             guard livePrefixes.contains(String(id.prefix(36))) else {
-                if let mirror = mirrors[id] { cloudContext.delete(mirror) }
-                if let entry = localValues[id] { resetLocalContent(entry) }
-                shadow.setContentShadow(id, nil)
+                // No owning playlist/server remains anywhere. Drop orphaned cloud
+                // state (favorites/progress keyed to a deleted source). When other
+                // sources are still live, keep dead-prefix rows — they may rematch
+                // once catalog syncs (delete + re-add with a new playlist UUID).
+                if livePrefixes.isEmpty {
+                    if let mirror = mirrors[id] {
+                        cloudContext.delete(mirror)
+                    }
+                    shadow.setContentShadow(id, nil)
+                }
                 continue
             }
 
@@ -211,6 +312,131 @@ actor CloudSyncEngine {
                 into: &result
             )
         }
+    }
+
+    /// Re-points cloud watch state at catalog rows after a playlist is deleted
+    /// and added back (new playlist UUID → new content ids, same provider item).
+    private func rematchOrphanedContent(
+        mirrors: inout [String: UserContentState],
+        localValues: inout [String: LocalContentEntry],
+        ids: inout Set<String>
+    ) {
+        let orphaned = mirrors.filter { localValues[$0.key] == nil }
+        guard !orphaned.isEmpty else { return }
+
+        for (oldId, mirror) in orphaned {
+            guard let key = ContentIdentity.stableKey(for: oldId),
+                  let model = catalogItem(kind: mirror.kind, stableKey: key)
+            else { continue }
+            let newId = catalogContentId(model)
+            guard newId != oldId else { continue }
+
+            if let existing = mirrors[newId], existing !== mirror {
+                existing.watchProgress = max(existing.watchProgress, mirror.watchProgress)
+                existing.isWatched = existing.isWatched || mirror.isWatched
+                existing.lastWatchedDate = laterDate(existing.lastWatchedDate, mirror.lastWatchedDate)
+                existing.isFavorite = existing.isFavorite || mirror.isFavorite
+                if existing.addedToWatchlistDate == nil {
+                    existing.addedToWatchlistDate = mirror.addedToWatchlistDate
+                }
+                cloudContext.delete(mirror)
+                mirrors[oldId] = nil
+            } else {
+                mirror.contentId = newId
+                mirrors[newId] = mirror
+                mirrors[oldId] = nil
+            }
+
+            let preserved = shadow.contentShadow(oldId)
+            shadow.setContentShadow(newId, preserved ?? shadow.contentShadow(newId))
+            shadow.setContentShadow(oldId, nil)
+            ids.remove(oldId)
+            ids.insert(newId)
+        }
+    }
+
+    private func catalogContentId(_ model: any PersistentModel) -> String {
+        switch model {
+        case let movie as Movie: movie.id
+        case let series as Series: series.id
+        case let episode as Episode: episode.id
+        case let stream as LiveStream: stream.id
+        default: ""
+        }
+    }
+
+    private func laterDate(_ a: Date?, _ b: Date?) -> Date? {
+        switch (a, b) {
+        case let (a?, b?): max(a, b)
+        case let (a?, nil): a
+        case let (nil, b?): b
+        case (nil, nil): nil
+        }
+    }
+
+    /// Finds the catalog row whose id resolves to `stableKey`, called once per
+    /// orphaned mirror.
+    ///
+    /// Content ids are `"<playlistUUID>-<stableKey>"`. The playlist UUID is
+    /// unknown here (that's the whole point of a rematch), so the match can only
+    /// be a substring one — and `#Predicate` supports neither `hasSuffix` nor a
+    /// regex, so the candidate set can't be narrowed to an exact tail in SQL.
+    /// Anchoring the needle with the separator at least drops the "key is a
+    /// prefix of another key" hits (`movie-1` no longer matches `10-movie-99`),
+    /// and `ContentIdentity.stableKey` still gates the survivors, so a key that
+    /// is genuinely another key's tail can't produce a false rematch.
+    ///
+    /// The memory fix is `propertiesToFetch`: candidates used to be hydrated in
+    /// full (plot, artwork paths, every column) across a 20K+ title catalog, per
+    /// orphan. Only `id` is ever read from the result — `rematchOrphanedContent`
+    /// passes it straight to `catalogContentId` — so faulting just that column
+    /// keeps each candidate tiny. Deliberately *not* `fetchLimit`ed: a fuzzy
+    /// predicate can place the true match anywhere in the result, so capping it
+    /// would silently drop rematches and lose watch state.
+    private func catalogItem(kind: SyncedContentKind, stableKey: String) -> (any PersistentModel)? {
+        let needle = "-\(stableKey)"
+        switch kind {
+        case .movie:
+            return firstCatalogMatch(
+                FetchDescriptor<Movie>(predicate: #Predicate { $0.id.contains(needle) }),
+                id: \.id,
+                properties: [\.id],
+                stableKey: stableKey
+            )
+        case .series:
+            return firstCatalogMatch(
+                FetchDescriptor<Series>(predicate: #Predicate { $0.id.contains(needle) }),
+                id: \.id,
+                properties: [\.id],
+                stableKey: stableKey
+            )
+        case .episode:
+            return firstCatalogMatch(
+                FetchDescriptor<Episode>(predicate: #Predicate { $0.id.contains(needle) }),
+                id: \.id,
+                properties: [\.id],
+                stableKey: stableKey
+            )
+        case .live:
+            return firstCatalogMatch(
+                FetchDescriptor<LiveStream>(predicate: #Predicate { $0.id.contains(needle) }),
+                id: \.id,
+                properties: [\.id],
+                stableKey: stableKey
+            )
+        }
+    }
+
+    private func firstCatalogMatch<T: PersistentModel>(
+        _ descriptor: FetchDescriptor<T>,
+        id: KeyPath<T, String>,
+        properties: [PartialKeyPath<T>],
+        stableKey: String
+    ) -> T? {
+        var lightweight = descriptor
+        lightweight.propertiesToFetch = properties
+        let candidates = (try? catalogContext.fetch(lightweight)) ?? []
+        return candidates.first { ContentIdentity.stableKey(for: $0[keyPath: id]) == stableKey }
     }
 
     // MARK: - Manual EPG sources
@@ -376,8 +602,9 @@ private extension CloudSyncEngine {
     /// `lastSyncDate`, so the UI's auto-sync will fetch its catalog).
     func applyPlaylistToLocal(_ value: PlaylistConfigValues?, id: UUID, local: Playlist?) -> Bool {
         guard let value else {
-            // Mirror the local-deletion path: remove the playlist's orphaned
-            // catalog content too, not just the `Playlist` row.
+            // Only reached when *this device* already removed the playlist
+            // (`pushToCloud(nil)` is the sibling-device path). A still-present
+            // local playlist is converted to a re-publish before we get here.
             if let local { PlaylistDeletion.delete(local, in: catalogContext) }
             return false
         }

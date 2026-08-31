@@ -90,6 +90,8 @@ final class VLCPlayerCoordinator: NSObject, ObservableObject {
     /// tracks appear so the tvOS overlay's track menus populate mid-stream.
     private var lastTextTrackCount = 0
     private var lastAudioTrackCount = 0
+    /// Apple TV HD: skip loading PGS subtitle decoders on heavy MKV remux.
+    private var suppressEmbeddedSubtitles = false
 
     /// Drives bounded backoff reconnects when the stream drops (see
     /// `handleRetry`).
@@ -143,6 +145,7 @@ final class VLCPlayerCoordinator: NSObject, ObservableObject {
         isLive = media.isLive
         startTime = media.startTime
         needsResume = !media.isLive && media.startTime > 1
+        suppressEmbeddedSubtitles = DeviceMemoryTier.current.isConstrained && media.isHeavyDirectRemux
         options = VLCPlayerOptions.load()
         mediaURL = media.url
         livePreviewHLSFallbackURL = nil
@@ -248,6 +251,9 @@ final class VLCPlayerCoordinator: NSObject, ObservableObject {
                 retry.reset()
                 hasStartedPlayback = true
                 cancelStartupWatchdog()
+                if suppressEmbeddedSubtitles {
+                    mediaPlayer.deselectAllTextTracks()
+                }
             }
         case .error:
             // A hard error before the first frame means this engine can't open
@@ -591,7 +597,13 @@ final class VLCPlayerCoordinator: NSObject, ObservableObject {
         guard textCount != lastTextTrackCount || audioCount != lastAudioTrackCount else { return }
         lastTextTrackCount = textCount
         lastAudioTrackCount = audioCount
-        if textCount > 0 { onEmbeddedSubtitlesAvailable?() }
+        if textCount > 0 {
+            if suppressEmbeddedSubtitles {
+                mediaPlayer.deselectAllTextTracks()
+            } else {
+                onEmbeddedSubtitlesAvailable?()
+            }
+        }
         objectWillChange.send()
     }
 }

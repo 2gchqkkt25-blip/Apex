@@ -95,6 +95,14 @@ enum PlayerEnginePriority {
         }
         return result
     }
+
+    /// De-duplicated list in the given order only — does **not** append missing
+    /// engines. Used for media-server playback where falling through AVPlayer →
+    /// KSPlayer → VLC on the same dead URL wastes memory on Apple TV HD.
+    static func exact(_ order: [PlayerEngineKind]) -> [PlayerEngineKind] {
+        var seen = Set<PlayerEngineKind>()
+        return order.filter { seen.insert($0).inserted }
+    }
 }
 
 enum PlayerSettings {

@@ -452,6 +452,7 @@ struct MovieCategoryView: View {
 
     private func loadNextPage() {
         guard canLoadMore, !isLoadingPage else { return }
+        if let ceiling = DeviceMemoryTier.current.maxPaginatedBrowseItems, movies.count >= ceiling { return }
         isLoadingPage = true
         defer { isLoadingPage = false }
         let categoryId = category.id
@@ -549,6 +550,7 @@ struct SeriesCategoryView: View {
 
     private func loadNextPage() {
         guard canLoadMore, !isLoadingPage else { return }
+        if let ceiling = DeviceMemoryTier.current.maxPaginatedBrowseItems, series.count >= ceiling { return }
         isLoadingPage = true
         defer { isLoadingPage = false }
         let categoryId = category.id

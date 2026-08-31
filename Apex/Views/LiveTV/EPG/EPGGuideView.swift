@@ -27,9 +27,11 @@ struct EPGGuideView: View {
 
     private let timeline: EPGTimeline
 
-    @State private var logoRefreshID = 0
     @State private var visibleCount = LiveChannelQuery.pageSize
     @State private var epgSync = EPGSyncService.shared
+    /// Coalesces mid-sync / gap-fill refresh bumps so the guide focus tree isn't
+    /// rebuilt on every signal while the user is scrolling.
+    @State private var pendingRefreshTask: Task<Void, Never>?
 
     init(
         scope: LiveChannelScope,
@@ -76,7 +78,6 @@ struct EPGGuideView: View {
             EPGGridScroller(
                 rows: displayRows,
                 timeline: timeline,
-                logoRefreshID: logoRefreshID,
                 onPlay: onPlay,
                 onNearEnd: {
                     guard visibleCount < channels.count else { return }
@@ -97,11 +98,23 @@ struct EPGGuideView: View {
                 visibleCount = LiveChannelQuery.pageSize
             }
             .onChange(of: epgSync.refreshGeneration) {
-                Task { await loadGuide(for: visible, force: true) }
+                pendingRefreshTask?.cancel()
+                pendingRefreshTask = Task {
+                    // Debounce: mid-sync signals + browse gap-fill can fire close
+                    // together; applying each immediately remounts programme cells
+                    // under the tvOS focus engine and makes guide scroll feel broken.
+                    try? await Task.sleep(for: .milliseconds(450))
+                    guard !Task.isCancelled else { return }
+                    await loadGuide(for: visible, force: true)
+                }
             }
             .onChange(of: visibleCount) { _, count in
                 let page = Array(scopedStreams.prefix(count))
                 Task { await loadGuide(for: page) }
+            }
+            .onDisappear {
+                pendingRefreshTask?.cancel()
+                pendingRefreshTask = nil
             }
         }
     }
@@ -115,23 +128,22 @@ struct EPGGuideView: View {
 
         // Same `EPGBrowseLoader.load` path as the list — identical store window
         // and speed. The grid clamps programmes to `timeline` when rendering.
+        // `force` reloads from store/warm cache only (no new gap-fill) so mid-sync
+        // refreshGeneration bumps don't re-trigger live API → forceGuideRefresh.
         let loaded = await EPGBrowseLoader.load(
             container: modelContext.container,
             channels: targets,
-            playlist: playlist
+            playlist: playlist,
+            allowGapFill: !force
         )
         guard !Task.isCancelled else { return }
 
         epgCache.merge(section: sectionToken, loaded: loaded)
 
+        let logoURLs = channels.compactMap(\.iconURL)
+        guard !logoURLs.isEmpty else { return }
         Task {
-            let rows = EPGGridBuilder.rows(
-                streams: channels,
-                programsByChannel: epgCache.programsByChannel,
-                timeline: timeline
-            )
-            await ChannelLogoLoader.prefetch(rows.compactMap(\.logoURL))
-            logoRefreshID += 1
+            await ChannelLogoLoader.prefetch(logoURLs)
         }
     }
 }
@@ -165,7 +177,6 @@ final class EPGScrollSync {
 private struct EPGGridScroller: View {
     let rows: [EPGChannelRow]
     let timeline: EPGTimeline
-    let logoRefreshID: Int
     let onPlay: (LiveStream) -> Void
     var onNearEnd: () -> Void = {}
 
@@ -196,7 +207,7 @@ private struct EPGGridScroller: View {
 
             // Body: frozen channel column + scrollable programme grid.
             HStack(spacing: 0) {
-                EPGFrozenColumn(rows: rows, metrics: metrics, sync: sync, logoRefreshID: logoRefreshID)
+                EPGFrozenColumn(rows: rows, metrics: metrics, sync: sync)
 
                 EPGGrid(
                     rows: rows,
@@ -299,7 +310,6 @@ private struct EPGFrozenColumn: View {
     let rows: [EPGChannelRow]
     let metrics: EPGMetrics
     let sync: EPGScrollSync
-    let logoRefreshID: Int
 
     var body: some View {
         GeometryReader { geo in
@@ -323,7 +333,6 @@ private struct EPGFrozenColumn: View {
                 .clipped()
         }
         .frame(width: metrics.channelColumnWidth)
-        .id(logoRefreshID)
         #if !os(tvOS)
             // The channel cards on tvOS already read as a separate rail, so
             // a vertical rule would only add visual weight.

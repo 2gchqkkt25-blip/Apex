@@ -57,6 +57,17 @@ extension KSPlayerEngineView {
         if !media.isLive, media.startTime > 1 {
             options.startPlayTime = media.startTime
         }
+        if DeviceMemoryTier.current.isConstrained, media.isHeavyDirectRemux {
+            // MKV with many PGS tracks: KSPlayer allocates a subtitle decoder per
+            // stream during probe — skip auto-select and cap FFmpeg analysis.
+            options.autoSelectEmbedSubtitle = false
+            options.isSecondOpen = false
+            options.probesize = 1_048_576
+            options.maxAnalyzeDuration = 500_000
+            options.decoderOptions["threads"] = "2"
+            options.preferredForwardBufferDuration = min(options.preferredForwardBufferDuration, 2)
+            options.maxBufferDuration = min(options.maxBufferDuration, 8)
+        }
         #if os(macOS)
             options.automaticWindowResize = false
         #endif

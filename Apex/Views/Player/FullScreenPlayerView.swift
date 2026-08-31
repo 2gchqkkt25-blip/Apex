@@ -23,7 +23,7 @@ struct FullScreenPlayerView: View {
     /// The user's ordered engine fallback list, read once when the player opens.
     /// Settings changes don't reshuffle a session already in flight; reopening
     /// the player picks up the new order. See `PlayerEnginePriority`.
-    private let enginePriority: [PlayerEngineKind]
+    @State private var enginePriority: [PlayerEngineKind]
 
     /// Index into `enginePriority` of the engine currently driving playback.
     /// Advanced when an engine fails to start a stream, falling the player back
@@ -79,6 +79,10 @@ struct FullScreenPlayerView: View {
     /// Wired by the active engine so the host-level skip overlay can seek.
     @State private var seekBridge = PlayerSeekBridge()
 
+    /// Retried once when Plex HLS transcode fails and a direct-play URL exists.
+    @State private var mediaServerDirectPlayFallbackAttempted = false
+    @State private var isRetryingMediaServerDirectPlay = false
+
     /// External subtitle file URL (from OpenSubtitles.com). Set when the stream
     /// doesn't have embedded subtitle tracks and OpenSubtitles is configured.
     @State private var externalSubtitleURL: URL?
@@ -112,11 +116,17 @@ struct FullScreenPlayerView: View {
         self.media = media
         _activeMedia = State(initialValue: media)
         let defaults = UserDefaults.standard
-        enginePriority = PlayerEnginePriority.resolve(
+        var priority = PlayerEnginePriority.resolve(
             priorityRaw: defaults.string(forKey: PlayerSettings.enginePriorityKey) ?? "",
             legacyEngineRaw: defaults.string(forKey: PlayerSettings.engineKey)
                 ?? PlayerEngineKind.defaultValue.rawValue
         )
+        // Media-server library files benefit from AVPlayer + VideoToolbox for
+        // Dolby Vision / Atmos passthrough when the server direct-plays.
+        if media.isMediaServerPlaceholder {
+            priority = PlayerEnginePriority.normalized([.avPlayer, .ksPlayer, .vlcKit])
+        }
+        _enginePriority = State(initialValue: priority)
     }
 
     /// The engine driving the current playback attempt.
@@ -128,6 +138,39 @@ struct FullScreenPlayerView: View {
     /// Whether another engine remains to fall back to after the current one.
     private var hasFallbackEngine: Bool {
         engineAttempt + 1 < enginePriority.count
+    }
+
+    /// True when a failed Plex transcode can retry as direct play (KSPlayer/VLC).
+    private var mediaServerDirectPlayRetryAvailable: Bool {
+        guard !mediaServerDirectPlayFallbackAttempted else { return false }
+        let media = displayMedia ?? resolvedMedia
+        guard let media, media.streamContext?.method == .transcode else { return false }
+        return isMediaServerPlayback(media)
+    }
+
+    /// Engine-level fallback OR an pending media-server direct-play retry.
+    private var engineHostFallbackAvailable: Bool {
+        hasFallbackEngine || mediaServerDirectPlayRetryAvailable
+    }
+
+    private func handleEnginePlaybackFailed() {
+        if !mediaServerDirectPlayFallbackAttempted,
+           let resolved = displayMedia,
+           resolved.streamContext?.method == .transcode,
+           isMediaServerPlayback(resolved)
+        {
+            // Some playback is better than none — fall back to direct play even on
+            // Apple TV HD. The engine picker below routes heavy MKV direct-play to
+            // VLC-only with subtitle tracks suppressed to keep memory in check.
+            mediaServerDirectPlayFallbackAttempted = true
+            isRetryingMediaServerDirectPlay = true
+            Logger.player.info("Media server transcode failed; retrying with direct play")
+            Task { await retryMediaServerWithDirectPlay() }
+            return
+        }
+        if hasFallbackEngine {
+            fallBackToNextEngine()
+        }
     }
 
     /// Called by an engine when it can't start the stream. Advances to the next
@@ -214,6 +257,7 @@ struct FullScreenPlayerView: View {
             // Seed the recall pair with the channel we opened on, so the very
             // first in-player recall has somewhere to jump back to.
             LiveChannelHistory.record(activeMedia)
+            PlaybackMemoryGate.prepareForPlayback()
             // Pause background indexing — its periodic saves merge into the
             // main context and hitch KSPlayer's render loop.
             ContentIndexingService.shared.isPlaybackActive = true
@@ -241,6 +285,9 @@ struct FullScreenPlayerView: View {
             // a disabled feature makes no network call. The lookup may fetch the
             // series' IMDb ID from TMDB on first encounter, so it is now async.
             skipSegments = nil
+            #if os(tvOS)
+            if DeviceMemoryTier.current.isConstrained { return }
+            #endif
             guard PlayerSettings.Playback.canUseSkipIntro else {
                 Logger.player.info("[SkipIntro] Skipped — setting disabled in Settings → Playback")
                 return
@@ -274,6 +321,24 @@ struct FullScreenPlayerView: View {
             externalSubtitleURL = nil
             hasEmbeddedSubtitles = false
             guard !activeMedia.isLive else { return }
+
+            // Media-server streams carry embedded subs (incl. PGS/SRT in the file or
+            // HLS sidecars from Plex/Jellyfin). Let the playback engine expose them.
+            if MediaPlaybackResolver.isPlaceholder(activeMedia.url) {
+                for _ in 0 ..< 120 {
+                    guard !Task.isCancelled else { return }
+                    if let resolved = displayMedia, isMediaServerPlayback(resolved) { return }
+                    if resolveError != nil { return }
+                    try? await Task.sleep(for: .milliseconds(250))
+                }
+            } else if isMediaServerPlayback(activeMedia) {
+                return
+            }
+
+            #if os(tvOS)
+            // Apple TV HD: skip OpenSubtitles fetch to leave headroom for the decoder.
+            if DeviceMemoryTier.current.isConstrained { return }
+            #endif
             guard WyzieSubsClient.shared.isConfigured else { return }
             guard UserDefaults.standard.bool(forKey: SubtitleSettings.enabledKey) else { return }
 
@@ -282,10 +347,12 @@ struct FullScreenPlayerView: View {
             try? await Task.sleep(for: .seconds(3))
             guard !Task.isCancelled else { return }
 
+            let playbackURL = displayMedia?.url ?? activeMedia.url
+
             // Skip external subtitles when the stream has embedded legible tracks.
             // This prevents duplicate subtitles on tvOS where KSPlayer renders its
             // own selected track AND the external overlay would render on top.
-            let asset = AVURLAsset(url: activeMedia.url)
+            let asset = AVURLAsset(url: playbackURL)
             if let legible = try? await asset.loadMediaSelectionGroup(for: .legible),
                !(legible.options.isEmpty)
             {
@@ -392,6 +459,7 @@ struct FullScreenPlayerView: View {
     private var displayMedia: PlayableMedia? {
         guard StalkerLink.isPlaceholder(activeMedia.url)
             || activeMedia.url.absoluteString.hasPrefix("stremio://")
+            || MediaPlaybackResolver.isPlaceholder(activeMedia.url)
         else { return activeMedia }
         guard let resolvedMedia, resolvedMedia.id == activeMedia.id else { return nil }
         return resolvedMedia
@@ -400,7 +468,11 @@ struct FullScreenPlayerView: View {
     @ViewBuilder
     private var playerView: some View {
         if let media = displayMedia {
-            engineView(for: media)
+            if isRetryingMediaServerDirectPlay {
+                PlayerLoadingIndicator(title: activeMedia.title)
+            } else {
+                engineView(for: media)
+            }
         } else if resolveError != nil {
             // Stalker `create_link` failed — surface the failure with a retry
             // rather than spinning forever.
@@ -422,8 +494,8 @@ struct FullScreenPlayerView: View {
                 clock: clock,
                 seekBridge: seekBridge,
                 nextUpMedia: nextUpMedia,
-                fallbackAvailable: hasFallbackEngine,
-                onPlaybackFailed: fallBackToNextEngine,
+                fallbackAvailable: engineHostFallbackAvailable,
+                onPlaybackFailed: handleEnginePlaybackFailed,
                 onPlaybackEnded: handlePlaybackEnded,
                 onEmbeddedSubtitlesAvailable: noteEmbeddedSubtitlesAvailable,
                 onSelectMedia: switchMedia,
@@ -437,8 +509,8 @@ struct FullScreenPlayerView: View {
                 clock: clock,
                 seekBridge: seekBridge,
                 nextUpMedia: nextUpMedia,
-                fallbackAvailable: hasFallbackEngine,
-                onPlaybackFailed: fallBackToNextEngine,
+                fallbackAvailable: engineHostFallbackAvailable,
+                onPlaybackFailed: handleEnginePlaybackFailed,
                 onPlaybackEnded: handlePlaybackEnded,
                 onEmbeddedSubtitlesAvailable: noteEmbeddedSubtitlesAvailable,
                 onSelectMedia: switchMedia,
@@ -452,8 +524,8 @@ struct FullScreenPlayerView: View {
                 clock: clock,
                 seekBridge: seekBridge,
                 nextUpMedia: nextUpMedia,
-                fallbackAvailable: hasFallbackEngine,
-                onPlaybackFailed: fallBackToNextEngine,
+                fallbackAvailable: engineHostFallbackAvailable,
+                onPlaybackFailed: handleEnginePlaybackFailed,
                 onPlaybackEnded: handlePlaybackEnded,
                 onEmbeddedSubtitlesAvailable: noteEmbeddedSubtitlesAvailable,
                 onSelectMedia: switchMedia,
@@ -508,14 +580,76 @@ struct FullScreenPlayerView: View {
                 resolveError = error.localizedDescription
                 Logger.player.error("Stremio stream resolution failed: \(error.localizedDescription, privacy: .public)")
             }
+        } else if MediaPlaybackResolver.isPlaceholder(url) {
+            resolvedMedia = nil
+            resolveError = nil
+            do {
+                let resolved = try await withTimeout(seconds: 45) {
+                    try await MediaPlaybackResolver.resolve(activeMedia, container: modelContext.container)
+                }
+                resolvedMedia = resolved
+                if isMediaServerPlayback(resolved) {
+                    enginePriority = Self.enginePriorityForMediaServer(resolved)
+                    engineAttempt = 0
+                }
+            } catch {
+                resolveError = error.localizedDescription
+                Logger.player.error("Media server stream resolution failed: \(error.localizedDescription, privacy: .public)")
+            }
         }
     }
 
     private func retryResolve() {
         engineAttempt = 0
+        mediaServerDirectPlayFallbackAttempted = false
+        isRetryingMediaServerDirectPlay = false
         stremioStreamOptions = []
         showStreamPicker = false
         Task { await resolveActiveMedia() }
+    }
+
+    private func retryMediaServerWithDirectPlay() async {
+        defer { isRetryingMediaServerDirectPlay = false }
+        guard MediaPlaybackResolver.isPlaceholder(activeMedia.url) else { return }
+        do {
+            let resolved = try await withTimeout(seconds: 45) {
+                try await MediaPlaybackResolver.resolve(
+                    activeMedia,
+                    container: modelContext.container,
+                    preferDirectPlay: true
+                )
+            }
+            resolvedMedia = resolved
+            enginePriority = Self.enginePriorityForMediaServer(resolved)
+            engineAttempt = 0
+        } catch {
+            resolveError = error.localizedDescription
+            Logger.player.error("Media server direct-play fallback failed: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    private static func enginePriorityForMediaServer(_ media: PlayableMedia) -> [PlayerEngineKind] {
+        guard let ctx = media.streamContext else {
+            return PlayerEnginePriority.exact([.avPlayer, .ksPlayer, .vlcKit])
+        }
+        switch ctx.method {
+        case .transcode:
+            // HLS only — never fall through KS/VLC on the same m3u8 URL.
+            return PlayerEnginePriority.exact([.avPlayer])
+        case .directPlay, .directStream:
+            let container = (ctx.container ?? media.url.pathExtension).lowercased()
+            if MediaPlaybackResolver.incompatibleDirectPlayContainer(container) {
+                #if os(tvOS)
+                if DeviceMemoryTier.current.isConstrained {
+                    // Should not reach here — resolver prefers Plex HLS transcode on Apple TV HD.
+                    Logger.player.warning("Heavy MKV direct play on Apple TV HD — jetsam likely")
+                    return PlayerEnginePriority.exact([.vlcKit])
+                }
+                #endif
+                return PlayerEnginePriority.exact([.ksPlayer, .vlcKit])
+            }
+            return PlayerEnginePriority.exact([.avPlayer, .ksPlayer, .vlcKit])
+        }
     }
 
     /// Races `operation` against a timeout and cancels whichever task loses.
@@ -546,7 +680,7 @@ struct FullScreenPlayerView: View {
     }
 
     /// Creates a PlayableMedia copy with a resolved URL.
-    private func mediaWith(url: URL) -> PlayableMedia {
+    private func mediaWith(url: URL, streamContext: MediaServerStreamContext? = nil) -> PlayableMedia {
         PlayableMedia(
             id: activeMedia.id,
             url: url,
@@ -555,8 +689,22 @@ struct FullScreenPlayerView: View {
             posterURL: activeMedia.posterURL,
             kind: activeMedia.kind,
             startTime: activeMedia.startTime,
-            contentRef: activeMedia.contentRef
+            contentRef: activeMedia.contentRef,
+            streamContext: streamContext ?? activeMedia.streamContext
         )
+    }
+
+    private func isMediaServerPlayback(_ media: PlayableMedia) -> Bool {
+        if media.streamContext != nil { return true }
+        if MediaPlaybackResolver.isPlaceholder(media.url) { return true }
+        switch media.contentRef {
+        case let .movie(id):
+            return MediaServerIdentity.parseCatalogID(id) != nil
+        case let .episode(id):
+            return MediaServerIdentity.parseCatalogID(id) != nil
+        default:
+            return false
+        }
     }
 
     /// Called when the user picks a stream from the Stremio picker sheet.
@@ -575,6 +723,7 @@ struct FullScreenPlayerView: View {
         clock.reset()
         // Restart the fallback chain from the primary engine for the new stream.
         engineAttempt = 0
+        mediaServerDirectPlayFallbackAttempted = false
         activeMedia = newMedia
         // Slide the outgoing channel into the recall slot so `right` can jump back.
         LiveChannelHistory.record(newMedia)
@@ -602,9 +751,12 @@ struct FullScreenPlayerView: View {
     /// remove any downloaded overlay that may already have appeared.
     private func noteEmbeddedSubtitlesAvailable() {
         guard !hasEmbeddedSubtitles else { return }
-        hasEmbeddedSubtitles = true
-        externalSubtitleURL = nil
-        Logger.player.info("[Subtitles] Embedded track discovered by playback engine — suppressing external overlay")
+        Task { @MainActor in
+            guard !hasEmbeddedSubtitles else { return }
+            hasEmbeddedSubtitles = true
+            externalSubtitleURL = nil
+            Logger.player.info("[Subtitles] Embedded track discovered by playback engine — suppressing external overlay")
+        }
     }
 
     private var closeButton: some View {
@@ -728,6 +880,38 @@ struct FullScreenPlayerView: View {
             )
             WatchProgressBuffer.remove(ref: ref)
             if let completion { syncTraktWatched(ref: completion.ref) }
+            await reportMediaServerProgress(ref: ref, progress: now, duration: total, completed: completion != nil)
+        }
+    }
+
+    /// Sync watch position back to Jellyfin / Emby / Plex when playing library items.
+    private func reportMediaServerProgress(
+        ref: PlayableMedia.ContentRef,
+        progress: TimeInterval,
+        duration: TimeInterval,
+        completed: Bool
+    ) async {
+        let catalogID: String? = switch ref {
+        case let .movie(id):
+            MediaServerIdentity.parseCatalogID(id) != nil ? id : nil
+        case let .episode(id):
+            MediaServerIdentity.parseCatalogID(id) != nil ? id : nil
+        case .live:
+            nil
+        }
+        guard let catalogID, MediaServerIdentity.parseCatalogID(catalogID) != nil else { return }
+        await MediaPlaybackResolver.reportProgressForCatalogItem(
+            catalogID: catalogID,
+            progressSeconds: progress,
+            isPaused: false,
+            container: modelContext.container
+        )
+        if completed {
+            await MediaPlaybackResolver.markPlayedForCatalogItem(
+                catalogID: catalogID,
+                played: true,
+                container: modelContext.container
+            )
         }
     }
 

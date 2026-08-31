@@ -21,7 +21,6 @@ struct SeriesDetailView: View {
     var animationNamespace: Namespace.ID?
 
     @Environment(\.modelContext) private var modelContext
-    @Environment(\.dismiss) private var dismiss
     @Environment(ThemeManager.self) private var themeManager
     #if os(macOS)
         @Environment(\.openWindow) private var openWindow
@@ -47,18 +46,7 @@ struct SeriesDetailView: View {
     init(series: Series, animationNamespace: Namespace.ID? = nil) {
         self.series = series
         self.animationNamespace = animationNamespace
-        let needsFetch = if TMDBClient.shared.isConfigured {
-            if let enrichedAt = series.tmdbEnrichedAt,
-               Date().timeIntervalSince(enrichedAt) < 14 * 24 * 3600
-            {
-                false
-            } else {
-                true
-            }
-        } else {
-            false
-        }
-        _isLoadingTMDB = State(initialValue: needsFetch)
+        _isLoadingTMDB = State(initialValue: false)
     }
 
     var body: some View {
@@ -77,19 +65,16 @@ struct SeriesDetailView: View {
             .background(backgroundColor)
             #if os(iOS)
                 .toolbar(.hidden, for: .tabBar)
-                .navigationBarBackButtonHidden(true)
                 .toolbarBackground(.hidden, for: .navigationBar)
             #endif
                 .toolbar { toolbarContent }
                 .task(id: series.id) {
                     await loadEpisodesIfNeeded()
+                    maybeAutoplay()
                     await enrichIfNeeded()
                     await enrichSeriesRatingsIfNeeded(series, context: modelContext)
                     resolveSimilar()
                     resolveOtherSources()
-                    withAnimation(.easeInOut(duration: 0.3)) {
-                        isLoadingTMDB = false
-                    }
                 }
                 .onChange(of: series.similarTMDBIds) { resolveSimilar() }
                 .onChange(of: refreshToken) { resolveSimilar() }
@@ -372,11 +357,6 @@ struct SeriesDetailView: View {
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
         #if os(iOS)
-            ToolbarItem(placement: .topBarLeading) {
-                GlassIconButton(systemImage: "chevron.left", accessibilityLabel: "Back") {
-                    dismiss()
-                }
-            }
             ToolbarItem(placement: .topBarTrailing) {
                 GlassIconButton(
                     systemImage: series.isFavorite ? "heart.fill" : "heart",
@@ -421,7 +401,7 @@ struct SeriesDetailView: View {
         // Open on the season of the furthest point reached in the series, so
         // progress in a later season always wins over progress in an earlier
         // one — regardless of which was watched more recently.
-        let target = furthestInProgressEpisode ?? furthestProgressEpisode
+        let target = SeriesResume.episode(in: series)
         if let target, seasons.contains(target.seasonNum) {
             return target.seasonNum
         }
@@ -457,16 +437,8 @@ struct SeriesDetailView: View {
             .max { ($0.seasonNum, $0.episodeNum) < ($1.seasonNum, $1.episodeNum) }
     }
 
-    /// Play button target: resume the furthest in-progress episode; else the
-    /// episode after the furthest watched one (overflowing seasons, wrapping to
-    /// the premiere after the finale); else the selected season's first episode.
     private var nextEpisode: Episode? {
-        if let inProgress = furthestInProgressEpisode { return inProgress }
-        let ordered = series.episodes.sorted { ($0.seasonNum, $0.episodeNum) < ($1.seasonNum, $1.episodeNum) }
-        guard let watched = furthestWatchedEpisode,
-              let index = ordered.firstIndex(where: { $0 === watched })
-        else { return seasonEpisodes.first ?? ordered.first }
-        return index + 1 < ordered.count ? ordered[index + 1] : ordered.first
+        SeriesResume.episode(in: series)
     }
 
     private var backgroundColor: Color {
@@ -480,6 +452,9 @@ struct SeriesDetailView: View {
     // MARK: - Loading & enrichment
 
     private func loadEpisodesIfNeeded() async {
+        if series.episodes.isEmpty {
+            SeriesResume.attachStoredEpisodes(to: series, in: modelContext)
+        }
         if series.episodes.isEmpty {
             await loadEpisodes()
         }
@@ -604,6 +579,13 @@ private extension SeriesDetailView {
         #else
             playingMedia = media
         #endif
+    }
+
+    func maybeAutoplay() {
+        guard DeepLinkAutoplay.consume(seriesTMDBId: series.tmdbId),
+              let episode = nextEpisode
+        else { return }
+        playEpisode(episode)
     }
 
     func openTrailer(_ trailer: String) {

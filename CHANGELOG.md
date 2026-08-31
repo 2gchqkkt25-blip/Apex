@@ -4,6 +4,32 @@ All notable changes to Apex Stream Player.
 
 ---
 
+## Build 52 (1.2.0) — August 31, 2026
+
+### Features
+
+- **Media tab for Plex, Jellyfin, and Emby** — Dedicated **Media** tab, kept separate from IPTV playlists. Connect via Plex PIN or Jellyfin/Emby credentials, sync movies/series/episodes into the local catalog, and play with AVPlayer-first direct play → remux → HLS transcode. Watch progress reports back to the server. Connections sync through iCloud; each device keeps its own library index.
+- **Media libraries survive tab changes and relaunches** — The Media tab mounts its server-backed catalog from launch, restores the selected server, and exposes the server selector, Manage Servers, and Sync controls on iOS.
+
+### Bug Fixes
+
+- **Plex playback on tvOS and iOS** — Plex universal-transcode decision and HLS start requests now use the same client/session contract. Constrained devices such as Apple TV HD force a real 1080p/12 Mbps transcode instead of an uncapped remux, use Plex's supported subtitle-disable parameter, and keep the HLS session alive during playback. Failed Plex transcodes can retry through the safe direct-play fallback when the source permits it.
+- **Jellyfin and Emby playback share the hardened resolver** — Media-server playback selects Apple-compatible HLS transcodes ahead of unsafe containers when needed, carries authentication through manifest and segment requests, and reports progress/watched state back to the connected server.
+- **Deleted servers stay deleted** — Removing a Plex, Jellyfin, or Emby connection now deletes both its local catalog rows and its iCloud mirror in one coordinated operation. A CloudKit tombstone baseline prevents an exporting deletion from briefly restoring the old connection.
+- **Duplicate detail back buttons removed** — Media detail screens no longer sit inside UIKit's automatic More navigation controller and their own nested navigation history at the same time.
+- **Live TV no longer opens blank from More** — iPhone now has five direct tabs: Home, Movies, Series, Live TV, and Media. Search moved to the magnifying-glass button on Home, eliminating the automatic More tab and its cached blank placeholder/navigation wrapper.
+- **Physical-device builds no longer require Apple's Multicast Networking approval** — The restricted `com.apple.developer.networking.multicast` entitlement was removed from development and release entitlements. Manual/PIN server connection and the non-multicast discovery fallback remain available.
+
+### Verification
+
+- Plex playback verified on tvOS and iOS; Jellyfin playback verified on tvOS, iOS, and macOS.
+
+### Release
+
+- Build number **52** (1.2.0).
+
+---
+
 ## Build 51 (1.2.0) — August 8, 2026
 
 ### Bug Fixes

@@ -23,6 +23,31 @@ struct PlayableMedia: Identifiable, Hashable, Codable {
     let kind: Kind
     let startTime: TimeInterval
     let contentRef: ContentRef
+    /// Server-reported stream characteristics after resolving a `mediaserver://`
+    /// placeholder. Populated by `MediaPlaybackResolver`; `nil` for IPTV streams.
+    let streamContext: MediaServerStreamContext?
+
+    init(
+        id: String,
+        url: URL,
+        title: String,
+        subtitle: String?,
+        posterURL: URL?,
+        kind: Kind,
+        startTime: TimeInterval,
+        contentRef: ContentRef,
+        streamContext: MediaServerStreamContext? = nil
+    ) {
+        self.id = id
+        self.url = url
+        self.title = title
+        self.subtitle = subtitle
+        self.posterURL = posterURL
+        self.kind = kind
+        self.startTime = startTime
+        self.contentRef = contentRef
+        self.streamContext = streamContext
+    }
 
     var isLive: Bool {
         kind == .live
@@ -32,7 +57,7 @@ struct PlayableMedia: Identifiable, Hashable, Codable {
     /// `StalkerStreamResolver` to swap a deferred `lumestalker://` placeholder for
     /// the real, freshly resolved stream URL while keeping the same identity.
     /// `nonisolated` so the resolver can call it off the main actor.
-    nonisolated func replacingURL(_ newURL: URL) -> PlayableMedia {
+    nonisolated func replacingURL(_ newURL: URL, streamContext: MediaServerStreamContext? = nil) -> PlayableMedia {
         PlayableMedia(
             id: id,
             url: newURL,
@@ -41,7 +66,8 @@ struct PlayableMedia: Identifiable, Hashable, Codable {
             posterURL: posterURL,
             kind: kind,
             startTime: startTime,
-            contentRef: contentRef
+            contentRef: contentRef,
+            streamContext: streamContext ?? self.streamContext
         )
     }
 
@@ -220,5 +246,55 @@ extension PlayableMedia {
             startTime: 0,
             contentRef: .live(stream.id)
         )
+    }
+
+    // MARK: - Media server (Jellyfin / Emby / Plex)
+
+    static func fromMediaServerMovie(_ movie: Movie, resumeFromProgress: Bool = true) -> PlayableMedia? {
+        guard let direct = movie.directURL,
+              direct.hasPrefix("mediaserver://"),
+              let url = URL(string: direct)
+        else { return nil }
+        let startTime = resumeFromProgress ? movie.watchProgress : 0
+        return PlayableMedia(
+            id: "movie-\(movie.id)",
+            url: url,
+            title: movie.name,
+            subtitle: movie.releaseDate,
+            posterURL: movie.iconURL,
+            kind: .vod,
+            startTime: startTime,
+            contentRef: .movie(movie.id)
+        )
+    }
+
+    static func fromMediaServerEpisode(_ episode: Episode, resumeFromProgress: Bool = true) -> PlayableMedia? {
+        guard let direct = episode.directSource,
+              direct.hasPrefix("mediaserver://"),
+              let url = URL(string: direct)
+        else { return nil }
+        let startTime = resumeFromProgress ? episode.watchProgress : 0
+        let seriesName = episode.series?.name
+        return PlayableMedia(
+            id: "episode-\(episode.id)",
+            url: url,
+            title: seriesName ?? episode.title,
+            subtitle: "S\(episode.seasonNum) E\(episode.episodeNum) · \(episode.title)",
+            posterURL: URL(string: episode.movieImage ?? ""),
+            kind: .vod,
+            startTime: startTime,
+            contentRef: .episode(episode.id)
+        )
+    }
+
+    var isMediaServerPlaceholder: Bool {
+        MediaPlaybackResolver.isPlaceholder(url)
+    }
+
+    /// MKV/AVI and similar containers that need FFmpeg/VLC remux on Apple platforms.
+    nonisolated var isHeavyDirectRemux: Bool {
+        guard kind == .vod, !isLive else { return false }
+        let container = (streamContext?.container ?? url.pathExtension).lowercased()
+        return MediaPlaybackResolver.incompatibleDirectPlayContainer(container)
     }
 }

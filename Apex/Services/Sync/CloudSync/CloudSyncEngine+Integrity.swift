@@ -28,6 +28,55 @@ extension CloudSyncEngine {
         case emptiedButHadData
     }
 
+    /// The state of the CloudKit mirror store as a source of "cloud" truth.
+    ///
+    /// The mirror image of `LocalCatalogReadiness`, and it was missing. A local
+    /// playlist with no cloud mirror but a shadow baseline reads as "a sibling
+    /// device deleted this", so reconcile deletes the playlist and every catalog
+    /// row it brought in. That verdict is right only if the mirror store is
+    /// actually complete — and at launch it frequently isn't, because
+    /// `NSPersistentCloudKitContainer` imports asynchronously. On Apple TV HD the
+    /// launch pass is deliberately delayed 30s to protect startup, which is still
+    /// no guarantee the import has landed. So a slow import looked identical to a
+    /// remote deletion and wiped a 37K-item library.
+    enum CloudMirrorReadiness {
+        /// Mirror holds records (or is empty on a genuinely fresh account, where
+        /// the shadow is empty too) — reconcile normally.
+        case ready
+        /// A probe fetch threw. Skip the pass rather than guess.
+        case unreadable
+        /// The mirror is *entirely* empty while the shadow still holds baselines:
+        /// an account that previously synced cannot lose every record in one
+        /// legitimate step, so treat this as an import that hasn't arrived.
+        case emptyButHadData
+    }
+
+    /// Note the deliberate asymmetry with a real remote deletion: if a user
+    /// genuinely deletes their last playlist on another device, this suppresses
+    /// that deletion and re-pushes from local instead. That's the intended
+    /// trade — re-adding an unwanted playlist costs one more delete, whereas
+    /// destroying the local catalog is unrecoverable. Requiring *total*
+    /// emptiness keeps the false-positive window narrow: a partially populated
+    /// mirror still reconciles normally, so ordinary per-item deletions sync.
+    func cloudMirrorReadiness() -> CloudMirrorReadiness {
+        let mirrorCount: Int
+        let localPlaylistCount: Int
+        do {
+            mirrorCount = try cloudContext.fetchCount(FetchDescriptor<SyncedPlaylist>())
+                + cloudContext.fetchCount(FetchDescriptor<UserContentState>())
+                + cloudContext.fetchCount(FetchDescriptor<SyncedMediaServer>())
+            localPlaylistCount = try catalogContext.fetchCount(FetchDescriptor<Playlist>())
+        } catch {
+            Logger.sync.error("Cloud mirror unreadable (\(error.localizedDescription, privacy: .public)) — skipping reconcile, not deleting local content")
+            return .unreadable
+        }
+        let shadowHasBaseline = !shadow.playlistShadowIDs().isEmpty || !shadow.contentShadowIDs().isEmpty
+        if mirrorCount == 0, shadowHasBaseline, localPlaylistCount > 0 {
+            return .emptyButHadData
+        }
+        return .ready
+    }
+
     func localCatalogReadiness() -> LocalCatalogReadiness {
         let catalogCount: Int
         do {

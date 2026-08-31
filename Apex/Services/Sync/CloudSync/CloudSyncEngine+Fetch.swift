@@ -51,6 +51,26 @@ extension CloudSyncEngine {
         return map
     }
 
+    func fetchLocalMediaServers() throws -> [UUID: MediaServer] {
+        var map: [UUID: MediaServer] = [:]
+        for server in try catalogContext.fetch(FetchDescriptor<MediaServer>()) {
+            map[server.id] = server
+        }
+        return map
+    }
+
+    func fetchMediaServerMirrors() throws -> [UUID: SyncedMediaServer] {
+        var map: [UUID: SyncedMediaServer] = [:]
+        for mirror in try cloudContext.fetch(FetchDescriptor<SyncedMediaServer>()) {
+            map[mirror.id] = dedupe(mirror, against: map[mirror.id])
+        }
+        return map
+    }
+
+    func dedupe(_ candidate: SyncedMediaServer, against existing: SyncedMediaServer?) -> SyncedMediaServer {
+        dedupe(candidate, against: existing, updatedAt: \.updatedAt)
+    }
+
     func dedupe(_ candidate: SyncedEPGSource, against existing: SyncedEPGSource?) -> SyncedEPGSource {
         dedupe(candidate, against: existing, updatedAt: \.updatedAt)
     }

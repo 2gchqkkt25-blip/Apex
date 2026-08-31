@@ -78,6 +78,12 @@ struct PlayerEnginePriorityTests {
         #expect(PlayerEnginePriority.normalized([]).count == PlayerEngineKind.allCases.count)
     }
 
+    @Test func `exact keeps only listed engines`() {
+        #expect(PlayerEnginePriority.exact([.avPlayer]) == [.avPlayer])
+        #expect(PlayerEnginePriority.exact([.ksPlayer, .vlcKit]) == [.ksPlayer, .vlcKit])
+        #expect(PlayerEnginePriority.exact([.avPlayer, .avPlayer, .vlcKit]) == [.avPlayer, .vlcKit])
+    }
+
     @Test func `resolve uses the stored priority when present`() {
         let resolved = PlayerEnginePriority.resolve(
             priorityRaw: "ksPlayer,avPlayer,vlcKit",

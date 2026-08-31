@@ -4,7 +4,7 @@
 
 ### A modern, native IPTV player for Apple platforms
 
-Browse, search, and stream your Xtream Codes or **M3U/M3U8** playlists with a clean SwiftUI interface — Live TV, Movies, and Series, enriched with metadata, EPG, and watch progress that follows you across your devices.
+Browse, search, and stream your IPTV playlists or personal **Plex, Jellyfin, and Emby** libraries with a clean SwiftUI interface — Live TV, Movies, and Series, enriched with metadata, EPG, and watch progress that follows you across your devices.
 
 <br>
 
@@ -47,11 +47,11 @@ Browse, search, and stream your Xtream Codes or **M3U/M3U8** playlists with a cl
 
 ## Overview
 
-**Apex** is a native IPTV client for the Apple ecosystem. It connects to your own
-**Xtream Codes** provider or imports **M3U/M3U8** playlists, indexes the full catalog
-locally with **SwiftData** for instant, offline-capable browsing, and plays everything
-through a choice of three playback engines — from VLC's universal codec support to
-Apple's native AVPlayer.
+**Apex** is a native IPTV and personal-media client for the Apple ecosystem. It connects
+to your own **Xtream Codes** provider, imports **M3U/M3U8** playlists, or syncs libraries
+from **Plex, Jellyfin, and Emby**. Apex indexes the catalog locally with **SwiftData**
+for fast browsing and plays everything through a choice of three playback engines —
+from VLC's universal codec support to Apple's native AVPlayer.
 
 It is built entirely in **SwiftUI** with a single, platform-adaptive codebase that
 runs on iPhone, iPad, Mac, Apple TV, and Apple Vision Pro. Content is enriched with
@@ -59,8 +59,8 @@ artwork, cast, trailers, and ratings from **TMDB** and **OMDb** (IMDb, Rotten To
 Metacritic), and your viewing activity can be scrobbled to **Trakt**.
 
 > **Note** — Apex is a player only. It ships with **no channels, streams, or content**
-> of its own. You bring your own Xtream Codes credentials or M3U playlist from a
-> provider you are entitled to use. We do not condone piracy — please read the
+> of its own. You bring an IPTV source you are entitled to use or connect your own
+> Plex, Jellyfin, or Emby server. We do not condone piracy — please read the
 > [**Anti-Piracy Policy**](ANTI_PIRACY.md).
 
 ---
@@ -86,6 +86,14 @@ Metacritic), and your viewing activity can be scrobbled to **Trakt**.
 - TMDB-enriched artwork, logos, and trailers
 - Quality / source picker when multiple streams are available
 
+#### 🖥️ Plex, Jellyfin & Emby
+- Dedicated **Media** tab, kept separate from IPTV playlists and categories
+- Plex PIN authentication plus Jellyfin/Emby server credentials
+- Library sync for movies, series, episodes, artwork, metadata, and resume state
+- Direct play, direct stream/remux, and server-side HLS transcoding with platform-aware selection
+- Watch progress and watched status reported back to the originating media server
+- Connections sync through iCloud while each device keeps its catalog index local
+
 #### 🏠 Home
 - Personalized dashboard with a hero carousel (iPhone) or immersive full-screen TMDB backdrop (iPad, tvOS)
 - **Immersive full-screen tvOS home** with horizontally paging TMDB backdrop and fold-based scroll snapping
@@ -94,7 +102,7 @@ Metacritic), and your viewing activity can be scrobbled to **Trakt**.
 - **For You** rail — on-device recommendations from your watch history and favorites; thumbs-up / thumbs-down a suggestion to tune what you see next, with your votes syncing across devices via iCloud (can be turned off in Settings)
 
 #### 🔎 Discovery & organization
-- Global search across Movies, Series, and Live channels with type filtering
+- Global search across Movies, Series, and Live channels with type filtering (magnifying-glass button on Home on iPhone)
 - **Background content indexing** — matches the whole library against TMDB and builds on-device embedding vectors (Apple NaturalLanguage) as the foundation for semantic search
 - Configurable sort options per category and content type
 - Hide and reorder categories to taste
@@ -177,13 +185,14 @@ Apex follows a clean, layered SwiftUI architecture:
 │    ├─ XtreamClient        Xtream Codes API + DTOs         │
 │    ├─ M3UClient/Parser    M3U/M3U8 playlist import       │
 │    ├─ StalkerClient       Stalker portal (MAC auth)       │
+│    ├─ Plex/Jellyfin/Emby  personal media server clients   │
 │    ├─ TMDBClient          metadata / artwork enrichment   │
 │    ├─ OMDBClient          IMDb / RT / Metacritic ratings  │
 │    ├─ TraktService        OAuth device flow + scrobbling  │
 │    ├─ ContentSyncManager  background catalog indexing     │
 │    └─ ImagePipeline        cached async image loading     │
 ├─────────────────────────────────────────────────────────┤
-│  Models (SwiftData) — Playlist · Category · LiveStream    │
+│  Models (SwiftData) — Playlist · MediaServer · LiveStream │
 │                       Movie · Series · Episode            │
 │                       CastMember · EPGListing · ExternalRating │
 └─────────────────────────────────────────────────────────┘
@@ -216,14 +225,15 @@ Apex/
 ├── ContentView.swift        Root view / login gate
 ├── Models/                  SwiftData models & sort options
 ├── Services/
-│   ├── Network/             Xtream, M3U, TMDB, OMDb, Trakt clients
-│   ├── Sync/                Content sync manager & progress
+│   ├── Network/             IPTV, media-server, metadata & Trakt clients
+│   ├── Sync/                IPTV/media-server sync & progress
 │   ├── Player/              Playable media, settings, history, NextUp
 │   └── Images/              Image cache & pipeline
 ├── Views/
 │   ├── Home/                Dashboard, hero carousel, rails, tvOS fold
 │   ├── LiveTV/              Channels & EPG guide
 │   ├── Movies/ · Series/    Browse & detail views
+│   ├── Media/               Plex, Jellyfin & Emby libraries
 │   ├── Player/              AVPlayer / KSPlayer / VLC engines, overlays, channel browser
 │   ├── TV/                  tvOS-specific detail screens
 │   ├── Settings/            Playlists, sync, Trakt, player engine options, content mgmt

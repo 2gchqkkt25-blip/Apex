@@ -211,6 +211,12 @@ import SwiftUI
                     .font(.title3.weight(.bold))
                     .foregroundStyle(.white)
                     .lineLimit(1)
+                if let quality = PlayerStreamDisplay.caption(for: media, videoInfo: coordinator.videoInfo) {
+                    Text(quality)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.white.opacity(0.6))
+                        .lineLimit(1)
+                }
             }
             .shadow(color: .black.opacity(0.35), radius: 4, y: 1)
         }

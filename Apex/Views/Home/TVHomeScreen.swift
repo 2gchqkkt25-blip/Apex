@@ -120,11 +120,17 @@
                 Color.black
 
                 if height > 0 {
-                    HomeHeroArtworkPager(
-                        controller: controller,
-                        height: height,
-                        isInteractive: false
-                    )
+                    if DeviceMemoryTier.current.isConstrained {
+                        HeroBackdropImage(url: controller.currentHero?.imageURL)
+                            .frame(height: height)
+                            .id(controller.currentItemID ?? "hero")
+                    } else {
+                        HomeHeroArtworkPager(
+                            controller: controller,
+                            height: height,
+                            isInteractive: false
+                        )
+                    }
                 }
             }
             .overlay {

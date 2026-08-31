@@ -44,8 +44,11 @@ class ContentProvider: TVTopShelfContentProvider {
             tsItem.setImageURL(imageURL, for: .screenScale2x)
             tsItem.imageShape = .poster
             if let deepLink = URL(string: "apex://\(item.type)/\(item.contentId)") {
-                tsItem.playAction = TVTopShelfAction(url: deepLink)
                 tsItem.displayAction = TVTopShelfAction(url: deepLink)
+                let playURL = item.type == "series"
+                    ? URL(string: "apex://series/\(item.contentId)?play=1") ?? deepLink
+                    : deepLink
+                tsItem.playAction = TVTopShelfAction(url: playURL)
             }
             return tsItem
         }

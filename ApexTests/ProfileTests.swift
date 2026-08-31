@@ -23,20 +23,22 @@ struct ProfileEngineTests {
         let fullSchema = Schema([
             Playlist.self, Apex.Category.self, LiveStream.self, Movie.self,
             Series.self, Episode.self, CastMember.self, EPGListing.self, EPGSource.self,
-            SyncedPlaylist.self, UserContentState.self, UserProfile.self, SyncedEPGSource.self
+            MediaServer.self,
+            SyncedPlaylist.self, UserContentState.self, UserProfile.self, SyncedEPGSource.self, SyncedMediaServer.self
         ])
         let localConfig = ModelConfiguration(
             "local",
             schema: Schema([
                 Playlist.self, Apex.Category.self, LiveStream.self, Movie.self,
-                Series.self, Episode.self, CastMember.self, EPGListing.self, EPGSource.self
+                Series.self, Episode.self, CastMember.self, EPGListing.self, EPGSource.self,
+                MediaServer.self
             ]),
             isStoredInMemoryOnly: true,
             cloudKitDatabase: .none
         )
         let cloudConfig = ModelConfiguration(
             "cloud",
-            schema: Schema([SyncedPlaylist.self, UserContentState.self, UserProfile.self, SyncedEPGSource.self]),
+            schema: Schema([SyncedPlaylist.self, UserContentState.self, UserProfile.self, SyncedEPGSource.self, SyncedMediaServer.self]),
             isStoredInMemoryOnly: true,
             cloudKitDatabase: .none
         )

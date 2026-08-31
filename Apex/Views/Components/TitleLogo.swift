@@ -20,9 +20,20 @@ struct TitleLogo<Fallback: View>: View {
     var alignment: Alignment = .leading
     @ViewBuilder var fallback: () -> Fallback
 
+    /// `CachedAsyncImage`'s cap applies to the *longest* edge, and a wordmark is
+    /// far wider than it is tall, so deriving this from `maxHeight` alone would
+    /// over-shrink it. The display width is the real bound; fall back to a
+    /// generous 5:1 wordmark when it's unbounded. Without any cap the pipeline
+    /// decodes the original TMDB asset at full resolution — often 2000-3840 px
+    /// wide with an alpha channel, so ~12 MB of pixels — to draw a strip under
+    /// 150 pt tall, on every hero and every detail screen.
+    private var logoMaxPixelSize: CGFloat {
+        maxWidth.isFinite ? max(maxWidth, maxHeight) : maxHeight * 5
+    }
+
     var body: some View {
         if let url {
-            CachedAsyncImage(url: url) { phase in
+            CachedAsyncImage(url: url, maxPixelSize: logoMaxPixelSize) { phase in
                 switch phase {
                 case .empty:
                     // Reserve the logo's vertical space without flashing the

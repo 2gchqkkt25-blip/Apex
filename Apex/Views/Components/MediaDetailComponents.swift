@@ -14,11 +14,20 @@ import SwiftUI
 extension View {
     @ViewBuilder
     func matchedTransitionSourceIfAvailable(id: some Hashable, in namespace: Namespace.ID?) -> some View {
-        if let namespace {
-            matchedTransitionSource(id: id, in: namespace)
-        } else {
+        #if os(tvOS)
+            // Only `.navigationTransition(.zoom(sourceID:in:))` consumes a
+            // matched transition source, and every call site gates that to iOS.
+            // Registering one per card on tvOS is pure overhead on every rail
+            // and grid — and on Apple TV HD that overhead competes with a
+            // ~1.5 GB jetsam budget.
             self
-        }
+        #else
+            if let namespace {
+                matchedTransitionSource(id: id, in: namespace)
+            } else {
+                self
+            }
+        #endif
     }
 }
 

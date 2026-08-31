@@ -112,21 +112,29 @@ struct SearchView: View {
             #if os(macOS)
                 .toolbarBackground(.visible, for: .windowToolbar)
             #endif
-            .searchable(text: $searchText, prompt: "Movies, Series, Live TV...")
+            .searchable(text: $searchText, prompt: "Movies, Series, Live TV, Media…")
             #if os(iOS)
                 .searchToolbarMinimizeIfAvailable()
             #endif
                 .navigationDestination(for: Movie.self) { movie in
-                    MovieDetailView(movie: movie, animationNamespace: animationNamespace)
-                    #if os(iOS)
-                        .navigationTransition(.zoom(sourceID: movie.id, in: animationNamespace))
-                    #endif
+                    if MediaServerIdentity.parseCatalogID(movie.id) != nil {
+                        MediaMovieDetailView(movie: movie, server: mediaServer(for: movie.id))
+                    } else {
+                        MovieDetailView(movie: movie, animationNamespace: animationNamespace)
+                        #if os(iOS)
+                            .navigationTransition(.zoom(sourceID: movie.id, in: animationNamespace))
+                        #endif
+                    }
                 }
                 .navigationDestination(for: Series.self) { series in
-                    SeriesDetailView(series: series, animationNamespace: animationNamespace)
-                    #if os(iOS)
-                        .navigationTransition(.zoom(sourceID: series.id, in: animationNamespace))
-                    #endif
+                    if MediaServerIdentity.parseCatalogID(series.id) != nil {
+                        MediaSeriesDetailView(series: series, server: mediaServer(for: series.id))
+                    } else {
+                        SeriesDetailView(series: series, animationNamespace: animationNamespace)
+                        #if os(iOS)
+                            .navigationTransition(.zoom(sourceID: series.id, in: animationNamespace))
+                        #endif
+                    }
                 }
                 .navigationDestination(for: Category.self) { category in
                     switch category.type {
@@ -427,6 +435,7 @@ struct SearchView: View {
             query: query,
             playlistID: playlistID,
             restrictToPlaylist: restrictToPlaylist,
+            mediaServerIDs: mediaServerIDStrings(in: container),
             wantMovies: filter == .all || filter == .movies,
             wantSeries: filter == .all || filter == .series,
             wantLive: filter == .all || filter == .liveTV,
@@ -459,6 +468,20 @@ struct SearchView: View {
 
         results = matches
     }
+
+    private func mediaServerIDStrings(in container: ModelContainer) -> Set<String> {
+        let context = ModelContext(container)
+        let servers = (try? context.fetch(FetchDescriptor<MediaServer>())) ?? []
+        return Set(servers.map { $0.id.uuidString })
+    }
+
+    private func mediaServer(for catalogID: String) -> MediaServer? {
+        guard let parsed = MediaServerIdentity.parseCatalogID(catalogID) else { return nil }
+        let serverID = parsed.serverUUID
+        var descriptor = FetchDescriptor<MediaServer>(predicate: #Predicate { $0.id == serverID })
+        descriptor.fetchLimit = 1
+        return try? modelContext.fetch(descriptor).first
+    }
 }
 
 // MARK: - Off-main search fetch
@@ -477,6 +500,7 @@ private nonisolated struct SearchRequest {
     let query: String
     let playlistID: String
     let restrictToPlaylist: Bool
+    let mediaServerIDs: Set<String>
     let wantMovies: Bool
     let wantSeries: Bool
     let wantLive: Bool
@@ -491,32 +515,106 @@ private nonisolated enum SearchFetcher {
         let query = request.query
         let playlistID = request.playlistID
         let restrictToPlaylist = request.restrictToPlaylist
+        let mediaServerIDs = request.mediaServerIDs
         let limit = request.limit
         let context = ModelContext(container)
         var hits = SearchHits()
 
         if request.wantMovies {
-            var descriptor = FetchDescriptor<Movie>(
-                predicate: #Predicate { movie in
-                    movie.name.localizedStandardContains(query)
-                        && (!restrictToPlaylist || (movie.categoryId?.localizedStandardContains(playlistID) ?? false))
-                },
-                sortBy: [SortDescriptor(\.name)]
+            var iptvIDs: [PersistentIdentifier] = []
+            if restrictToPlaylist {
+                var descriptor = FetchDescriptor<Movie>(
+                    predicate: #Predicate { movie in
+                        movie.name.localizedStandardContains(query)
+                            && (movie.categoryId?.localizedStandardContains(playlistID) ?? false)
+                    },
+                    sortBy: [SortDescriptor(\.name)]
+                )
+                descriptor.fetchLimit = limit
+                iptvIDs = ((try? context.fetch(descriptor)) ?? []).map(\.persistentModelID)
+            } else {
+                var descriptor = FetchDescriptor<Movie>(
+                    predicate: #Predicate { movie in
+                        movie.name.localizedStandardContains(query)
+                    },
+                    sortBy: [SortDescriptor(\.name)]
+                )
+                descriptor.fetchLimit = limit * 2
+                let fetched = (try? context.fetch(descriptor)) ?? []
+                iptvIDs = fetched
+                    .filter { !MediaServerIdentity.belongsToKnownMediaServer($0.id, serverIDs: mediaServerIDs) }
+                    .prefix(limit)
+                    .map(\.persistentModelID)
+            }
+
+            var mediaServerIDsList: [PersistentIdentifier] = []
+            if !mediaServerIDs.isEmpty {
+                var descriptor = FetchDescriptor<Movie>(
+                    predicate: #Predicate { movie in
+                        movie.name.localizedStandardContains(query)
+                    },
+                    sortBy: [SortDescriptor(\.name)]
+                )
+                descriptor.fetchLimit = limit * 2
+                mediaServerIDsList = ((try? context.fetch(descriptor)) ?? [])
+                    .filter { MediaServerIdentity.belongsToKnownMediaServer($0.id, serverIDs: mediaServerIDs) }
+                    .prefix(limit)
+                    .map(\.persistentModelID)
+            }
+
+            hits.movies = mergeSortedIDs(
+                iptvIDs + mediaServerIDsList,
+                in: context,
+                limit: limit
             )
-            descriptor.fetchLimit = limit
-            hits.movies = ((try? context.fetch(descriptor)) ?? []).map(\.persistentModelID)
         }
 
         if request.wantSeries {
-            var descriptor = FetchDescriptor<Series>(
-                predicate: #Predicate { series in
-                    series.name.localizedStandardContains(query)
-                        && (!restrictToPlaylist || (series.categoryId?.localizedStandardContains(playlistID) ?? false))
-                },
-                sortBy: [SortDescriptor(\.name)]
+            var iptvIDs: [PersistentIdentifier] = []
+            if restrictToPlaylist {
+                var descriptor = FetchDescriptor<Series>(
+                    predicate: #Predicate { series in
+                        series.name.localizedStandardContains(query)
+                            && (series.categoryId?.localizedStandardContains(playlistID) ?? false)
+                    },
+                    sortBy: [SortDescriptor(\.name)]
+                )
+                descriptor.fetchLimit = limit
+                iptvIDs = ((try? context.fetch(descriptor)) ?? []).map(\.persistentModelID)
+            } else {
+                var descriptor = FetchDescriptor<Series>(
+                    predicate: #Predicate { series in
+                        series.name.localizedStandardContains(query)
+                    },
+                    sortBy: [SortDescriptor(\.name)]
+                )
+                descriptor.fetchLimit = limit * 2
+                iptvIDs = ((try? context.fetch(descriptor)) ?? [])
+                    .filter { !MediaServerIdentity.belongsToKnownMediaServer($0.id, serverIDs: mediaServerIDs) }
+                    .prefix(limit)
+                    .map(\.persistentModelID)
+            }
+
+            var mediaServerIDsList: [PersistentIdentifier] = []
+            if !mediaServerIDs.isEmpty {
+                var descriptor = FetchDescriptor<Series>(
+                    predicate: #Predicate { series in
+                        series.name.localizedStandardContains(query)
+                    },
+                    sortBy: [SortDescriptor(\.name)]
+                )
+                descriptor.fetchLimit = limit * 2
+                mediaServerIDsList = ((try? context.fetch(descriptor)) ?? [])
+                    .filter { MediaServerIdentity.belongsToKnownMediaServer($0.id, serverIDs: mediaServerIDs) }
+                    .prefix(limit)
+                    .map(\.persistentModelID)
+            }
+
+            hits.series = mergeSortedIDs(
+                iptvIDs + mediaServerIDsList,
+                in: context,
+                limit: limit
             )
-            descriptor.fetchLimit = limit
-            hits.series = ((try? context.fetch(descriptor)) ?? []).map(\.persistentModelID)
         }
 
         if request.wantLive {
@@ -532,6 +630,26 @@ private nonisolated enum SearchFetcher {
         }
 
         return hits
+    }
+
+    private static func mergeSortedIDs(
+        _ ids: [PersistentIdentifier],
+        in context: ModelContext,
+        limit: Int
+    ) -> [PersistentIdentifier] {
+        var seen = Set<PersistentIdentifier>()
+        var named: [(PersistentIdentifier, String)] = []
+        for id in ids where seen.insert(id).inserted {
+            if let movie = context.model(for: id) as? Movie {
+                named.append((id, movie.name))
+            } else if let series = context.model(for: id) as? Series {
+                named.append((id, series.name))
+            }
+        }
+        return named
+            .sorted { $0.1.localizedStandardCompare($1.1) == .orderedAscending }
+            .prefix(limit)
+            .map(\.0)
     }
 }
 
@@ -595,6 +713,17 @@ enum SearchResult: Identifiable, Hashable {
 
     func hash(into hasher: inout Hasher) {
         hasher.combine(id)
+    }
+
+    var isMediaServerContent: Bool {
+        switch self {
+        case let .movie(movie):
+            MediaServerIdentity.parseCatalogID(movie.id) != nil
+        case let .series(series):
+            MediaServerIdentity.parseCatalogID(series.id) != nil
+        case .liveStream:
+            false
+        }
     }
 }
 
@@ -664,9 +793,9 @@ struct SearchResultRow: View {
     private var categoryName: String {
         switch result {
         case .movie:
-            "Movie"
+            result.isMediaServerContent ? "Media Library" : "Movie"
         case .series:
-            "Series"
+            result.isMediaServerContent ? "Media Library" : "Series"
         case .liveStream:
             "Live TV"
         }
@@ -675,23 +804,16 @@ struct SearchResultRow: View {
     private var categoryIcon: String {
         switch result {
         case .movie:
-            "film"
+            result.isMediaServerContent ? "play.tv" : "film"
         case .series:
-            "tv"
+            result.isMediaServerContent ? "play.tv" : "tv"
         case .liveStream:
             "antenna.radiowaves.left.and.right"
         }
     }
 
     private var iconName: String {
-        switch result {
-        case .movie:
-            "film"
-        case .series:
-            "tv"
-        case .liveStream:
-            "antenna.radiowaves.left.and.right"
-        }
+        categoryIcon
     }
 
     @ViewBuilder

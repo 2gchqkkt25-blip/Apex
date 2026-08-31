@@ -2,7 +2,7 @@
 
 > **Purpose:** Track what stays, what goes, and what changes during the Lume → Apex rebrand.
 >
-> **Last updated:** July 20, 2026 (Build 46)
+> **Last updated:** August 31, 2026 (unreleased media-server update)
 
 ---
 
@@ -40,6 +40,11 @@ Create, edit, delete playlists. Stores server URL, credentials, MAC address, EPG
 ### 1.5 Playlist Switching
 Switch between multiple playlists with progress overlay. Each switch re-scopes all content tabs. Limited to 1 playlist on free tier. Empty selection prefers **Xtream → M3U → Stalker → Stremio** so a CloudKit restore does not leave Stremio as the default when a catalog playlist exists (Build 41).
 - **Files:** `PlaylistSwitcher.swift`, `PlaylistSwitchProgress.swift`, `MainTabView.swift`
+- **Status:** Core — **Decision:** ✅ Keep
+
+### 1.6 Personal Media Servers (Plex / Jellyfin / Emby)
+Dedicated Media tab for personal libraries; media-server content is deliberately isolated from IPTV playlists by server-scoped catalog IDs. Plex uses PIN authentication, while Jellyfin and Emby use their native server credentials/tokens. Sync imports movies, series, episodes, artwork, and metadata. Playback resolves direct play → direct stream/remux → HLS transcode with AVPlayer-first handling and server progress reporting. Connection configuration mirrors through CloudKit, while the catalog remains local per device. Coordinated deletion removes the local connection, its catalog rows, and its cloud mirror so it cannot return after reconcile.
+- **Files:** `MediaServer.swift`, `SyncedMediaServer.swift`, `MediaServerClient.swift`, `PlexClient.swift`, `JellyfinClient.swift`, `EmbyClient.swift`, `MediaServerSyncService.swift`, `MediaServerDeletion.swift`, `CloudSyncEngine+MediaServers.swift`, `MediaPlaybackResolver.swift`, `MediaHomeView.swift`, `MediaServersSettingsView.swift`
 - **Status:** Core — **Decision:** ✅ Keep
 
 ---

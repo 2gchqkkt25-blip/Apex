@@ -161,7 +161,7 @@ enum TopShelfDataWriter {
         var result: [TopShelfItemData] = []
 
         var movieDescriptor = FetchDescriptor<Movie>(
-            predicate: #Predicate { $0.watchProgress > 0 && $0.watchProgress < 0.9 },
+            predicate: #Predicate { $0.watchProgress > 1 && $0.isWatched == false },
             sortBy: [SortDescriptor(\.lastWatchedDate, order: .reverse)]
         )
         movieDescriptor.fetchLimit = 15
@@ -178,7 +178,25 @@ enum TopShelfDataWriter {
             ))
         }
 
-        return Array(result.prefix(20))
+        var seriesDescriptor = FetchDescriptor<Series>(
+            predicate: #Predicate { $0.lastWatchedDate != nil },
+            sortBy: [SortDescriptor(\.lastWatchedDate, order: .reverse)]
+        )
+        seriesDescriptor.fetchLimit = 10
+        let series = (try? context.fetch(seriesDescriptor)) ?? []
+        for show in series {
+            guard let poster = show.cover, !poster.isEmpty else { continue }
+            result.append(TopShelfItemData(
+                id: show.id,
+                title: show.name,
+                imageURL: poster,
+                type: "series",
+                contentId: show.tmdbId.map(String.init) ?? show.id,
+                category: category
+            ))
+        }
+
+        return Array(result.sorted { ($0.title) < ($1.title) }.prefix(20))
     }
 }
 

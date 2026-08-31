@@ -430,12 +430,13 @@ struct AVPlayerEngineView: View {
     }
 
     /// The coordinator reported it can't start the stream. On an initial-load
-    /// failure with a fallback engine available, hand off to the host (which
-    /// switches engines); otherwise raise the failure overlay.
+    /// failure, notify the host first — it may switch engines or retry direct play.
     private func reportFailure() {
         guard !loadFailed else { return }
-        if fallbackAvailable, !coordinator.hasStartedPlayback {
+        if !coordinator.hasStartedPlayback {
             onPlaybackFailed?()
+            if fallbackAvailable { return }
+            // Host is retrying (e.g. media-server direct play) — defer the overlay.
             return
         }
         withAnimation(.easeInOut(duration: 0.25)) { loadFailed = true }

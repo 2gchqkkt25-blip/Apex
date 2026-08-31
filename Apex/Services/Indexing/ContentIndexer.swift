@@ -23,16 +23,26 @@ actor ContentIndexer {
     private let tmdbClient: TMDBClient
 
     /// Items per chunk; the context is saved and progress published once per
-    /// chunk so main-context merges stay infrequent. 50 balances throughput
-    /// against memory (TMDB responses are held until save) — fewer, larger
-    /// chunks mean fewer main-context merges on 20k+ catalogs.
-    private let chunkSize = 50
-    /// Pause between items — keeps TMDB traffic to a couple of requests per
-    /// second at most.
-    private let itemPause: Duration = .milliseconds(100)
+    /// chunk so main-context merges stay infrequent.
+    private var chunkSize: Int {
+        #if os(tvOS)
+        10
+        #else
+        50
+        #endif
+    }
+
     /// Pause after each chunk save — gives the UI a breathing window where no
     /// main-context merge will fire, preventing stutter during scrolling.
-    private let chunkPause: Duration = .milliseconds(500)
+    private var chunkPause: Duration {
+        #if os(tvOS)
+        .seconds(2)
+        #else
+        .milliseconds(500)
+        #endif
+    }
+
+    private let itemPause: Duration = .milliseconds(100)
     /// Pause before re-checking when a sync or playback blocks indexing.
     private let busyPause: Duration = .seconds(20)
     /// First wait before retrying a failed embedding-asset download; doubles
@@ -101,6 +111,8 @@ actor ContentIndexer {
                 || status.isCloudSyncActive
                 || status.isBrowsePaused
                 || EPGSyncGate.isActive
+                || MediaSyncGate.isActive
+                || MediaConnectGate.isActive
             {
                 Logger.indexing.debug("Indexer pausing: blocked by active sync, playback, cloud sync, browse, or EPG import")
                 await status.setWaiting()
@@ -250,10 +262,15 @@ actor ContentIndexer {
     /// Snapshots the next chunk of unindexed titles into plain values.
     private func fetchPending() throws -> [PendingItem] {
         let context = ModelContext(modelContainer)
+        let mediaServerIDs = Set(try context.fetch(FetchDescriptor<MediaServer>()).map(\.id.uuidString))
+
+        func isMediaServerCatalog(_ id: String) -> Bool {
+            MediaServerIdentity.belongsToKnownMediaServer(id, serverIDs: mediaServerIDs)
+        }
 
         var movieDescriptor = FetchDescriptor<Movie>(predicate: #Predicate { $0.indexedAt == nil })
         movieDescriptor.fetchLimit = chunkSize
-        let movies = try context.fetch(movieDescriptor)
+        let movies = try context.fetch(movieDescriptor).filter { !isMediaServerCatalog($0.id) }
         var items: [PendingItem] = movies.map { movie in
             let query = ContentIndexText.searchQuery(for: movie.name)
             return PendingItem(
@@ -269,7 +286,7 @@ actor ContentIndexer {
         if movies.count < chunkSize {
             var seriesDescriptor = FetchDescriptor<Series>(predicate: #Predicate { $0.indexedAt == nil })
             seriesDescriptor.fetchLimit = chunkSize - movies.count
-            let series = try context.fetch(seriesDescriptor)
+            let series = try context.fetch(seriesDescriptor).filter { !isMediaServerCatalog($0.id) }
             items += series.map { item in
                 let query = ContentIndexText.searchQuery(for: item.name)
                 return PendingItem(
@@ -445,8 +462,12 @@ actor ContentIndexer {
     private func hasActiveSync() throws -> Bool {
         let context = ModelContext(modelContainer)
         let syncing = SyncStatus.syncing.rawValue
-        return try context.fetchCount(
+        let playlistSyncing = try context.fetchCount(
             FetchDescriptor<Playlist>(predicate: #Predicate { $0.syncStatusRaw == syncing })
         ) > 0
+        let mediaSyncing = try context.fetchCount(
+            FetchDescriptor<MediaServer>(predicate: #Predicate { $0.syncStatusRaw == syncing })
+        ) > 0
+        return playlistSyncing || mediaSyncing
     }
 }

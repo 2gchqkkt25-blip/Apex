@@ -4,23 +4,23 @@ import Testing
 
 struct DeepLinkTests {
     @Test func `parses movie link`() throws {
-        let url = try #require(URL(string: "lume://movie/603"))
-        #expect(DeepLink(url: url) == .movie(tmdbId: 603))
+        let url = try #require(URL(string: "apex://movie/603"))
+        #expect(DeepLink(url: url) == .movie(tmdbId: 603, play: false))
     }
 
     @Test func `parses series link`() throws {
-        let url = try #require(URL(string: "lume://series/1396"))
-        #expect(DeepLink(url: url) == .series(tmdbId: 1396))
+        let url = try #require(URL(string: "apex://series/1396"))
+        #expect(DeepLink(url: url) == .series(tmdbId: 1396, play: false))
     }
 
     @Test func `scheme is case insensitive`() throws {
-        let url = try #require(URL(string: "LUME://MOVIE/42"))
-        #expect(DeepLink(url: url) == .movie(tmdbId: 42))
+        let url = try #require(URL(string: "APEX://MOVIE/42"))
+        #expect(DeepLink(url: url) == .movie(tmdbId: 42, play: false))
     }
 
     @Test func `tolerates a trailing slash`() throws {
-        let url = try #require(URL(string: "lume://series/77/"))
-        #expect(DeepLink(url: url) == .series(tmdbId: 77))
+        let url = try #require(URL(string: "apex://series/77/"))
+        #expect(DeepLink(url: url) == .series(tmdbId: 77, play: false))
     }
 
     @Test func `rejects a foreign scheme`() throws {
@@ -29,17 +29,17 @@ struct DeepLinkTests {
     }
 
     @Test func `rejects an unknown kind`() throws {
-        let url = try #require(URL(string: "lume://episode/603"))
+        let url = try #require(URL(string: "apex://episode/603"))
         #expect(DeepLink(url: url) == nil)
     }
 
     @Test func `rejects a non-numeric id`() throws {
-        let url = try #require(URL(string: "lume://movie/not-a-number"))
+        let url = try #require(URL(string: "apex://movie/not-a-number"))
         #expect(DeepLink(url: url) == nil)
     }
 
     @Test func `rejects a missing id`() throws {
-        let url = try #require(URL(string: "lume://movie"))
+        let url = try #require(URL(string: "apex://movie"))
         #expect(DeepLink(url: url) == nil)
     }
 }

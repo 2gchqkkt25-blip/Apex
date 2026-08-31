@@ -49,9 +49,18 @@
         let url: URL?
         var fallbackSymbol: String = "film"
 
+        @Environment(\.displayScale) private var displayScale
+
         var body: some View {
             GeometryReader { geo in
-                CachedAsyncImage(url: url) { phase in
+                CachedAsyncImage(
+                    url: url,
+                    maxPixelSize: HeroBackdropMetrics.detailBackdropMaxPoints(
+                        width: geo.size.width,
+                        height: geo.size.height,
+                        scale: displayScale
+                    )
+                ) { phase in
                     switch phase {
                     case .empty:
                         Rectangle().fill(Color.black.opacity(0.6))

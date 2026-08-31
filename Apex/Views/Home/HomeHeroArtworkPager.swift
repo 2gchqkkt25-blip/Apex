@@ -9,6 +9,38 @@
 
 import SwiftUI
 
+/// Caps hero backdrop decode size — full TMDB originals can exceed 20 MB decoded
+/// and were a primary jetsam trigger on Apple TV while the home carousel idled.
+enum HeroBackdropMetrics {
+    /// Longest edge for on-screen hero artwork (pixels).
+    static func displayMaxPixelSize(width: CGFloat, height: CGFloat, scale: CGFloat) -> CGFloat {
+        let requested = max(width, height) * scale
+        #if os(tvOS)
+        return min(requested, DeviceMemoryTier.current.isConstrained ? 960 : 1920)
+        #else
+        return requested
+        #endif
+    }
+
+    /// Prefetch neighbours at the same cap — never full-resolution originals.
+    static var prefetchMaxPixelSize: CGFloat? {
+        #if os(tvOS)
+        DeviceMemoryTier.current.isConstrained ? 960 : 1920
+        #else
+        2560
+        #endif
+    }
+
+    /// Longest edge in points for tvOS detail-screen backdrops; `nil` elsewhere.
+    static func detailBackdropMaxPoints(width: CGFloat, height: CGFloat, scale: CGFloat) -> CGFloat? {
+        #if os(tvOS)
+        displayMaxPixelSize(width: width, height: height, scale: scale) / scale
+        #else
+        nil
+        #endif
+    }
+}
+
 struct HomeHeroArtworkPager: View {
     @Bindable var controller: HomeHeroController
     var height: CGFloat
@@ -48,7 +80,11 @@ struct HeroBackdropImage: View {
 
     var body: some View {
         GeometryReader { geo in
-            let maxPixel = max(geo.size.width, geo.size.height) * displayScale
+            let maxPixel = HeroBackdropMetrics.displayMaxPixelSize(
+                width: geo.size.width,
+                height: geo.size.height,
+                scale: displayScale
+            )
             CachedAsyncImage(url: url, maxPixelSize: maxPixel) { phase in
                 switch phase {
                 case .empty:

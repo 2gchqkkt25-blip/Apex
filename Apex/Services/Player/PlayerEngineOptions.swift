@@ -194,7 +194,7 @@ struct VLCPlayerOptions {
     static func load(from defaults: UserDefaults = .standard) -> VLCPlayerOptions {
         let jitter = VLCClockJitter(rawValue: defaults.integer(PlayerSettings.VLC.clockJitterKey, default: VLCClockJitter.auto.rawValue)) ?? .auto
         let synchro = VLCClockSynchro(rawValue: defaults.integer(PlayerSettings.VLC.clockSynchroKey, default: VLCClockSynchro.automatic.rawValue)) ?? .automatic
-        return VLCPlayerOptions(
+        var options = VLCPlayerOptions(
             hardwareDecode: defaults.bool(PlayerSettings.VLC.hardwareDecodeKey, default: PlayerSettings.VLC.hardwareDecodeDefault),
             decodeThreads: defaults.integer(PlayerSettings.VLC.decodeThreadsKey, default: PlayerSettings.VLC.decodeThreadsDefault),
             skipFrames: defaults.bool(PlayerSettings.VLC.skipFramesKey, default: PlayerSettings.VLC.skipFramesDefault),
@@ -207,6 +207,12 @@ struct VLCPlayerOptions {
             clockJitter: jitter.optionValue,
             clockSynchro: synchro.optionValue
         )
+        if DeviceMemoryTier.current.isConstrained {
+            options.liveBuffer = min(options.liveBuffer, 1500)
+            options.vodBuffer = min(options.vodBuffer, 500)
+            options.decodeThreads = min(options.decodeThreads, 2)
+        }
+        return options
     }
 }
 
@@ -232,7 +238,7 @@ struct KSPlayerOptions {
     var maxBuffer: Int
 
     static func load(from defaults: UserDefaults = .standard) -> KSPlayerOptions {
-        KSPlayerOptions(
+        var options = KSPlayerOptions(
             hardwareDecode: defaults.bool(PlayerSettings.KSPlayer.hardwareDecodeKey, default: PlayerSettings.KSPlayer.hardwareDecodeDefault),
             asyncDecompression: defaults.bool(PlayerSettings.KSPlayer.asyncDecompressionKey, default: PlayerSettings.KSPlayer.asyncDecompressionDefault),
             secondOpen: defaults.bool(PlayerSettings.KSPlayer.secondOpenKey, default: PlayerSettings.KSPlayer.secondOpenDefault),
@@ -250,6 +256,13 @@ struct KSPlayerOptions {
             vodBuffer: defaults.integer(PlayerSettings.KSPlayer.vodBufferKey, default: PlayerSettings.KSPlayer.vodBufferDefault),
             maxBuffer: defaults.integer(PlayerSettings.KSPlayer.maxBufferKey, default: PlayerSettings.KSPlayer.maxBufferDefault)
         )
+        if DeviceMemoryTier.current.isConstrained {
+            options.liveBuffer = min(options.liveBuffer, 2)
+            options.vodBuffer = min(options.vodBuffer, 2)
+            options.maxBuffer = min(options.maxBuffer, 8)
+            options.secondOpen = false
+        }
+        return options
     }
 }
 

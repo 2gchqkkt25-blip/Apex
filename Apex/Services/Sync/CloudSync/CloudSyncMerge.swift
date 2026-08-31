@@ -158,7 +158,29 @@ nonisolated struct EPGSourceValues: Codable, Equatable {
     }
 }
 
-// MARK: - Per-content user state
+// MARK: - Media server connection
+
+/// The syncable fields of a `MediaServer` connection. Conflicts resolve
+/// cloud-wins, like playlist config.
+nonisolated struct MediaServerConfigValues: Codable, Equatable {
+    var name: String
+    var baseURL: String
+    var kindRaw: String
+    var username: String
+    var password: String
+    var accessToken: String?
+    var plexToken: String?
+    var userId: String?
+    var plexServerIdentifier: String?
+    var syncEnabled: Bool
+    var sortOrder: Int
+
+    static func mergeConflict(local _: MediaServerConfigValues, cloud: MediaServerConfigValues) -> MediaServerConfigValues {
+        cloud
+    }
+}
+
+// MARK: - Per-content user state (continued)
 
 /// The syncable user state of a single catalog item. Fields irrelevant to a
 /// given kind stay at their defaults and round-trip harmlessly (a `Series` never

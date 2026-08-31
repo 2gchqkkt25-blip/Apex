@@ -22,7 +22,6 @@ struct MovieDetailView: View {
     var animationNamespace: Namespace.ID?
 
     @Environment(\.modelContext) private var modelContext
-    @Environment(\.dismiss) private var dismiss
     @Environment(ThemeManager.self) private var themeManager
     #if os(macOS)
         @Environment(\.openWindow) private var openWindow
@@ -45,18 +44,7 @@ struct MovieDetailView: View {
     init(movie: Movie, animationNamespace: Namespace.ID? = nil) {
         self.movie = movie
         self.animationNamespace = animationNamespace
-        let needsFetch = if TMDBClient.shared.isConfigured {
-            if let enrichedAt = movie.tmdbEnrichedAt,
-               Date().timeIntervalSince(enrichedAt) < 14 * 24 * 3600
-            {
-                false
-            } else {
-                true
-            }
-        } else {
-            false
-        }
-        _isLoadingTMDB = State(initialValue: needsFetch)
+        _isLoadingTMDB = State(initialValue: false)
     }
 
     var body: some View {
@@ -76,7 +64,6 @@ struct MovieDetailView: View {
             .paywall(isPresented: $showDownloadPaywall, highlight: .downloads)
             #if os(iOS)
                 .toolbar(.hidden, for: .tabBar)
-                .navigationBarBackButtonHidden(true)
                 .toolbarBackground(.hidden, for: .navigationBar)
             #endif
             #if !os(tvOS)
@@ -463,11 +450,6 @@ struct MovieDetailView: View {
         @ToolbarContentBuilder
         var toolbarContent: some ToolbarContent {
             #if os(iOS)
-                ToolbarItem(placement: .topBarLeading) {
-                    GlassIconButton(systemImage: "chevron.left", accessibilityLabel: "Back") {
-                        dismiss()
-                    }
-                }
                 ToolbarItem(placement: .topBarTrailing) {
                     HStack(spacing: 10) {
                         if let playlist = moviePlaylist, playlist.supportsDownloads {

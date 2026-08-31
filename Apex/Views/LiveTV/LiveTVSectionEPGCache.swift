@@ -43,12 +43,22 @@ final class LiveTVSectionEPGCache {
     loaded: (channelEPG: [String: ChannelEPG], programs: [String: [EPGProgram]])
   ) {
     var snapshot = sections[section] ?? SectionSnapshot()
+    var changed = false
     for (channelId, programs) in loaded.programs {
-      snapshot.programsByChannel[channelId] = programs
+      // Skip identical lists so mid-sync / gap-fill refreshes don't rebuild the
+      // tvOS guide focus tree for channels that already have this data.
+      if snapshot.programsByChannel[channelId] != programs {
+        snapshot.programsByChannel[channelId] = programs
+        changed = true
+      }
     }
     for (channelId, epg) in loaded.channelEPG {
-      snapshot.epgByChannel[channelId] = epg
+      if snapshot.epgByChannel[channelId] != epg {
+        snapshot.epgByChannel[channelId] = epg
+        changed = true
+      }
     }
+    guard changed else { return }
     sections[section] = snapshot
     if section == activeSectionToken {
       programsByChannel = snapshot.programsByChannel
@@ -74,7 +84,9 @@ final class LiveTVSectionEPGCache {
   }
 
   func channelsNeedingLoad(_ channels: [LiveStream]) -> [LiveStream] {
-    channels.filter { programsByChannel[$0.primaryEPGChannelId] == nil }
+    // Treat empty arrays as still needing a load — store/warm may have filled
+    // in since the last empty result (common during deferred EPG sync).
+    channels.filter { programsByChannel[$0.primaryEPGChannelId]?.isEmpty ?? true }
   }
 
   private func persistActiveSection() {

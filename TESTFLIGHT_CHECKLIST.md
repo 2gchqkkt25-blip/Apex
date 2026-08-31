@@ -1,4 +1,19 @@
-# TestFlight Checklist — Build 46
+# TestFlight Checklist — Build 52
+
+## August 31 Media Server and iOS Navigation Regression
+
+- [ ] iPhone tab bar shows exactly **Home, Movies, Series, Live TV, Media**; there is no automatic More tab
+- [ ] iPhone Home magnifying-glass button opens Search and the sheet dismisses normally
+- [ ] iPhone Live TV opens immediately, shows channels/guide, and still works after switching tabs and relaunching
+- [ ] iPhone Media is populated after launch without requiring a manual sync; switching tabs and relaunching preserves the selected server and library rails
+- [ ] iPhone Media movie and series detail screens show exactly one back button
+- [ ] iOS physical-device build signs without the Multicast Networking entitlement or Apple capability approval
+- [ ] Plex: play MP4 direct-play and MKV/HLS-transcode samples on iOS and tvOS; playback starts without a crash or runaway buffering
+- [ ] Apple TV HD: a high-bitrate Plex source uses a real 1080p/12 Mbps transcode rather than an uncapped remux
+- [ ] Jellyfin: sync and play a movie and episode on iOS, macOS, and tvOS; confirm progress returns to the server
+- [ ] Emby: sync and play a movie and episode on iOS, macOS, and tvOS; confirm progress returns to the server
+- [ ] Configure two servers, delete one, switch tabs, force-quit, relaunch, and allow iCloud reconcile; the deleted server does not return
+- [ ] After deleting a server, its movies, series, and episodes are absent from the Media catalog while the remaining server is unchanged
 
 ## Build 46 Regression Fixes
 

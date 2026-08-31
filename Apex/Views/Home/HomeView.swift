@@ -80,6 +80,7 @@ struct HomeView: View {
     @State private var playingMedia: PlayableMedia?
     @State private var showingSync = false
     @State private var showingSettings = false
+    @State private var showingSearch = false
 
     /// True while a playlist content sync is running. CloudKit reconcile is
     /// excluded — the local catalog is usable during iCloud import.
@@ -227,6 +228,21 @@ struct HomeView: View {
                     showingSettings: $showingSettings,
                     activePlaylist: activePlaylist
                 ))
+            #if os(iOS)
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            showingSearch = true
+                        } label: {
+                            Image(systemName: "magnifyingglass")
+                        }
+                        .accessibilityLabel("Search")
+                    }
+                }
+                .sheet(isPresented: $showingSearch) {
+                    SearchView()
+                }
+            #endif
                 .navigationDestination(for: Movie.self) { movie in
                     MovieDetailView(movie: movie, animationNamespace: animationNamespace)
                     #if os(iOS)
@@ -252,10 +268,16 @@ struct HomeView: View {
                     await loadTrending()
                 }
                 .task(id: watchlistTaskKey) {
+                    #if os(tvOS)
+                    guard !DeviceMemoryTier.current.isConstrained else { return }
+                    #endif
                     try? await Task.sleep(for: .seconds(3))
                     await loadWatchlist()
                 }
                 .task(id: recommendationsKey) {
+                    #if os(tvOS)
+                    guard !DeviceMemoryTier.current.isConstrained else { return }
+                    #endif
                     try? await Task.sleep(for: .seconds(8))
                     await loadRecommendations()
                 }
@@ -326,8 +348,15 @@ struct HomeView: View {
     ) -> some View {
         let hiddenIDs = Set(hiddenCategories.map(\.id))
         let filtered = items.filter { !hiddenIDs.contains($0.categoryId ?? "") }
-        if !filtered.isEmpty {
-            HomeRow(title: title, items: filtered, onPlayLive: playChannel, onRemove: onRemove, animationNamespace: animationNamespace)
+        #if os(tvOS)
+        let visible = DeviceMemoryTier.current.isConstrained
+            ? Array(filtered.prefix(6))
+            : filtered
+        #else
+        let visible = filtered
+        #endif
+        if !visible.isEmpty {
+            HomeRow(title: title, items: visible, onPlayLive: playChannel, onRemove: onRemove, animationNamespace: animationNamespace)
         }
     }
 
@@ -347,8 +376,7 @@ struct HomeView: View {
     }
 
     func belongsToActivePlaylist(_ id: String) -> Bool {
-        guard let prefix = playlistPrefix else { return true }
-        return id.hasPrefix(prefix)
+        HomeCatalogScope.includes(id, playlistPrefix: playlistPrefix)
     }
 
     // MARK: - Derived content

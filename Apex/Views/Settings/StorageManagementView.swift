@@ -58,7 +58,7 @@ struct StorageManagementView: View {
             case .index:
                 indexing.reset()
                 StorageManager.clearIndex(in: modelContext)
-                indexing.kick()
+                indexing.kick(allowOnTV: true)
         #endif
         }
         await load()

@@ -40,6 +40,12 @@
 		<string>infuse</string>
 		<string>vlc-x-callback</string>
 	</array>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_plexmediaserver._tcp</string>
+	</array>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Apex searches your local network to find your Plex, Jellyfin, or Emby server automatically.</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>

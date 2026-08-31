@@ -42,17 +42,20 @@ struct CachedAsyncImage<Content: View>: View {
     }
 
     var body: some View {
-        // `.id(taskID)` on an inner loader resets `@State` when a `LazyVStack`
-        // cell is recycled for a different URL — without this, a prior channel's
-        // `.success` phase can stick around and render blank/wrong artwork.
-        CachedAsyncImageLoader(
-            url: url,
-            pixelSize: pixelSize,
-            taskID: taskID,
-            transaction: transaction,
-            content: content
-        )
-        .id(taskID)
+        Group {
+            if url == nil {
+                content(.empty)
+            } else {
+                CachedAsyncImageLoader(
+                    url: url,
+                    pixelSize: pixelSize,
+                    taskID: taskID,
+                    transaction: transaction,
+                    content: content
+                )
+                .id(taskID)
+            }
+        }
     }
 
     /// Restart the load whenever the URL or target size changes (e.g. cell reuse).
@@ -82,14 +85,19 @@ private struct CachedAsyncImageLoader<Content: View>: View {
     @State private var phase: AsyncImagePhase = .empty
 
     var body: some View {
-        content(url == nil ? .failure(URLError(.badURL)) : phase)
+        content(phase)
             .task(id: taskID) { await load() }
     }
 
     private func load() async {
-        guard let url else {
-            phase = .failure(URLError(.badURL))
-            Logger.network.warning("[ImageDebug] CachedAsyncImage: nil URL — showing failure")
+        guard let url else { return }
+
+        guard !MediaSyncGate.isActive,
+              !MemoryPressureGate.isActive,
+              !MediaConnectGate.isActive,
+              !PlaybackMemoryGate.suppressesImageLoads
+        else {
+            phase = .empty
             return
         }
 

@@ -104,6 +104,7 @@ struct SettingsView: View {
                     appearanceSection
                     profilesSection
                     playlistsSection
+                    mediaServersSection
                     librarySection
                     layoutSection
                     searchSection
@@ -220,6 +221,20 @@ struct SettingsView: View {
                 } else {
                     Text("Free includes one playlist. Upgrade to Apex Pro to add more.")
                 }
+            }
+        }
+
+        private var mediaServersSection: some View {
+            Section {
+                NavigationLink {
+                    MediaServersSettingsView()
+                } label: {
+                    Label("Media Servers", systemImage: "play.tv")
+                }
+            } header: {
+                Text("Media Servers")
+            } footer: {
+                Text("Connect Jellyfin, Emby, or Plex to browse your home library in the Media tab.")
             }
         }
 
@@ -387,10 +402,19 @@ struct SettingsView: View {
         }
 
         private func deletePlaylists(offsets: IndexSet) {
-            withAnimation {
-                for index in offsets {
-                    PlaylistDeletion.delete(playlists[index], in: modelContext)
+            let container = modelContext.container
+            let ids = offsets.map { playlists[$0].id }
+            Task.detached(priority: .userInitiated) {
+                let context = ModelContext(container)
+                context.autosaveEnabled = false
+                for id in ids {
+                    let descriptor = FetchDescriptor<Playlist>(
+                        predicate: #Predicate { $0.id == id }
+                    )
+                    guard let local = try? context.fetch(descriptor).first else { continue }
+                    PlaylistDeletion.delete(local, in: context)
                 }
+                try? context.save()
             }
         }
     #endif
@@ -504,6 +528,8 @@ extension SettingsView {
                         } else {
                             tvPlaylistsDetail
                         }
+                    case .mediaServers:
+                        MediaServersSettingsView()
                     case .profiles: TVProfilesSettingsView()
                     case .home: tvHomeLayoutDetail
                     case .topShelf: TopShelfSettingsView()

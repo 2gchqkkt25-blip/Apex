@@ -2,6 +2,7 @@
 
 # XCode
 xcuserdata/
+DerivedData/
 
 .env
 

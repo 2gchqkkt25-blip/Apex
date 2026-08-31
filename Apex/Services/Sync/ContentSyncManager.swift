@@ -43,9 +43,16 @@ extension Series {
     /// while still yielding regularly.
     @MainActor
     func insertEpisodes(_ parsed: [ParsedEpisode], into context: ModelContext) async {
-        let existingIds = Set(episodes.map(\.id))
-        let newEpisodes = parsed.filter { !existingIds.contains($0.id) }
-        guard !newEpisodes.isEmpty else { return }
+        let parsedIds = parsed.map(\.id)
+        var existingById: [String: Episode] = Dictionary(uniqueKeysWithValues: episodes.map { ($0.id, $0) })
+        if existingById.count < parsedIds.count {
+            let stored = ((try? context.fetch(FetchDescriptor<Episode>(
+                predicate: #Predicate<Episode> { parsedIds.contains($0.id) }
+            ))) ?? [])
+            for episode in stored {
+                existingById[episode.id] = episode
+            }
+        }
 
         #if os(tvOS)
         let batchSize = 25
@@ -53,32 +60,53 @@ extension Series {
         let batchSize = 100
         #endif
 
-        var index = newEpisodes.startIndex
-        while index < newEpisodes.endIndex {
-            let end = Swift.min(index + batchSize, newEpisodes.endIndex)
-            for parsed in newEpisodes[index ..< end] {
+        var index = parsed.startIndex
+        while index < parsed.endIndex {
+            let end = Swift.min(index + batchSize, parsed.endIndex)
+            var didWrite = false
+            for item in parsed[index ..< end] {
+                if let existing = existingById[item.id] {
+                    existing.title = item.title
+                    existing.containerExtension = item.containerExtension
+                    existing.seasonNum = item.seasonNum
+                    existing.episodeNum = item.episodeNum
+                    existing.added = item.added
+                    existing.directSource = item.directSource
+                    existing.durationSecs = item.durationSecs
+                    existing.movieImage = item.movieImage
+                    existing.rating = item.rating
+                    existing.airDate = item.airDate
+                    existing.plot = item.plot
+                    existing.series = self
+                    if !episodes.contains(where: { $0.id == existing.id }) {
+                        episodes.append(existing)
+                    }
+                    didWrite = true
+                    continue
+                }
+
                 let episode = Episode(
-                    id: parsed.id,
-                    episodeId: parsed.episodeId,
-                    title: parsed.title,
-                    containerExtension: parsed.containerExtension,
-                    seasonNum: parsed.seasonNum,
-                    episodeNum: parsed.episodeNum,
-                    added: parsed.added,
-                    directSource: parsed.directSource
+                    id: item.id,
+                    episodeId: item.episodeId,
+                    title: item.title,
+                    containerExtension: item.containerExtension,
+                    seasonNum: item.seasonNum,
+                    episodeNum: item.episodeNum,
+                    added: item.added,
+                    directSource: item.directSource
                 )
-                episode.durationSecs = parsed.durationSecs
-                episode.movieImage = parsed.movieImage
-                episode.rating = parsed.rating
-                episode.airDate = parsed.airDate
-                episode.plot = parsed.plot
+                episode.durationSecs = item.durationSecs
+                episode.movieImage = item.movieImage
+                episode.rating = item.rating
+                episode.airDate = item.airDate
+                episode.plot = item.plot
                 episode.series = self
                 context.insert(episode)
                 episodes.append(episode)
+                existingById[episode.id] = episode
+                didWrite = true
             }
-            try? context.save()
-            // Yield the main actor so SwiftUI can process the new batch and the
-            // OS watchdog sees the main thread is still responsive.
+            if didWrite { try? context.save() }
             await Task.yield()
             index = end
         }

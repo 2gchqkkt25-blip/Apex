@@ -61,7 +61,9 @@ final nonisolated class ImageMemoryCache: @unchecked Sendable {
         // cheap re-decodes. iOS/iPadOS/macOS keep the generous ceiling for
         // smooth poster scrolling.
         #if os(tvOS)
-            cache.totalCostLimit = 64 * 1024 * 1024
+            cache.totalCostLimit = DeviceMemoryTier.current.isConstrained
+                ? 8 * 1024 * 1024
+                : 24 * 1024 * 1024
         #else
             // Reduced from 256MB to 128MB to leave more headroom for SwiftData
             // on large playlists (17K+ channels, 20K+ movies). NSCache still
@@ -83,6 +85,8 @@ final nonisolated class ImageMemoryCache: @unchecked Sendable {
                 object: nil,
                 queue: nil
             ) { [weak self] _ in
+                MemoryPressureGate.noteMemoryWarning()
+                PlaybackMemoryGate.noteMemoryWarningDuringPlayback()
                 self?.purge(reason: "memory warning")
             }
         #endif
@@ -124,7 +128,19 @@ final nonisolated class ImageMemoryCache: @unchecked Sendable {
     /// The disk cache still holds the original bytes, so this only forces a re-decode.
     func purge(reason: String) {
         cache.removeAllObjects()
-        Logger.memory.notice("Image memory cache purged (\(reason, privacy: .public))")
+        // The footprint at warning time is the number that matters: this cache
+        // is capped at 8 MB on Apple TV HD, so if warnings keep arriving after a
+        // purge the real consumer is elsewhere (SwiftData hydration, decoded
+        // pixels held by live views, the indexer) and the purge is a red
+        // herring. Logging MB here turns every warning into a data point.
+        if let mb = MemoryFootprint.currentMB {
+            Logger.memory.notice(
+                // swiftlint:disable:next line_length
+                "Image memory cache purged (\(reason, privacy: .public)) — footprint \(mb, format: .fixed(precision: 1), privacy: .public) MB"
+            )
+        } else {
+            Logger.memory.notice("Image memory cache purged (\(reason, privacy: .public))")
+        }
     }
 
     // MARK: - Deferred purge

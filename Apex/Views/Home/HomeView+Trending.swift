@@ -20,13 +20,13 @@ extension HomeView {
         let playlistChanged = lastTrendingPlaylistStamp != playlistStamp
 
         if playlistChanged {
-            trendingState = .loading
-            heroItems = []
+            if heroItems.isEmpty {
+                trendingState = .loading
+            }
             trendingMovies = []
             trendingSeries = []
         }
 
-        // Skip re-fetch when we already have a settled carousel for this playlist.
         if trendingState == .loaded,
            lastTrendingPlaylistStamp == playlistStamp,
            (!heroItems.isEmpty || !trendingMovies.isEmpty || !trendingSeries.isEmpty)
@@ -34,12 +34,11 @@ extension HomeView {
             return
         }
 
-        // Phase 1 — instant library heroes from the local catalog (no network, no
-        // sync wait). Paint Home immediately so reopen doesn't freeze on the hero.
-        if heroItems.isEmpty, let prefix = playlistPrefix, !prefix.isEmpty {
+        // Phase 1 — instant library / Plex heroes (no network).
+        if heroItems.isEmpty {
             let libraryMatch = await HomeHeroBuilder.libraryHeroMatch(
                 container: modelContext.container,
-                playlistPrefix: prefix,
+                playlistPrefix: playlistPrefix ?? "",
                 restriction: restriction
             )
             if !libraryMatch.heroSlots.isEmpty {
@@ -49,36 +48,47 @@ extension HomeView {
         }
 
         guard client.isConfigured else {
-            trendingState = .loaded
+            await loadLibraryTrendingFallback(playlistStamp: playlistStamp)
             return
         }
         guard !Task.isCancelled else { return }
 
-        // Phase 2 — TMDB trending fetches the actual trending rows. Runs within
-        // the structured task (so it survives tvOS tab unmount) but yields first
-        // so phase-1 heroes paint immediately without waiting for network.
+        // Phase 2 — TMDB trending rows + hero upgrade when phase 1 was empty.
         if heroItems.isEmpty {
             trendingState = .loading
-            // No heroes yet — await directly so the loading state is visible
-            await upgradeTrendingFromTMDB(client: client, playlistStamp: playlistStamp)
-        } else {
-            // Heroes already visible — give the UI a moment to render the first
-            // paint before starting the network-heavy phase 2.
-            try? await Task.sleep(for: .milliseconds(500))
-            guard !Task.isCancelled else { return }
-            await upgradeTrendingFromTMDB(client: client, playlistStamp: playlistStamp)
         }
+        await upgradeTrendingFromTMDB(client: client, playlistStamp: playlistStamp)
     }
 
-    /// Fetches TMDB trending and merges into Home. Runs after playlist sync
-    /// settles but does not block first paint when library heroes are already up.
+    private func loadLibraryTrendingFallback(playlistStamp: Double) async {
+        if trendingMovies.isEmpty, trendingSeries.isEmpty {
+            let libraryTrending = await HomeHeroBuilder.libraryTrendingMatch(
+                container: modelContext.container,
+                playlistPrefix: playlistPrefix ?? "",
+                restriction: restriction
+            )
+            if !libraryTrending.movieIDs.isEmpty || !libraryTrending.seriesIDs.isEmpty {
+                applyTrendingMatch(libraryTrending)
+            }
+        }
+        trendingState = .loaded
+        lastTrendingPlaylistStamp = playlistStamp
+    }
+
     private func upgradeTrendingFromTMDB(client: TMDBClient, playlistStamp: Double) async {
+        #if os(tvOS)
+        if !DeviceMemoryTier.current.isConstrained {
+            await waitUntilPlaylistSyncIdle()
+        }
+        #else
         await waitUntilPlaylistSyncIdle()
+        #endif
         guard !Task.isCancelled else { return }
 
         let prefix = playlistPrefix ?? ""
         let restriction = restriction
         let container = modelContext.container
+        let hadHeroes = !heroItems.isEmpty
 
         do {
             async let movieTitles = client.trending(.movie)
@@ -93,24 +103,29 @@ extension HomeView {
                 restriction: restriction
             )
 
-            applyTrendingMatch(match)
+            applyTrendingMatch(match, preserveExistingHeroes: hadHeroes)
             trendingState = .loaded
             lastTrendingPlaylistStamp = playlistStamp
 
+            #if os(tvOS)
+            guard !DeviceMemoryTier.current.isConstrained else { return }
+            #endif
             Task(priority: .utility) {
                 try? await Task.sleep(for: .seconds(3))
                 guard NetworkMonitor.shared.shouldProceedWithHeavyNetworkWork() else { return }
                 await enrichHeroLogos()
             }
         } catch {
-            // Keep any library heroes from phase 1; mark settled so Home doesn't
-            // stay in the empty-state gate forever.
-            trendingState = heroItems.isEmpty ? .failed : .loaded
+            if trendingMovies.isEmpty, trendingSeries.isEmpty {
+                await loadLibraryTrendingFallback(playlistStamp: playlistStamp)
+            } else {
+                trendingState = heroItems.isEmpty ? .failed : .loaded
+                lastTrendingPlaylistStamp = playlistStamp
+            }
         }
     }
 
-    /// Applies a trending match to view state — hero carousel + trending rows.
-    private func applyTrendingMatch(_ match: TrendingCatalogMatch) {
+    private func applyTrendingMatch(_ match: TrendingCatalogMatch, preserveExistingHeroes: Bool = false) {
         let movieLookup = fetchMoviesByCatalogID(Set(match.movieIDs + match.heroSlots.compactMap {
             $0.media == .movie ? $0.catalogID : nil
         }))
@@ -118,8 +133,18 @@ extension HomeView {
             $0.media == .series ? $0.catalogID : nil
         }))
 
-        trendingMovies = match.movieIDs.compactMap { movieLookup[$0].map(HomeMediaItem.movie) }
-        trendingSeries = match.seriesIDs.compactMap { seriesLookup[$0].map(HomeMediaItem.series) }
+        if !match.movieIDs.isEmpty {
+            trendingMovies = match.movieIDs.compactMap { movieLookup[$0].map(HomeMediaItem.movie) }
+        }
+        if !match.seriesIDs.isEmpty {
+            trendingSeries = match.seriesIDs.compactMap { seriesLookup[$0].map(HomeMediaItem.series) }
+        }
+        #if os(tvOS)
+        if DeviceMemoryTier.current.isConstrained {
+            trendingMovies = Array(trendingMovies.prefix(6))
+            trendingSeries = Array(trendingSeries.prefix(6))
+        }
+        #endif
 
         let trendingHeroes = match.heroSlots.compactMap { slot -> HeroItem? in
             switch slot.media {
@@ -139,20 +164,30 @@ extension HomeView {
                 )
             }
         }
-        if !trendingHeroes.isEmpty {
+        if !trendingHeroes.isEmpty, !preserveExistingHeroes || heroItems.isEmpty {
             heroItems = trendingHeroes
+            prefetchFirstHeroBackdrop()
         }
     }
 
-    /// The TMDB trending feed carries no logo artwork, so a hero title shows
-    /// only its backdrop until its full details are fetched. That fetch used to
-    /// happen only on the detail screen, so logos "popped in" after visiting
-    /// Details and coming back. Enrich the visible hero titles up front via the
-    /// same TMDB detail path. Runs after the carousel is shown so backdrops
-    /// aren't blocked.
+    private func prefetchFirstHeroBackdrop() {
+        guard let url = heroItems.first?.imageURL else { return }
+        #if os(tvOS)
+        guard !DeviceMemoryTier.current.isConstrained else { return }
+        #endif
+        Task {
+            await ImagePipeline.shared.prefetch(
+                [url],
+                maxPixelSize: HeroBackdropMetrics.prefetchMaxPixelSize
+            )
+        }
+    }
+
     private func enrichHeroLogos() async {
+        #if os(tvOS)
+        guard !DeviceMemoryTier.current.isConstrained else { return }
+        #endif
         let manager = ContentSyncManager(modelContainer: modelContext.container)
-        // Only enrich the first visible hero — the rest can load on demand.
         for hero in heroItems.prefix(2) {
             switch hero {
             case let .movie(movie, _, _):
@@ -173,11 +208,6 @@ extension HomeView {
         guard (logoPath ?? "").isEmpty else { return false }
         guard let enrichedAt else { return true }
         return Date().timeIntervalSince(enrichedAt) >= 14 * 24 * 3600
-    }
-
-    private func dedupedMediaItems(_ items: [HomeMediaItem]) -> [HomeMediaItem] {
-        var seen = Set<String>()
-        return items.filter { seen.insert($0.id).inserted }
     }
 
     // MARK: - Watchlist
@@ -241,8 +271,6 @@ extension HomeView {
         }
     }
 
-    // MARK: - Catalog lookup (main context, batched)
-
     func fetchMoviesByCatalogID(_ ids: Set<String>) -> [String: Movie] {
         guard !ids.isEmpty else { return [:] }
         let idSet = ids
@@ -269,21 +297,19 @@ extension HomeView {
         return byID
     }
 
-    /// Background-context versions of the catalog ID fetches — used by watchlist
-    /// loading which previously blocked the main thread and triggered watchdog
-    /// kills on large (28K) catalogs.
     func fetchMoviesByCatalogIDBackground(_ ids: Set<String>) async -> [String: Movie] {
         guard !ids.isEmpty else { return [:] }
         let container = modelContext.container
         let idSet = ids
-        let prefix = playlistPrefix ?? ""
+        let prefix = playlistPrefix
         let restriction = restriction
         return await Task.detached(priority: .userInitiated) {
             let context = ModelContext(container)
             let descriptor = FetchDescriptor<Movie>(predicate: #Predicate { idSet.contains($0.id) })
             var byID: [String: Movie] = [:]
             for movie in (try? context.fetch(descriptor)) ?? []
-                where movie.id.hasPrefix(prefix) && !restriction.hides(categoryID: movie.categoryId)
+                where HomeCatalogScope.includes(movie.id, playlistPrefix: prefix)
+                    && !restriction.hides(categoryID: movie.categoryId)
             {
                 byID[movie.id] = movie
             }
@@ -295,14 +321,15 @@ extension HomeView {
         guard !ids.isEmpty else { return [:] }
         let container = modelContext.container
         let idSet = ids
-        let prefix = playlistPrefix ?? ""
+        let prefix = playlistPrefix
         let restriction = restriction
         return await Task.detached(priority: .userInitiated) {
             let context = ModelContext(container)
             let descriptor = FetchDescriptor<Series>(predicate: #Predicate { idSet.contains($0.id) })
             var byID: [String: Series] = [:]
             for series in (try? context.fetch(descriptor)) ?? []
-                where series.id.hasPrefix(prefix) && !restriction.hides(categoryID: series.categoryId)
+                where HomeCatalogScope.includes(series.id, playlistPrefix: prefix)
+                    && !restriction.hides(categoryID: series.categoryId)
             {
                 byID[series.id] = series
             }
@@ -310,8 +337,6 @@ extension HomeView {
         }.value
     }
 
-    /// Waits until playlist content sync finishes without blocking on CloudKit
-    /// reconcile — the catalog is already local and usable during iCloud import.
     func waitUntilPlaylistSyncIdle() async {
         while isPlaylistSyncBusy {
             try? await Task.sleep(for: .milliseconds(400))
@@ -319,49 +344,14 @@ extension HomeView {
         }
     }
 
-    /// Waits until playlist sync / iCloud reconcile finish without blocking the
-    /// main thread in a tight loop. Used by heavier rows (For You) that benefit
-    /// from a settled store.
     func waitUntilSyncIdle() async {
         while isSyncBusy {
             try? await Task.sleep(for: .milliseconds(400))
             if Task.isCancelled { return }
         }
     }
-
-    private func fetchMovies(tmdbIds: [Int]) -> [Int: Movie] {
-        let ids = Set(tmdbIds)
-        guard !ids.isEmpty else { return [:] }
-        let descriptor = FetchDescriptor<Movie>(predicate: movieTmdbIdPredicate(ids: ids))
-        var byId: [Int: Movie] = [:]
-        for movie in (try? modelContext.fetch(descriptor)) ?? []
-            where belongsToActivePlaylist(movie.id) && !restriction.hides(categoryID: movie.categoryId)
-        {
-            guard let tmdbId = movie.tmdbId, byId[tmdbId] == nil else { continue }
-            byId[tmdbId] = movie
-        }
-        return byId
-    }
-
-    private func fetchSeries(tmdbIds: [Int]) -> [Int: Series] {
-        let ids = Set(tmdbIds)
-        guard !ids.isEmpty else { return [:] }
-        let descriptor = FetchDescriptor<Series>(predicate: seriesTmdbIdPredicate(ids: ids))
-        var byId: [Int: Series] = [:]
-        for series in (try? modelContext.fetch(descriptor)) ?? []
-            where belongsToActivePlaylist(series.id) && !restriction.hides(categoryID: series.categoryId)
-        {
-            guard let tmdbId = series.tmdbId, byId[tmdbId] == nil else { continue }
-            byId[tmdbId] = series
-        }
-        return byId
-    }
 }
 
-/// `tmdbId` is optional, and neither `?? -1` (TERNARY) nor a nil-check +
-/// force-unwrap (ForcedUnwrap) survives SwiftData's SQL generation — both throw
-/// at fetch time on a real store (in-memory stores skip SQL and don't
-/// reproduce it). Comparing against a `Set<Int?>` builds a plain `IN` clause.
 nonisolated func movieTmdbIdPredicate(ids: Set<Int>) -> Predicate<Movie> {
     let optionalIds = Set(ids.map(Int?.some))
     return #Predicate { optionalIds.contains($0.tmdbId) }

@@ -64,6 +64,10 @@ actor ImagePipeline {
     /// Returns a decoded image for `url`, downsampled to `maxPixelSize` (longest
     /// edge in pixels) when provided. Throws on permanent failure.
     func image(for url: URL, maxPixelSize: CGFloat?) async throws -> PlatformImage {
+        if MemoryPressureGate.isActive || PlaybackMemoryGate.suppressesImageLoads {
+            throw CancellationError()
+        }
+
         let key = Self.memoryKey(url, maxPixelSize: maxPixelSize)
 
         if let cached = ImageMemoryCache.shared.image(for: key) {
@@ -82,9 +86,19 @@ actor ImagePipeline {
         return try await task.value
     }
 
+    /// Drops every in-flight download/decode so memory warnings can reclaim
+    /// bandwidth and decoded bytes immediately.
+    func cancelAllInFlight() {
+        for task in inFlight.values {
+            task.cancel()
+        }
+        inFlight.removeAll()
+    }
+
     /// Warms the cache for upcoming images (e.g. neighbouring hero slides). Fire
     /// and forget — failures are ignored.
     func prefetch(_ urls: [URL], maxPixelSize: CGFloat?) {
+        guard !MemoryPressureGate.isActive, !PlaybackMemoryGate.suppressesImageLoads else { return }
         for url in urls {
             let key = Self.memoryKey(url, maxPixelSize: maxPixelSize)
             guard ImageMemoryCache.shared.image(for: key) == nil, inFlight[key] == nil else { continue }

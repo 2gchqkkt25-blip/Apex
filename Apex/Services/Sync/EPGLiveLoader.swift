@@ -643,7 +643,11 @@ enum EPGBrowseLoader {
         playlist: Playlist?,
         windowStart: Date? = nil,
         windowEnd: Date? = nil,
-        now: Date = Date()
+        now: Date = Date(),
+        /// When false, return store/warm-cache only. Used by mid-sync
+        /// `refreshGeneration` reloads so each bump doesn't spawn another
+        /// live-API gap-fill → `forceGuideRefresh` storm (tvOS guide scroll thrash).
+        allowGapFill: Bool = true
     ) async -> (channelEPG: [String: ChannelEPG], programs: [String: [EPGProgram]]) {
         let snapshots = channels.map(EPGStreamSnapshot.init(stream:))
         let start = windowStart ?? now.addingTimeInterval(-3600)
@@ -686,8 +690,10 @@ enum EPGBrowseLoader {
 
             // Fire-and-forget: live API gap-fill runs in background for channels
             // not in the store or warm cache. The view updates when refreshGeneration bumps.
+            // Skip on store-only refreshes (mid-sync / generation bumps) — otherwise
+            // every signal re-spawns gap-fill and forceGuideRefresh, thrashing the guide.
             let needsLive = snapshots.filter { programs[$0.primaryEPGChannelId]?.isEmpty ?? true }
-            if !needsLive.isEmpty {
+            if allowGapFill, !needsLive.isEmpty, !MemoryPressureGate.isActive {
                 Logger.database.warning("EPG browse — store had data for \(programs.count)/\(snapshots.count) channels; \(needsLive.count) need live API")
                 if let sample = needsLive.first {
                     Logger.database.warning("EPG browse — sample needing live: name=\(sample.name, privacy: .public) epgId=\(sample.epgChannelId ?? "nil", privacy: .public) primaryId=\(sample.primaryEPGChannelId, privacy: .public)")

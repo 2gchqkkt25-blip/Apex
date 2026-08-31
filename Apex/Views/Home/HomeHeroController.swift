@@ -136,6 +136,13 @@ final class HomeHeroController {
     }
 
     func prefetchNeighbours() {
+        #if os(tvOS)
+        // Apple TV loads hero art on-screen only — neighbour prefetch was a
+        // primary jetsam trigger while other tabs (Media connect) were active.
+        return
+        #else
+        guard !MemoryPressureGate.isActive else { return }
+        #endif
         guard let currentItemID,
               let index = items.firstIndex(where: { $0.id == currentItemID })
         else { return }
@@ -144,7 +151,7 @@ final class HomeHeroController {
         let neighbours = [(index - 1 + count) % count, (index + 1) % count]
             .compactMap { items[$0].imageURL }
         guard !neighbours.isEmpty else { return }
-        Task { await ImagePipeline.shared.prefetch(neighbours, maxPixelSize: nil) }
+        Task { await ImagePipeline.shared.prefetch(neighbours, maxPixelSize: HeroBackdropMetrics.prefetchMaxPixelSize) }
     }
 
     private func crossfadeInfo() {

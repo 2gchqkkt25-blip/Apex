@@ -69,7 +69,8 @@ struct ApexApp: App {
         let cloud = makeCloudContainer()
         let catalogSchema = Schema([
             Playlist.self, Category.self, LiveStream.self, Movie.self,
-            Series.self, Episode.self, CastMember.self, EPGListing.self, EPGSource.self
+            Series.self, Episode.self, CastMember.self, EPGListing.self, EPGSource.self,
+            MediaServer.self
         ])
         // Unnamed → keeps the historical `default.store` path (preserves data).
         // `cloudKitDatabase: .none` is REQUIRED: the default is `.automatic`, which
@@ -118,7 +119,7 @@ struct ApexApp: App {
     /// `UserContentState`, `UserProfile`). Small and CloudKit-backed; a load
     /// failure is unexpected, so fail loudly rather than risk a silent empty store.
     private static func makeCloudContainer() -> ModelContainer {
-        let cloudSchema = Schema([SyncedPlaylist.self, UserContentState.self, UserProfile.self, SyncedEPGSource.self])
+        let cloudSchema = Schema([SyncedPlaylist.self, UserContentState.self, UserProfile.self, SyncedEPGSource.self, SyncedMediaServer.self])
         let cloudConfiguration = ModelConfiguration(
             "CloudUserData",
             schema: cloudSchema,
@@ -181,6 +182,10 @@ struct ApexApp: App {
                 .environment(ThemeManager.shared)
                 .tint(ThemeManager.shared.colors.accent)
                 .task {
+                    // Apple TV HD jetsams while browsing too, not just during
+                    // playback — keep a footprint trace for the whole session.
+                    MemoryFootprint.startMonitoringIfConstrained()
+
                     // Give DownloadManager access to the model container so it
                     // can persist download state from its delegate callbacks.
                     #if !os(tvOS)
@@ -228,10 +233,13 @@ struct ApexApp: App {
                     // sync is running).
                     ContentIndexingService.shared.configure(container: catalogContainer)
                     #if os(tvOS)
-                    ContentIndexingService.shared.kick(after: .seconds(30))
-                    // Update Top Shelf content on launch so the extension has
-                    // fresh data even without a new sync.
-                    TopShelfDataWriter.update(container: catalogContainer)
+                    Task {
+                        let topShelfDelay: Duration = DeviceMemoryTier.current.isConstrained
+                            ? .seconds(120)
+                            : .seconds(45)
+                        try? await Task.sleep(for: topShelfDelay)
+                        TopShelfDataWriter.update(container: catalogContainer)
+                    }
                     #else
                     // Defer so the first Home paint (hero + rows) isn't fighting
                     // TMDB enrichment saves that merge into every @Query.
@@ -247,7 +255,11 @@ struct ApexApp: App {
                     EPGSyncService.shared.configure(container: catalogContainer)
                     #if os(tvOS)
                     Task {
-                        try? await Task.sleep(for: .seconds(60))
+                        let delay: Duration = DeviceMemoryTier.current.isConstrained
+                            ? .seconds(300)
+                            : .seconds(120)
+                        try? await Task.sleep(for: delay)
+                        guard !MediaConnectGate.isActive else { return }
                         EPGSyncService.shared.syncIfDue()
                     }
                     #else

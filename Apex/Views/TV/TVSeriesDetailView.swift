@@ -19,6 +19,7 @@
 
         @Environment(\.modelContext) private var modelContext
         @Query private var playlists: [Playlist]
+        @Query(sort: \MediaServer.sortOrder) private var mediaServers: [MediaServer]
 
         @State private var selectedSeason: Int = 1
         @State private var isLoadingEpisodes = false
@@ -39,33 +40,45 @@
 
         init(series: Series) {
             self.series = series
-            let needsFetch = if TMDBClient.shared.isConfigured {
-                if let enrichedAt = series.tmdbEnrichedAt,
-                   Date().timeIntervalSince(enrichedAt) < 14 * 24 * 3600
-                {
-                    false
-                } else {
-                    true
-                }
-            } else {
-                false
-            }
-            _isLoadingTMDB = State(initialValue: needsFetch)
+            _isLoadingTMDB = State(initialValue: false)
+        }
+
+        private var detailWorkToken: String {
+            "\(series.id)-\(playingMedia?.id ?? "idle")"
+        }
+
+        private var tmdbEnrichmentToken: String {
+            "\(series.tmdbId ?? 0)-\(playingMedia?.id ?? "idle")"
+        }
+
+        private var detailTransition: AnyTransition {
+            DeviceMemoryTier.current.allowsFullScreenCrossFade ? .opacity : .identity
+        }
+
+        private var detailFadeAnimation: Animation? {
+            DeviceMemoryTier.current.allowsFullScreenCrossFade ? .easeInOut(duration: 0.3) : nil
         }
 
         var body: some View {
             Group {
-                if isLoadingTMDB {
+                if playingMedia != nil {
+                    Color.black.ignoresSafeArea()
+                } else if isLoadingTMDB {
                     TVDetailLoadingView(title: series.name)
-                        .transition(.opacity)
+                        .transition(detailTransition)
                 } else {
                     content
-                        .transition(.opacity)
+                        .transition(detailTransition)
                         .onAppear { focus = .play }
                 }
             }
             .background(Color.black)
             .ignoresSafeArea()
+            .onChange(of: playingMedia) { _, media in
+                guard media != nil else { return }
+                similar = []
+                otherSources = []
+            }
             .fullScreenCover(item: $playingMedia) { media in
                 FullScreenPlayerView(media: media)
             }
@@ -74,25 +87,33 @@
             } message: {
                 Text("Install the YouTube app on your Apple TV to watch trailers.")
             }
-            .task(id: series.id) {
-                await loadEpisodesIfNeeded()
-                // Show content now — episodes are loaded. TMDB metadata (backdrop,
-                // cast, ratings, similar titles) fills in progressively afterward
-                // instead of hiding the view behind a spinner the whole time.
-                withAnimation(.easeInOut(duration: 0.3)) {
+            .task(id: detailWorkToken) {
+                guard playingMedia == nil else { return }
+                withAnimation(detailFadeAnimation) {
                     isLoadingTMDB = false
                 }
+                await loadEpisodesIfNeeded()
+                guard playingMedia == nil else { return }
+                maybeAutoplay()
                 await enrichIfNeeded()
+                guard playingMedia == nil else { return }
                 await enrichSeriesRatingsIfNeeded(series, context: modelContext)
-                resolveSimilar()
-                resolveOtherSources()
+                if !series.isMediaServerCatalogItem {
+                    resolveSimilar()
+                    resolveOtherSources()
+                }
                 focus = .play
             }
             .onChange(of: series.similarTMDBIds) { resolveSimilar() }
             .onChange(of: refreshToken) { resolveSimilar() }
-            // Backup trigger: .task(id:) re-runs when tmdbId changes, providing a
-            // second independent observation path alongside .onChange.
-            .task(id: series.tmdbId) {
+            // ContentIndexer may set tmdbId after the view is already displayed
+            // (background indexing runs after sync). tmdbEnrichmentToken embeds
+            // tmdbId, so this re-runs when it lands — and unlike a plain
+            // `.onChange { Task { … } }`, SwiftUI cancels it automatically when
+            // the view disappears or the id changes again, so it can't leak a
+            // background Task after the user navigates away.
+            .task(id: tmdbEnrichmentToken) {
+                guard playingMedia == nil else { return }
                 guard series.tmdbId != nil else { return }
                 for attempt in 0 ..< 2 {
                     guard !Task.isCancelled else { return }
@@ -103,25 +124,7 @@
                 }
                 if series.tmdbEnrichedAt != nil {
                     await enrichSeriesRatingsIfNeeded(series, context: modelContext)
-                    resolveSimilar()
-                    resolveOtherSources()
-                }
-            }
-            .onChange(of: series.tmdbId) {
-                // ContentIndexer may set tmdbId after the view is already displayed
-                // (background indexing runs after sync). When it lands, trigger
-                // enrichment silently so TMDB metadata and ratings appear without a
-                // loading spinner flash mid-browse.
-                guard series.tmdbId != nil else { return }
-                Task {
-                    for attempt in 0 ..< 2 {
-                        guard !Task.isCancelled else { return }
-                        if await enrichIfNeeded() { break }
-                        guard attempt == 0 else { break }
-                        try? await Task.sleep(for: .seconds(5))
-                    }
-                    if series.tmdbEnrichedAt != nil {
-                        await enrichSeriesRatingsIfNeeded(series, context: modelContext)
+                    if !series.isMediaServerCatalogItem {
                         resolveSimilar()
                         resolveOtherSources()
                     }
@@ -186,7 +189,7 @@
             ) {
                 TVPlayButton(
                     title: playTitle,
-                    isEnabled: nextEpisode != nil && seriesPlaylist != nil,
+                    isEnabled: canPlaySeries,
                     action: { if let episode = nextEpisode { playEpisode(episode) } }
                 )
                 .focused($focus, equals: .play)
@@ -405,7 +408,7 @@
             // Open on the season of the furthest point reached in the series, so
             // progress in a later season always wins over progress in an earlier
             // one — regardless of which was watched more recently.
-            let target = furthestInProgressEpisode ?? furthestProgressEpisode
+            let target = SeriesResume.episode(in: series)
             if let target, seasons.contains(target.seasonNum) {
                 return target.seasonNum
             }
@@ -441,16 +444,8 @@
                 .max { ($0.seasonNum, $0.episodeNum) < ($1.seasonNum, $1.episodeNum) }
         }
 
-        /// Play button target: resume the furthest in-progress episode; else the
-        /// episode after the furthest watched one (overflowing seasons, wrapping
-        /// to the premiere after the finale); else the selected season's first.
         private var nextEpisode: Episode? {
-            if let inProgress = furthestInProgressEpisode { return inProgress }
-            let ordered = series.episodes.sorted { ($0.seasonNum, $0.episodeNum) < ($1.seasonNum, $1.episodeNum) }
-            guard let watched = furthestWatchedEpisode,
-                  let index = ordered.firstIndex(where: { $0 === watched })
-            else { return seasonEpisodes.first ?? ordered.first }
-            return index + 1 < ordered.count ? ordered[index + 1] : ordered.first
+            SeriesResume.episode(in: series)
         }
 
         private var playTitle: LocalizedStringKey {
@@ -465,9 +460,25 @@
             playlists.first { series.id.hasPrefix($0.id.uuidString) } ?? playlists.first
         }
 
+        private var mediaServer: MediaServer? {
+            guard let parsed = MediaServerIdentity.parseCatalogID(series.id) else { return nil }
+            return mediaServers.first { $0.id == parsed.serverUUID }
+        }
+
+        private var canPlaySeries: Bool {
+            guard let episode = nextEpisode else { return false }
+            if series.isMediaServerCatalogItem {
+                return PlayableMedia.fromMediaServerEpisode(episode) != nil
+            }
+            return seriesPlaylist != nil
+        }
+
         // MARK: - Loading & enrichment
 
         private func loadEpisodesIfNeeded() async {
+            if series.episodes.isEmpty {
+                SeriesResume.attachStoredEpisodes(to: series, in: modelContext)
+            }
             if series.episodes.isEmpty {
                 await loadEpisodes()
             }
@@ -475,7 +486,26 @@
         }
 
         private func loadEpisodes() async {
-            guard let playlist = seriesPlaylist, !isLoadingEpisodes else { return }
+            guard !isLoadingEpisodes else { return }
+
+            if series.isMediaServerCatalogItem {
+                guard let server = mediaServer else { return }
+                isLoadingEpisodes = true
+                defer { isLoadingEpisodes = false }
+                do {
+                    try await MediaServerSyncService.shared.loadEpisodes(
+                        for: series,
+                        server: server,
+                        container: modelContext.container
+                    )
+                } catch {
+                    Logger.network.error("Media server episode load failed: \(error.localizedDescription, privacy: .public)")
+                }
+                selectedSeason = determineDefaultSeason()
+                return
+            }
+
+            guard let playlist = seriesPlaylist else { return }
             isLoadingEpisodes = true
             defer { isLoadingEpisodes = false }
             let manager = ContentSyncManager(modelContainer: modelContext.container)
@@ -514,6 +544,14 @@
 
         @discardableResult
         private func enrichIfNeeded() async -> Bool {
+            if series.isMediaServerCatalogItem {
+                await MediaServerDetailEnrichment.enrichSeriesIfNeeded(series, context: modelContext)
+                if series.tmdbEnrichedAt != nil {
+                    refreshToken = UUID()
+                    return true
+                }
+                return series.tmdbId != nil
+            }
             guard let tmdbId = await resolveTMDBIdIfNeeded() else { return false }
             if let enrichedAt = series.tmdbEnrichedAt,
                Date().timeIntervalSince(enrichedAt) < 14 * 24 * 3600
@@ -538,15 +576,36 @@
 
     private extension TVSeriesDetailView {
         func playEpisode(_ episode: Episode) {
-            guard let playlist = seriesPlaylist,
-                  let media = PlayableMedia.from(episode: episode, playlist: playlist) else { return }
+            let media: PlayableMedia?
+            if series.isMediaServerCatalogItem {
+                media = PlayableMedia.fromMediaServerEpisode(episode)
+            } else if let playlist = seriesPlaylist {
+                media = PlayableMedia.from(episode: episode, playlist: playlist)
+            } else {
+                media = nil
+            }
+            guard let media else { return }
             if ExternalPlayback.open(media) { return }
             playingMedia = media
         }
 
+        func maybeAutoplay() {
+            guard DeepLinkAutoplay.consume(seriesTMDBId: series.tmdbId),
+                  let episode = nextEpisode
+            else { return }
+            playEpisode(episode)
+        }
+
         func playEpisodeFromBeginning(_ episode: Episode) {
-            guard let playlist = seriesPlaylist,
-                  let media = PlayableMedia.from(episode: episode, playlist: playlist, resumeFromProgress: false) else { return }
+            let media: PlayableMedia?
+            if series.isMediaServerCatalogItem {
+                media = PlayableMedia.fromMediaServerEpisode(episode, resumeFromProgress: false)
+            } else if let playlist = seriesPlaylist {
+                media = PlayableMedia.from(episode: episode, playlist: playlist, resumeFromProgress: false)
+            } else {
+                media = nil
+            }
+            guard let media else { return }
             if ExternalPlayback.open(media) { return }
             playingMedia = media
         }

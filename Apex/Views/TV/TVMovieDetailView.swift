@@ -34,33 +34,49 @@
 
         init(movie: Movie) {
             self.movie = movie
-            let needsFetch = if TMDBClient.shared.isConfigured {
-                if let enrichedAt = movie.tmdbEnrichedAt,
-                   Date().timeIntervalSince(enrichedAt) < 14 * 24 * 3600
-                {
-                    false
-                } else {
-                    true
-                }
-            } else {
-                false
-            }
-            _isLoadingTMDB = State(initialValue: needsFetch)
+            _isLoadingTMDB = State(initialValue: false)
+        }
+
+        /// Changes when playback starts so enrichment tasks cancel and free memory.
+        private var detailWorkToken: String {
+            "\(movie.id)-\(playingMedia?.id ?? "idle")"
+        }
+
+        private var tmdbEnrichmentToken: String {
+            "\(movie.tmdbId ?? 0)-\(playingMedia?.id ?? "idle")"
+        }
+
+        private var detailTransition: AnyTransition {
+            DeviceMemoryTier.current.allowsFullScreenCrossFade ? .opacity : .identity
+        }
+
+        private var detailFadeAnimation: Animation? {
+            DeviceMemoryTier.current.allowsFullScreenCrossFade ? .easeInOut(duration: 0.3) : nil
         }
 
         var body: some View {
             Group {
-                if isLoadingTMDB {
+                if playingMedia != nil {
+                    // Drop the hero/backdrop/rails while fullScreenCover is up — they stay
+                    // in the hierarchy under the cover and hold decoded images on Apple TV HD.
+                    Color.black.ignoresSafeArea()
+                } else if isLoadingTMDB {
                     TVDetailLoadingView(title: movie.name)
-                        .transition(.opacity)
+                        .transition(detailTransition)
                 } else {
                     content
-                        .transition(.opacity)
+                        .transition(detailTransition)
                         .onAppear { focus = .play }
                 }
             }
             .background(Color.black)
             .ignoresSafeArea()
+            .onChange(of: playingMedia) { _, media in
+                guard media != nil else { return }
+                similar = []
+                collectionMovies = []
+                otherSources = []
+            }
             .fullScreenCover(item: $playingMedia) { media in
                 FullScreenPlayerView(media: media)
             }
@@ -69,24 +85,37 @@
             } message: {
                 Text("Install the YouTube app on your Apple TV to watch trailers.")
             }
-            .task(id: movie.id) {
+            .task(id: detailWorkToken) {
+                guard playingMedia == nil else { return }
                 await enrichIfNeeded()
+                guard playingMedia == nil else { return }
                 await enrichMovieRatingsIfNeeded(movie, context: modelContext)
-                resolveSimilar()
-                await resolveCollection()
-                resolveOtherSources()
-                withAnimation(.easeInOut(duration: 0.3)) {
+                if !movie.isMediaServerCatalogItem {
+                    resolveSimilar()
+                    resolveOtherSources()
+                }
+                withAnimation(detailFadeAnimation) {
                     isLoadingTMDB = false
                 }
             }
             .onChange(of: movie.similarTMDBIds) { resolveSimilar() }
-            .onChange(of: movie.collectionId) { Task { await resolveCollection() } }
+            // Covers both the first pass and a `collectionId` that background
+            // indexing fills in later. A plain `.onChange { Task { … } }` kept
+            // running after the user navigated back, then wrote view state from
+            // a dismissed screen; `.task(id:)` is cancelled for us.
+            .task(id: movie.collectionId) {
+                guard !movie.isMediaServerCatalogItem else { return }
+                await resolveCollection()
+            }
             .onChange(of: refreshToken) { resolveSimilar() }
-            // Backup trigger: .task(id:) re-runs when tmdbId changes, providing a
-            // second independent observation path alongside .onChange. If SwiftData
-            // auto-merge timing on tvOS causes .onChange to miss a tmdbId arrival,
-            // .task(id:) still fires when SwiftUI processes the id change.
-            .task(id: movie.tmdbId) {
+            // ContentIndexer may set tmdbId after the view is already displayed
+            // (background indexing runs after sync). tmdbEnrichmentToken embeds
+            // tmdbId, so this re-runs when it lands — and unlike a plain
+            // `.onChange { Task { … } }`, SwiftUI cancels it automatically when
+            // the view disappears or the id changes again, so it can't leak a
+            // background Task after the user navigates away.
+            .task(id: tmdbEnrichmentToken) {
+                guard playingMedia == nil else { return }
                 guard movie.tmdbId != nil else { return }
                 // Retry once if enrichment fails (network blip, rate limit, etc.)
                 for attempt in 0 ..< 2 {
@@ -98,26 +127,7 @@
                 }
                 if movie.tmdbEnrichedAt != nil {
                     await enrichMovieRatingsIfNeeded(movie, context: modelContext)
-                    resolveSimilar()
-                    await resolveCollection()
-                    resolveOtherSources()
-                }
-            }
-            .onChange(of: movie.tmdbId) {
-                // ContentIndexer may set tmdbId after the view is already displayed
-                // (background indexing runs after sync). When it lands, trigger
-                // enrichment silently so TMDB metadata and ratings appear without a
-                // loading spinner flash mid-browse.
-                guard movie.tmdbId != nil else { return }
-                Task {
-                    for attempt in 0 ..< 2 {
-                        guard !Task.isCancelled else { return }
-                        if await enrichIfNeeded() { break }
-                        guard attempt == 0 else { break }
-                        try? await Task.sleep(for: .seconds(5))
-                    }
-                    if movie.tmdbEnrichedAt != nil {
-                        await enrichMovieRatingsIfNeeded(movie, context: modelContext)
+                    if !movie.isMediaServerCatalogItem {
                         resolveSimilar()
                         await resolveCollection()
                         resolveOtherSources()
@@ -188,7 +198,7 @@
                 VStack(spacing: 16) {
                     TVPlayButton(
                         title: movie.watchProgress > 1 ? "Resume" : "Play",
-                        isEnabled: moviePlaylist != nil,
+                        isEnabled: canPlayMovie,
                         action: startPlayback
                     )
                     .focused($focus, equals: .play)
@@ -197,7 +207,7 @@
                         TVPlayButton(
                             title: "Start from Beginning",
                             systemImage: "gobackward",
-                            isEnabled: moviePlaylist != nil,
+                            isEnabled: canPlayMovie,
                             action: startPlaybackFromBeginning
                         )
                     }
@@ -325,6 +335,13 @@
             playlists.first { movie.id.hasPrefix($0.id.uuidString) } ?? playlists.first
         }
 
+        private var canPlayMovie: Bool {
+            if movie.isMediaServerCatalogItem {
+                return PlayableMedia.fromMediaServerMovie(movie) != nil
+            }
+            return moviePlaylist != nil
+        }
+
         // MARK: - Enrichment
 
         /// Resolves a TMDB id by title when the provider didn't supply one.
@@ -350,6 +367,14 @@
 
         @discardableResult
         private func enrichIfNeeded() async -> Bool {
+            if movie.isMediaServerCatalogItem {
+                await MediaServerDetailEnrichment.enrichMovieIfNeeded(movie, context: modelContext)
+                if movie.tmdbEnrichedAt != nil {
+                    refreshToken = UUID()
+                    return true
+                }
+                return movie.tmdbId != nil
+            }
             guard let tmdbId = await resolveTMDBIdIfNeeded() else { return false }
             if let enrichedAt = movie.tmdbEnrichedAt,
                Date().timeIntervalSince(enrichedAt) < 14 * 24 * 3600
@@ -441,6 +466,12 @@
         // MARK: - Actions
 
         private func startPlayback() {
+            if movie.isMediaServerCatalogItem {
+                guard let media = PlayableMedia.fromMediaServerMovie(movie) else { return }
+                if ExternalPlayback.open(media) { return }
+                playingMedia = media
+                return
+            }
             guard let playlist = moviePlaylist,
                   let media = PlayableMedia.from(movie: movie, playlist: playlist) else { return }
             if ExternalPlayback.open(media) { return }
@@ -448,6 +479,12 @@
         }
 
         private func startPlaybackFromBeginning() {
+            if movie.isMediaServerCatalogItem {
+                guard let media = PlayableMedia.fromMediaServerMovie(movie, resumeFromProgress: false) else { return }
+                if ExternalPlayback.open(media) { return }
+                playingMedia = media
+                return
+            }
             guard let playlist = moviePlaylist,
                   let media = PlayableMedia.from(movie: movie, playlist: playlist, resumeFromProgress: false) else { return }
             if ExternalPlayback.open(media) { return }

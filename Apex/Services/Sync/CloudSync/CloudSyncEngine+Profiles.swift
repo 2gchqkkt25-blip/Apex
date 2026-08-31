@@ -17,6 +17,9 @@ extension CloudSyncEngine {
     /// both create) are collapsed, the active profile is resolved, and any
     /// legacy `nil`-profileID content records are claimed by it. Idempotent.
     func bootstrapProfiles(preferredActiveID: UUID?, defaultName: String) throws -> ProfileBootstrap {
+        // Runs after the return value is built, so the `profiles.count` read below
+        // is unaffected.
+        defer { releaseHydratedRows() }
         var profiles = try dedupeProfiles(cloudContext.fetch(
             FetchDescriptor<UserProfile>(sortBy: [SortDescriptor(\.createdAt)])
         ))
@@ -61,6 +64,7 @@ extension CloudSyncEngine {
     /// reconcile (which re-reads the active profile from `ActiveProfileStore`)
     /// re-baselines against the newly projected state.
     func switchProfile(from: UUID, to toID: UUID) throws {
+        defer { releaseHydratedRows() }
         // Gather the catalog's current user-state once and reuse it for both the
         // export into the outgoing profile's mirrors and the catalog reset — these
         // each used to re-run the four catalog fetches, tripling the work per
@@ -105,6 +109,7 @@ extension CloudSyncEngine {
     /// Delete every content record owned by a profile (called when the profile
     /// itself is deleted). The `UserProfile` row is removed by `ProfileManager`.
     func purgeProfileData(_ profileID: UUID) throws {
+        defer { releaseHydratedRows() }
         // Scope the fetch with a predicate (served by the
         // `UserContentState.profileID` index) instead of scanning every mirror.
         // Records with a `nil` profileID are treated as belonging to the default

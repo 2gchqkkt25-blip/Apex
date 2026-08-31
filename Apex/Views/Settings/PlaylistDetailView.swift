@@ -470,12 +470,23 @@ struct PlaylistDetailView: View {
     }
 
     private func deletePlaylist() {
-        PlaylistDeletion.delete(playlist, in: modelContext)
+        let container = modelContext.container
+        let playlistID = playlist.id
         #if os(tvOS)
             onClose?()
         #else
             dismiss()
         #endif
+        Task.detached(priority: .userInitiated) {
+            let context = ModelContext(container)
+            context.autosaveEnabled = false
+            let descriptor = FetchDescriptor<Playlist>(
+                predicate: #Predicate { $0.id == playlistID }
+            )
+            guard let local = try? context.fetch(descriptor).first else { return }
+            PlaylistDeletion.delete(local, in: context)
+            try? context.save()
+        }
     }
 }
 

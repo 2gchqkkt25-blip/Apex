@@ -77,6 +77,7 @@ final class CloudSyncCoordinator {
         observeCloudKitEvents()
         observeRemoteChanges()
         observeContentSyncCompletion()
+        observeMediaSyncCompletion()
     }
 
     // No `deinit`: this coordinator is created once in `LumeApp` and lives for
@@ -110,7 +111,12 @@ final class CloudSyncCoordinator {
         // cached local store data. On TestFlight (production CloudKit), the
         // reconcile's save triggers main-context merges that freeze all @Query
         // views — deferring means that freeze doesn't overlap with first paint.
-        try? await Task.sleep(for: .seconds(2))
+        #if os(tvOS)
+        let launchDelay: Duration = DeviceMemoryTier.current.isConstrained ? .seconds(30) : .seconds(2)
+        #else
+        let launchDelay: Duration = .seconds(2)
+        #endif
+        try? await Task.sleep(for: launchDelay)
         reconcile(reason: .launch)
         scheduleInitialSyncTimeout()
     }
@@ -219,6 +225,16 @@ final class CloudSyncCoordinator {
     }
 
     private func runReconcile() {
+        guard !MediaSyncGate.isActive else {
+            pendingReconcile = true
+            Logger.sync.debug("Reconcile deferred — media library sync in progress")
+            return
+        }
+        guard !MediaConnectGate.isActive else {
+            pendingReconcile = true
+            Logger.sync.debug("Reconcile deferred — media server connect in progress")
+            return
+        }
         guard !isReconciling else {
             pendingReconcile = true
             return
@@ -275,6 +291,15 @@ final class CloudSyncCoordinator {
         } catch {
             Logger.sync.error("Profile switch failed: \(error.localizedDescription)")
         }
+    }
+
+    /// Removes a home-media connection locally and from its CloudKit mirror.
+    /// The engine keeps a deletion baseline until the immediate reconcile has
+    /// observed the tombstone, preventing an un-baselined mirror from restoring
+    /// the server the user just removed.
+    func deleteMediaServer(id: UUID) async throws {
+        try await engine.deleteMediaServer(id: id)
+        reconcile(reason: .queued, debounced: false)
     }
 
     /// Delete a profile's content state.
@@ -507,6 +532,23 @@ final class CloudSyncCoordinator {
         }
         observers.append(observer)
     }
+
+    private func observeMediaSyncCompletion() {
+        let observer = NotificationCenter.default.addObserver(
+            forName: .apexMediaSyncDidFinish,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                if pendingReconcile {
+                    pendingReconcile = false
+                    reconcile(reason: .queued)
+                }
+            }
+        }
+        observers.append(observer)
+    }
 }
 
 /// Why a reconcile was requested — determines whether a pass with nothing to do
@@ -534,4 +576,6 @@ enum ReconcileReason {
 extension Notification.Name {
     /// Posted by `ContentSyncManager` after a playlist's catalog sync succeeds.
     static let lumeContentSyncDidComplete = Notification.Name("ApexContentSyncDidComplete")
+    /// Posted when a home media library import finishes so deferred iCloud work can resume.
+    static let apexMediaSyncDidFinish = Notification.Name("ApexMediaSyncDidFinish")
 }

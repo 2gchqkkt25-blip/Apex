@@ -64,27 +64,34 @@ nonisolated struct TMDBClient {
         self.language = language
     }
 
-    /// Whether a usable token is present. When false the trending section is
-    /// simply hidden rather than surfacing an error to the user.
+    /// Whether a usable token is present. When false the trending section falls
+    /// back to library picks rather than surfacing an error to the user.
     var isConfigured: Bool {
         guard let token, !token.isEmpty else {
-            Logger.network.warning("[TMDBDebug] Not configured: token is \(token == nil ? "nil" : "empty")")
+            Self.logMissingTokenOnce()
             return false
         }
         // Guard against an unsubstituted Info.plist variable (no xcconfig present).
         if token.hasPrefix("$(") {
-            Logger.network.warning("[TMDBDebug] Token appears unsubstituted: \(token.prefix(20))...")
+            Self.logMissingTokenOnce()
             return false
         }
-        Logger.network.info("[TMDBDebug] Configured — token prefix: \(token.prefix(15))...")
         return true
+    }
+
+    private static nonisolated(unsafe) var missingTokenLogged = false
+
+    private static func logMissingTokenOnce() {
+        guard !missingTokenLogged else { return }
+        missingTokenLogged = true
+        Logger.network.warning(
+            "[TMDB] No access token — add TMDB_ACCESS_TOKEN to .env and rebuild for TMDB trending and metadata enrichment."
+        )
     }
 
     static func tokenFromBundle() -> String? {
         let raw = Bundle.main.object(forInfoDictionaryKey: "TMDBAccessToken") as? String
-        let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines)
-        Logger.network.info("[TMDBDebug] tokenFromBundle — raw: \(raw ?? "nil"), trimmed exists: \(trimmed != nil && !(trimmed?.isEmpty ?? true))")
-        return trimmed
+        return raw?.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// The TMDB `language` value for the user's current preferred language.

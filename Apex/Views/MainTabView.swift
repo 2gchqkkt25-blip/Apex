@@ -39,17 +39,12 @@ struct MainTabView: View {
     /// that's already been handled.
     @State private var autoSyncAttempted: Set<UUID> = []
 
-    /// Browse tabs mount on first selection and **unmount when not selected**.
-    /// Other IPTV apps handle 17K+ channels without crashing because they only
-    /// keep the current screen's data in memory. SwiftData's `@Query` keeps all
-    /// results resident for the lifetime of the view — with 44K+ objects across
-    /// multiple tabs, the combined memory exceeds jetsam limits. Deactivating
-    /// inactive tabs releases their query subscriptions and backing objects.
-    ///
-    /// The Home tab stays mounted (lightweight hero + small collection queries).
-    /// Every other tab unmounts when the user navigates away — its view (and all
-    /// `@Query` results) are deallocated. Re-mounting on return is fast because
-    /// SwiftData's SQLite backing reads from disk cache.
+    /// Browse tabs mount only while selected (see `lazyTab`). On tvOS every tab
+    /// unmounts when inactive — Apple TV HD cannot hold Home + Media connect +
+    /// background EPG in memory at once. iOS/macOS keep Home mounted, and keep
+    /// Media mounted from launch so the new `Tab` content closure never caches a
+    /// `Color.clear` placeholder before its activation callback runs. Media only
+    /// retains capped rails, so this is bounded while preserving sync results.
     @State private var activatedTabs: Set<AppTab> = [.home]
 
     private var syncFrequency: SyncFrequency {
@@ -159,6 +154,12 @@ struct MainTabView: View {
                     Text("Live TV")
                 }
 
+                Tab(value: AppTab.media) {
+                    lazyTab(.media, selection: selection.wrappedValue) { MediaHomeView() }
+                } label: {
+                    Text("Media")
+                }
+
                 Tab(value: AppTab.settings) {
                     lazyTab(.settings, selection: selection.wrappedValue) { SettingsView() }
                 } label: {
@@ -189,16 +190,16 @@ struct MainTabView: View {
                     lazyTab(.liveTV, selection: selection.wrappedValue) { LiveTVView() }
                 }
 
+                Tab("Media", systemImage: "play.tv", value: AppTab.media) {
+                    lazyTab(.media, selection: selection.wrappedValue) { MediaHomeView() }
+                }
+
                 #if os(macOS)
                     // A regular Search tab owns `.searchable` + the type filter.
                     // `role: .search` parks the field in the window search chrome
                     // and hides the All / Movies / Series / Live TV control (or
                     // duplicates it under the main tabs).
                     Tab("Search", systemImage: "magnifyingglass", value: AppTab.search) {
-                        lazyTab(.search, selection: selection.wrappedValue) { SearchView() }
-                    }
-                #else
-                    Tab(value: AppTab.search, role: .search) {
                         lazyTab(.search, selection: selection.wrappedValue) { SearchView() }
                     }
                 #endif
@@ -210,21 +211,26 @@ struct MainTabView: View {
         }
     #endif
 
-    /// Defers mounting a tab's browse surface until the user selects it (or a
-    /// deep link targets it). Home is always mounted so the launch screen is
-    /// usable immediately after sync.
-    ///
     /// Mounts the tab's content only when it is the active selection. Inactive
-    /// tabs unmount so their `@Query` subscriptions release memory. Home stays
-    /// mounted (its queries are all capped and lightweight). The re-mount on
-    /// selection is instant — SwiftData reads from SQLite's page cache.
+    /// tabs unmount so their `@Query` subscriptions release memory. On tvOS every
+    /// tab (including Home) unmounts when not selected — Apple TV HD cannot keep
+    /// Home's hero + trending queries resident while the user connects Plex on
+    /// the Media tab. iOS/macOS keep Home mounted for instant tab switches.
     @ViewBuilder
     private func lazyTab(_ tab: AppTab, selection: AppTab, @ViewBuilder content: () -> some View) -> some View {
-        if selection == tab || tab == .home {
+        #if os(tvOS)
+        if selection == tab {
             content()
         } else {
             Color.clear
         }
+        #else
+        if selection == tab || tab == .home || tab == .media {
+            content()
+        } else {
+            Color.clear
+        }
+        #endif
     }
 
     private func activateTab(_ tab: AppTab) {
@@ -240,18 +246,19 @@ struct MainTabView: View {
     private func handleDeepLink(_ url: URL) {
         guard let link = DeepLink(url: url) else { return }
         switch link {
-        case let .movie(tmdbId):
+        case let .movie(tmdbId, _):
             guard let movie = resolveMovie(tmdbId: tmdbId) else { return }
             activateTab(.movies)
             router.selectedTab = .movies
             router.moviesPath = NavigationPath()
             router.moviesPath.append(movie)
-        case let .series(tmdbId):
+        case let .series(tmdbId, play):
             guard let series = resolveSeries(tmdbId: tmdbId) else { return }
             activateTab(.series)
             router.selectedTab = .series
             router.seriesPath = NavigationPath()
             router.seriesPath.append(series)
+            if play { DeepLinkAutoplay.setPending(seriesTMDBId: tmdbId) }
         }
     }
 

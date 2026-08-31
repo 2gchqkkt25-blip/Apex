@@ -227,45 +227,38 @@ import SwiftUI
             .shadow(color: .black.opacity(0.35), radius: 4, y: 1)
         }
 
-        /// Derives a quality string from the active video track (e.g. "1080p · HEVC · 30fps").
+        /// Merges server-reported stream metadata (media servers) with live
+        /// decoder stats from the active KSPlayer video track.
         private var videoQualityCaption: String? {
+            PlayerStreamDisplay.caption(for: media, videoInfo: runtimeVideoInfoFromTracks)
+        }
+
+        private var runtimeVideoInfoFromTracks: PlayerVideoInfo? {
             guard let player = coordinator.playerLayer?.player else { return nil }
             let tracks = player.tracks(mediaType: .video)
             guard let track = tracks.first(where: { $0.isEnabled }) ?? tracks.first else { return nil }
-            var parts: [String] = []
-            // Resolution label
             let size = track.naturalSize
-            let height = Int(size.height)
-            if height > 0 {
-                if height >= 2160 { parts.append("4K") }
-                else if height >= 1080 { parts.append("1080p") }
-                else if height >= 720 { parts.append("720p") }
-                else if height >= 480 { parts.append("480p") }
-                else { parts.append("\(height)p") }
-            }
-            // Codec
+            let width = Int(size.width.rounded())
+            let height = Int(size.height.rounded())
+            guard width > 0, height > 0 else { return nil }
             let codec = track.codecType.string
-            if !codec.isEmpty {
-                let short: String
+            let shortCodec: String? = {
+                guard !codec.isEmpty else { return nil }
                 switch codec {
-                case "avc1", "avc3": short = "H.264"
-                case "hvc1", "hev1": short = "HEVC"
-                case "av01": short = "AV1"
-                case "vp09": short = "VP9"
-                case "dvhe": short = "Dolby Vision"
-                default: short = codec.uppercased()
+                case "avc1", "avc3": return "H.264"
+                case "hvc1", "hev1": return "HEVC"
+                case "av01": return "AV1"
+                case "vp09": return "VP9"
+                case "dvhe": return "Dolby Vision"
+                default: return codec.uppercased()
                 }
-                parts.append(short)
-            }
-            // FPS
-            let fps = track.nominalFrameRate
-            if fps > 0 {
-                if fps > 29 && fps < 31 { parts.append("30fps") }
-                else if fps > 59 && fps < 61 { parts.append("60fps") }
-                else if fps > 23 && fps < 25 { parts.append("24fps") }
-                else { parts.append("\(Int(fps))fps") }
-            }
-            return parts.isEmpty ? nil : parts.joined(separator: "  ·  ")
+            }()
+            return PlayerVideoInfo(
+                width: width,
+                height: height,
+                fps: Double(track.nominalFrameRate),
+                codec: shortCodec
+            )
         }
 
         private var liveIndicator: some View {

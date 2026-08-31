@@ -63,7 +63,7 @@
         }
 
         var techCaption: String {
-            coordinator.videoInfo?.captionParts.joined(separator: "  ·  ") ?? ""
+            PlayerStreamDisplay.caption(for: media, videoInfo: coordinator.videoInfo) ?? ""
         }
 
         // MARK: Scrubbing (VOD)
@@ -263,10 +263,7 @@
         var infoBadges: [String] {
             var badges: [String] = []
             if let rating = contentRatingBadge, !rating.isEmpty { badges.append(rating) }
-            if let info = coordinator.videoInfo {
-                if !info.qualityTag.isEmpty { badges.append(info.qualityTag) }
-                if let codec = info.codec, !codec.isEmpty { badges.append(codec.uppercased()) }
-            }
+            badges.append(contentsOf: PlayerStreamDisplay.badges(for: media, videoInfo: coordinator.videoInfo))
             return badges
         }
 

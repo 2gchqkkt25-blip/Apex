@@ -106,10 +106,13 @@
             let targets = force ? channels : epgCache.channelsNeedingLoad(channels)
             guard !targets.isEmpty else { return }
 
+            // Mid-sync refreshes reload store/warm cache only — re-spawning
+            // gap-fill on every generation bump fights the guide focus engine.
             let loaded = await EPGBrowseLoader.load(
                 container: modelContext.container,
                 channels: targets,
-                playlist: playlist
+                playlist: playlist,
+                allowGapFill: !force
             )
             guard !Task.isCancelled else { return }
 

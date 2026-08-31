@@ -12,8 +12,12 @@ import SwiftUI
 
 enum PosterCardMetrics {
     #if os(tvOS)
-        static let posterWidth: CGFloat = 240
-        static let posterHeight: CGFloat = 360
+        static var posterWidth: CGFloat {
+            DeviceMemoryTier.current.isConstrained ? 200 : 240
+        }
+        static var posterHeight: CGFloat {
+            DeviceMemoryTier.current.isConstrained ? 300 : 360
+        }
         static let cornerRadius: CGFloat = 12
         static let titleSpacing: CGFloat = 12
         static let titleFont: Font = .system(size: 24, weight: .medium)
@@ -23,7 +27,9 @@ enum PosterCardMetrics {
         /// Vertical breathing room so the focus lift isn't clipped by the rail.
         static let railVerticalPadding: CGFloat = 28
         /// Height reserved for a rail: poster + two-line title + the focus lift.
-        static let rowHeight: CGFloat = 470
+        static var rowHeight: CGFloat {
+            DeviceMemoryTier.current.isConstrained ? 400 : 470
+        }
         /// Minimum item width for the "Show All" adaptive grid.
         static let gridMinimum: CGFloat = 240
         static let gridSpacing: CGFloat = 48

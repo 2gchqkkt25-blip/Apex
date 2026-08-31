@@ -127,6 +127,8 @@ final class AVPlayerCoordinator: NSObject, ObservableObject {
     #endif
 
     private var pipController: AVPictureInPictureController?
+    private var memoryFootprintTimer: Timer?
+    private var plexPingTimer: Timer?
 
     override init() {
         player.automaticallyWaitsToMinimizeStalling = true
@@ -193,10 +195,35 @@ final class AVPlayerCoordinator: NSObject, ObservableObject {
         let newItem = AVPlayerItem(asset: asset)
         if livePreview {
             newItem.preferredForwardBufferDuration = 1
+        } else if DeviceMemoryTier.current.isConstrained {
+            let isTranscodeHLS = media.streamContext?.method == .transcode
+            newItem.preferredForwardBufferDuration = media.isLive ? 2 : (isTranscodeHLS ? 2 : 4)
+            if isTranscodeHLS {
+                // Plex is capped server-side at 12 Mbps for this device (see
+                // PlexClient.buildTranscodeQueryItems), but AVPlayer doesn't know
+                // that and sizes its buffers off a live bandwidth estimate — on a
+                // fast LAN that estimate can be much higher, so it holds more
+                // decoded/encoded data in flight than the stream ever needs.
+                // Pin the ceiling to match the real cap plus a small margin.
+                newItem.preferredPeakBitRate = 13_000_000
+            }
         } else {
             newItem.preferredForwardBufferDuration = media.isLive ? 4 : 8
         }
         item = newItem
+
+        plexPingTimer?.invalidate()
+        plexPingTimer = nil
+        if media.url.path.contains("/video/:/transcode/universal/") {
+            // Official/well-behaved Plex clients ping the transcode session
+            // periodically — most load-bearing while paused (no segment
+            // requests are implicitly doing the same job), but sent
+            // throughout playback to match documented client behavior.
+            let pingURL = media.url
+            plexPingTimer = Timer.scheduledTimer(withTimeInterval: 20, repeats: true) { _ in
+                Task { await PlexClient.pingTranscodeSession(playbackURL: pingURL) }
+            }
+        }
 
         attachItemObservers(to: newItem)
         loadTracks(from: asset, item: newItem)
@@ -404,6 +431,29 @@ final class AVPlayerCoordinator: NSObject, ObservableObject {
             }
         }
 
+        // Apple TV HD jetsams are silent — the debugger disconnects before the
+        // kill reaches Xcode, so nothing in-process explains why. Logging the
+        // real jetsam-relevant footprint (not resident size) plus
+        // AVPlayerItem's own network access log every 3s during playback leaves
+        // a trail of how fast memory climbed and — critically — whether the
+        // growth is actually network bytes (accessLog) or an in-process
+        // accumulation unrelated to the stream (accessLog flat while footprint
+        // keeps climbing). A 12 Mbps server-side cap should show ~1.5 MB/s in
+        // accessLog; if footprint climbs far faster, the leak isn't the stream.
+        if DeviceMemoryTier.current.isConstrained {
+            memoryFootprintTimer?.invalidate()
+            memoryFootprintTimer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak item] _ in
+                if let mb = MemoryFootprint.currentMB {
+                    let heap = MemoryFootprint.mallocInUseMB ?? 0
+                    Logger.memory.log("Playback footprint: \(mb, format: .fixed(precision: 1), privacy: .public) MB heap=\(heap, format: .fixed(precision: 1), privacy: .public) MB")
+                }
+                if let event = item?.accessLog()?.events.last {
+                    // swiftlint:disable:next line_length
+                    Logger.memory.log("AccessLog: indicatedKbps=\(event.indicatedBitrate / 1000, format: .fixed(precision: 0), privacy: .public) observedKbps=\(event.observedBitrate / 1000, format: .fixed(precision: 0), privacy: .public) bytesTransferred=\(event.numberOfBytesTransferred, privacy: .public) mediaRequests=\(event.numberOfMediaRequests, privacy: .public) switchEvents=\(event.numberOfServerAddressChanges, privacy: .public) stalls=\(event.numberOfStalls, privacy: .public)")
+                }
+            }
+        }
+
         let interval = CMTime(seconds: 0.5, preferredTimescale: 600)
         timeObserver = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
             guard let self else { return }
@@ -428,6 +478,21 @@ final class AVPlayerCoordinator: NSObject, ObservableObject {
                 }
             case .failed:
                 // The item can't be played (bad URL, unsupported container/codec).
+                let underlying = item.error as NSError?
+                let nsUnderlying = underlying?.userInfo[NSUnderlyingErrorKey] as? NSError
+                Logger.player.error(
+                    // swiftlint:disable:next line_length
+                    "AVPlayerItem failed: \(underlying?.localizedDescription ?? "unknown", privacy: .public) domain=\(underlying?.domain ?? "?", privacy: .public) code=\(underlying?.code ?? 0, privacy: .public) underlying=\(nsUnderlying?.localizedDescription ?? "none", privacy: .public)"
+                )
+                // HLS manifest/segment HTTP failures (e.g. a Plex transcode session
+                // that failed to start server-side) show up here with the real
+                // status code — AVPlayerItem.error alone is too generic to diagnose.
+                for entry in item.errorLog()?.events ?? [] {
+                    Logger.player.error(
+                        // swiftlint:disable:next line_length
+                        "AVPlayerItem errorLog: status=\(entry.errorStatusCode) domain=\(entry.errorDomain, privacy: .public) comment=\(entry.errorComment ?? "none", privacy: .public) uri=\(entry.uri ?? "none", privacy: .private(mask: .hash))"
+                    )
+                }
                 DispatchQueue.main.async { [weak self] in self?.reportFailure() }
             default:
                 break
@@ -460,6 +525,10 @@ final class AVPlayerCoordinator: NSObject, ObservableObject {
             player.removeTimeObserver(timeObserver)
             self.timeObserver = nil
         }
+        memoryFootprintTimer?.invalidate()
+        memoryFootprintTimer = nil
+        plexPingTimer?.invalidate()
+        plexPingTimer = nil
         #if os(macOS)
             if let item, let legibleOutput {
                 item.remove(legibleOutput)

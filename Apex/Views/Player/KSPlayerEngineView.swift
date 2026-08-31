@@ -162,6 +162,7 @@ struct KSPlayerEngineView: View {
             // SubtitleModel publishes before mutating its track collection.
             // Inspect on the next main-actor turn so the new tracks are visible.
             Task { @MainActor in
+                guard !(DeviceMemoryTier.current.isConstrained && media.isHeavyDirectRemux) else { return }
                 guard !coordinator.subtitleModel.subtitleInfos.isEmpty else { return }
                 onEmbeddedSubtitlesAvailable?()
             }
