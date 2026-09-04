@@ -57,7 +57,7 @@ enum CloudSyncStatusText {
     }
 
     static var footer: LocalizedStringKey {
-        "Your playlists, watch progress, favorites and watchlist sync across your devices through your private iCloud account. The video catalog itself is fetched on each device and isn’t uploaded."
+        "Your playlists, watch progress, favorites, watchlist, and hidden channels and categories sync across your devices through your private iCloud account. The video catalog itself is fetched on each device and isn’t uploaded."
     }
 }
 

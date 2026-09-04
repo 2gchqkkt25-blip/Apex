@@ -52,6 +52,7 @@ extension CloudSyncEngine {
             isFavorite: mirror.isFavorite,
             addedToWatchlistDate: mirror.addedToWatchlistDate,
             favoriteOrder: mirror.favoriteOrder,
+            isHidden: mirror.isHidden,
             recommendationVoteRaw: mirror.recommendationVoteRaw
         )
     }

@@ -92,15 +92,6 @@ private struct CachedAsyncImageLoader<Content: View>: View {
     private func load() async {
         guard let url else { return }
 
-        guard !MediaSyncGate.isActive,
-              !MemoryPressureGate.isActive,
-              !MediaConnectGate.isActive,
-              !PlaybackMemoryGate.suppressesImageLoads
-        else {
-            phase = .empty
-            return
-        }
-
         // Synchronous cache hit: render immediately, no placeholder flash.
         if let cached = ImagePipeline.cachedImage(for: url, maxPixelSize: pixelSize) {
             phase = .success(Image(platformImage: cached).renderingMode(.original))
@@ -128,12 +119,47 @@ private struct CachedAsyncImageLoader<Content: View>: View {
                 phase = .success(Image(platformImage: image).renderingMode(.original))
             }
         } catch is CancellationError {
-            // View went away mid-load; the detached fetch still warms the cache.
+            // Playback / memory-pressure / connect gates used to abort this `.task`
+            // and never retry. Disk hits are served even while gated; a miss
+            // waits the gate out, then loads from the network.
+            guard !Task.isCancelled else { return }
+            await waitForImageGatesToClear()
+            guard !Task.isCancelled else { return }
+            do {
+                let image = try await ImagePipeline.shared.image(for: url, maxPixelSize: pixelSize)
+                withTransaction(transaction) {
+                    phase = .success(Image(platformImage: image).renderingMode(.original))
+                }
+            } catch is CancellationError {
+                // View went away, or gates never cleared — leave the current phase.
+            } catch {
+                Logger.network.warning("[ImageDebug] CachedAsyncImage load failed: \(url.absoluteString) — \(error.localizedDescription)")
+                withTransaction(transaction) {
+                    phase = .failure(error)
+                }
+            }
         } catch {
             Logger.network.warning("[ImageDebug] CachedAsyncImage load failed: \(url.absoluteString) — \(error.localizedDescription)")
             withTransaction(transaction) {
                 phase = .failure(error)
             }
+        }
+    }
+
+    /// Playback, connect, catalog-sync, and memory-warning gates are transient.
+    /// Returning immediately left posters/backdrops stuck on `.empty`.
+    private func waitForImageGatesToClear() async {
+        let deadline = Date().addingTimeInterval(75)
+        while Date() < deadline {
+            if !MediaSyncGate.isActive,
+               !MemoryPressureGate.isActive,
+               !MediaConnectGate.isActive,
+               !PlaybackMemoryGate.suppressesImageLoads
+            {
+                return
+            }
+            try? await Task.sleep(for: .milliseconds(350))
+            if Task.isCancelled { return }
         }
     }
 }

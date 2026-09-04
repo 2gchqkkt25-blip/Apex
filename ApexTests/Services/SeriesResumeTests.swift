@@ -11,6 +11,17 @@ struct SeriesResumeTests {
         #expect(ContentIdentity.stableKey(for: "not-a-uuid-id") == nil)
     }
 
+    @Test func `category cloud ids do not collide with live stream ids`() {
+        let playlist = UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")!
+        let categoryId = "\(playlist.uuidString)-live-99"
+        let streamId = "\(playlist.uuidString)-live-99"
+        let cloudId = ContentIdentity.categoryCloudId(forCategoryId: categoryId)
+        #expect(cloudId == "\(playlist.uuidString)-category-live-99")
+        #expect(cloudId != streamId)
+        #expect(ContentIdentity.categoryId(fromCloudContentId: cloudId!) == categoryId)
+        #expect(ContentIdentity.categoryLocalStableKey(fromCloudStableKey: "category-live-99") == "live-99")
+    }
+
     @Test func `resume prefers most recently watched in-progress episode`() throws {
         let container = try makeTestContainer()
         let context = ModelContext(container)

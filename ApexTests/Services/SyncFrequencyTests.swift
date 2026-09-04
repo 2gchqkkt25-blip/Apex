@@ -6,15 +6,15 @@
 //  automatic content sync.
 //
 
-import Foundation
 @testable import Apex
+import Foundation
 import Testing
 
 struct SyncFrequencyTests {
     // MARK: - Defaults & resolution
 
-    @Test func `default is every three days`() {
-        #expect(SyncFrequency.defaultValue == .everyThreeDays)
+    @Test func `default is daily`() {
+        #expect(SyncFrequency.defaultValue == .daily)
     }
 
     @Test func `resolve falls back to default for unknown raw`() {
@@ -122,5 +122,43 @@ struct SyncFrequencyTests {
             frequency: .everyThreeDays,
             alreadyStarted: false
         ))
+    }
+
+    @Test func `auto-sync skips while this device is playing`() {
+        #expect(AutoSync.shouldSync(
+            syncEnabled: true,
+            status: .idle,
+            lastSyncDate: nil,
+            frequency: .everyThreeDays,
+            alreadyStarted: false,
+            playbackActive: true
+        ) == false)
+    }
+
+    @Test func `auto-sync skips while another device holds the catalog lease`() {
+        #expect(AutoSync.shouldSync(
+            syncEnabled: true,
+            status: .idle,
+            lastSyncDate: nil,
+            frequency: .everyThreeDays,
+            alreadyStarted: false,
+            remoteLeaseActive: true
+        ) == false)
+    }
+
+    @Test func `lease from another device is active within the quiet period`() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        let lease = CatalogSyncLease(deviceID: "other", startedAt: now.addingTimeInterval(-60))
+        #expect(lease.isHeldByAnotherDevice("this", now: now))
+        #expect(lease.isHeldByAnotherDevice("other", now: now) == false)
+    }
+
+    @Test func `expired lease does not block sibling devices`() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        let lease = CatalogSyncLease(
+            deviceID: "other",
+            startedAt: now.addingTimeInterval(-(CatalogSyncLease.ttl + 1))
+        )
+        #expect(lease.isHeldByAnotherDevice("this", now: now) == false)
     }
 }

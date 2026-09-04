@@ -31,16 +31,10 @@ struct PlayerEPGGuidePanel: View {
     @State private var epgSync = EPGSyncService.shared
     @State private var scrollSync = EPGScrollSync()
     @State private var scrollPosition = ScrollPosition()
+    @State private var channelColumnPosition = ScrollPosition()
     @State private var didScrollToNow = false
 
     private let metrics = EPGMetrics.playerOverlay
-    private let panelHeight: CGFloat = {
-        #if os(tvOS)
-            480
-        #else
-            280
-        #endif
-    }()
 
     private var timeline: EPGTimeline {
         EPGTimeline.live(
@@ -74,8 +68,7 @@ struct PlayerEPGGuidePanel: View {
                 guideGrid
             }
         }
-        .frame(maxWidth: .infinity)
-        .frame(height: panelHeight)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .fill(.black.opacity(0.72))
@@ -161,19 +154,40 @@ struct PlayerEPGGuidePanel: View {
         Color.clear
             .frame(width: metrics.channelColumnWidth)
             .overlay(alignment: .top) {
-                VStack(spacing: metrics.rowSpacing) {
-                    ForEach(rows) { row in
-                        channelCellButton(row)
+                #if os(tvOS)
+                    ScrollView(.vertical) {
+                        // Lazy + disabled, synced from the programme scroller —
+                        // same pattern as `EPGGuideView`. Channel rows are not
+                        // in the focus engine; Down moves through programme
+                        // cells so the enabled grid can realize the next rows.
+                        LazyVStack(spacing: metrics.rowSpacing) {
+                            ForEach(rows) { row in
+                                channelCellButton(row)
+                                    .id(row.id)
+                            }
+                        }
                     }
-                }
-                .offset(y: -scrollSync.offset.y)
+                    .scrollDisabled(true)
+                    .scrollPosition($channelColumnPosition)
+                    .onChange(of: scrollSync.offset.y) { _, newY in
+                        channelColumnPosition.scrollTo(y: max(0, newY))
+                    }
+                #else
+                    VStack(spacing: metrics.rowSpacing) {
+                        ForEach(rows) { row in
+                            channelCellButton(row)
+                        }
+                    }
+                    .offset(y: -scrollSync.offset.y)
+                #endif
             }
             .clipped()
             .frame(width: metrics.channelColumnWidth)
     }
 
     private func channelCellButton(_ row: EPGChannelRow) -> some View {
-        Button {
+        let isCurrent = row.stream.id == currentChannelID
+        return Button {
             select(row.stream)
         } label: {
             HStack(spacing: 8) {
@@ -189,25 +203,29 @@ struct PlayerEPGGuidePanel: View {
                     #else
                         .font(.caption.weight(.semibold))
                     #endif
-                    .foregroundStyle(.white)
                     .lineLimit(2)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(.horizontal, 8)
             .frame(width: metrics.channelColumnWidth, height: metrics.rowHeight, alignment: .leading)
             .contentShape(Rectangle())
-            .background(
-                row.stream.id == currentChannelID
-                    ? Color.white.opacity(0.14)
-                    : Color.white.opacity(0.06),
-                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
-            )
+            #if !os(tvOS)
+                .foregroundStyle(.white)
+                .background(
+                    isCurrent
+                        ? Color.white.opacity(0.14)
+                        : Color.white.opacity(0.06),
+                    in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                )
+            #endif
         }
-        .buttonStyle(.plain)
         #if os(tvOS)
-            .focused(focus, equals: .guideChannel(row.id))
+            .buttonStyle(PlayerGuideChannelButtonStyle(isCurrent: isCurrent))
+            .focusEffectDisabled()
+            .focusable(false)
+        #else
+            .buttonStyle(.plain)
         #endif
-        .disabled(row.stream.id == currentChannelID)
         .accessibilityLabel(Text(row.name))
         .accessibilityHint(Text("Switch channel"))
     }
@@ -240,11 +258,17 @@ struct PlayerEPGGuidePanel: View {
             guard !didScrollToNow else { return }
             didScrollToNow = true
             scrollPosition.scrollTo(x: nowScrollTarget)
+            #if os(tvOS)
+                moveFocusIntoProgrammeGrid()
+            #endif
         }
         .onChange(of: channels.map(\.id)) {
             didScrollToNow = false
             scrollPosition.scrollTo(x: nowScrollTarget)
             didScrollToNow = true
+            #if os(tvOS)
+                moveFocusIntoProgrammeGrid()
+            #endif
         }
     }
 
@@ -257,11 +281,13 @@ struct PlayerEPGGuidePanel: View {
                     Color.clear
                         .frame(width: cell.width, height: metrics.rowHeight)
                 }
-                .buttonStyle(EPGBlockButtonStyle(cell: cell, metrics: metrics, now: now))
                 #if os(tvOS)
+                    .buttonStyle(PlayerGuideProgramButtonStyle(cell: cell, metrics: metrics, now: now))
+                    .focusEffectDisabled()
                     .focused(focus, equals: .guideProgram(cell.id))
+                #else
+                    .buttonStyle(EPGBlockButtonStyle(cell: cell, metrics: metrics, now: now))
                 #endif
-                .disabled(row.stream.id == currentChannelID)
                 .accessibilityLabel(Text(cell.isGap ? row.name : cell.title))
                 .accessibilityHint(Text("Switch channel"))
             }
@@ -280,6 +306,29 @@ struct PlayerEPGGuidePanel: View {
               let newMedia = PlayableMedia.from(stream: stream, playlist: playlist) else { return }
         onSelect(newMedia)
     }
+
+    #if os(tvOS)
+        /// Channel names are not a focus rail. Land on the current (or now-playing)
+        /// programme so Down/Up ride the enabled programme `ScrollView` and lazy
+        /// rows realize as they come on screen — the same path as the main guide.
+        private func moveFocusIntoProgrammeGrid() {
+            if case .guideProgram = focus.wrappedValue { return }
+            let preferredID: String?
+            if case let .guideChannel(id) = focus.wrappedValue {
+                preferredID = id
+            } else {
+                preferredID = currentChannelID
+            }
+            let row = rows.first { $0.id == preferredID || $0.stream.id == preferredID }
+                ?? rows.first { $0.stream.id == currentChannelID }
+                ?? rows.first
+            guard let row else { return }
+            let cell = row.cells.first { $0.isLive(at: now) } ?? row.cells.first
+            if let cell {
+                focus.wrappedValue = .guideProgram(cell.id)
+            }
+        }
+    #endif
 
     @MainActor
     private func reload(force: Bool = false) async {
@@ -310,3 +359,71 @@ struct PlayerEPGGuidePanel: View {
         now = Date()
     }
 }
+
+#if os(tvOS)
+    /// Channel-column focus for the in-player Guide. The system tvOS highlight
+    /// is a large white rectangle that doesn't match these compact rows — we
+    /// draw the 10-foot idiom ourselves (white fill, dark text) instead.
+    private struct PlayerGuideChannelButtonStyle: ButtonStyle {
+        var isCurrent: Bool
+
+        func makeBody(configuration: Configuration) -> some View {
+            StyleBody(configuration: configuration, isCurrent: isCurrent)
+        }
+
+        private struct StyleBody: View {
+            let configuration: ButtonStyleConfiguration
+            let isCurrent: Bool
+            @Environment(\.isFocused) private var isFocused
+
+            var body: some View {
+                configuration.label
+                    .foregroundStyle(isFocused ? Color.black : Color.white)
+                    .background(fill, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .scaleEffect(configuration.isPressed ? 0.99 : (isFocused ? 1.02 : 1.0))
+                    .animation(.easeOut(duration: 0.16), value: isFocused)
+            }
+
+            private var fill: Color {
+                if isFocused { return Color.white }
+                if isCurrent { return Color.white.opacity(0.16) }
+                return Color.white.opacity(0.06)
+            }
+        }
+    }
+
+    /// Programme-cell focus for the in-player Guide. Filling a two-hour block
+    /// solid white (the main-guide idiom) reads as a giant rectangle in this
+    /// compact overlay; a tight stroke keeps the selector on the cell.
+    private struct PlayerGuideProgramButtonStyle: ButtonStyle {
+        let cell: EPGProgramCell
+        let metrics: EPGMetrics
+        let now: Date
+
+        func makeBody(configuration: Configuration) -> some View {
+            StyleBody(cell: cell, metrics: metrics, now: now, isPressed: configuration.isPressed)
+        }
+
+        private struct StyleBody: View {
+            let cell: EPGProgramCell
+            let metrics: EPGMetrics
+            let now: Date
+            let isPressed: Bool
+            @Environment(\.isFocused) private var isFocused
+
+            var body: some View {
+                EPGProgramBlockView(cell: cell, metrics: metrics, now: now, isFocused: false)
+                    .overlay {
+                        if isFocused {
+                            RoundedRectangle(cornerRadius: metrics.blockCornerRadius, style: .continuous)
+                                .strokeBorder(Color.white, lineWidth: 3)
+                                .padding(.trailing, metrics.rowSpacing)
+                                .padding(.vertical, metrics.rowSpacing / 2)
+                        }
+                    }
+                    .animation(.easeOut(duration: 0.12), value: isFocused)
+                    .animation(.easeOut(duration: 0.12), value: isPressed)
+            }
+        }
+    }
+#endif

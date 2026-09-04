@@ -207,6 +207,7 @@ struct ApexApp: App {
 
                     // Pull OpenSubtitles settings from iCloud so the API key
                     // entered on another device is available for playback.
+                    // Missing enabled flag becomes on (Wyzie fetch + Settings toggle).
                     OpenSubtitlesSettings.syncFromCloud()
 
                     // Restore a previously connected Trakt session (refreshing

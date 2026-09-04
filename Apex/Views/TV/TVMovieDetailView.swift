@@ -37,10 +37,8 @@
             _isLoadingTMDB = State(initialValue: false)
         }
 
-        /// Changes when playback starts so enrichment tasks cancel and free memory.
-        private var detailWorkToken: String {
-            "\(movie.id)-\(playingMedia?.id ?? "idle")"
-        }
+        /// Bumped when the player dismisses so enrichment re-runs.
+        @State private var detailWorkToken = UUID()
 
         private var tmdbEnrichmentToken: String {
             "\(movie.tmdbId ?? 0)-\(playingMedia?.id ?? "idle")"
@@ -71,11 +69,24 @@
             }
             .background(Color.black)
             .ignoresSafeArea()
-            .onChange(of: playingMedia) { _, media in
-                guard media != nil else { return }
-                similar = []
-                collectionMovies = []
-                otherSources = []
+            .onChange(of: playingMedia) { old, new in
+                if new != nil {
+                    // Player opening — clear transient data
+                    similar = []
+                    collectionMovies = []
+                    otherSources = []
+                } else if old != nil {
+                    // Restore rails immediately from persisted TMDB ids. Do not
+                    // wait on a network enrichment pass — that used to leave the
+                    // hero spinning after Stop.
+                    if !movie.isMediaServerCatalogItem {
+                        resolveSimilar()
+                        resolveOtherSources()
+                    }
+                    if movie.tmdbEnrichedAt == nil {
+                        detailWorkToken = UUID()
+                    }
+                }
             }
             .fullScreenCover(item: $playingMedia) { media in
                 FullScreenPlayerView(media: media)
@@ -87,8 +98,20 @@
             }
             .task(id: detailWorkToken) {
                 guard playingMedia == nil else { return }
-                await enrichIfNeeded()
+                // Cap enrichment at 15 s so a hung TMDB/OMDb call can't freeze
+                // the detail screen forever (tvOS network timeouts, rate limits).
+                await withTaskGroup(of: Bool.self) { group in
+                    group.addTask { await enrichIfNeeded() }
+                    group.addTask {
+                        try? await Task.sleep(for: .seconds(15))
+                        return false
+                    }
+                    _ = await group.next()
+                    group.cancelAll()
+                }
                 guard playingMedia == nil else { return }
+                // Ratings are best-effort; run inline after enrichment completes
+                // (or times out). They're fast when cached and won't block the UI.
                 await enrichMovieRatingsIfNeeded(movie, context: modelContext)
                 if !movie.isMediaServerCatalogItem {
                     resolveSimilar()
@@ -369,6 +392,8 @@
         private func enrichIfNeeded() async -> Bool {
             if movie.isMediaServerCatalogItem {
                 await MediaServerDetailEnrichment.enrichMovieIfNeeded(movie, context: modelContext)
+                // Background-context saves auto-merge into the main context;
+                // refreshToken below forces the view body to re-evaluate.
                 if movie.tmdbEnrichedAt != nil {
                     refreshToken = UUID()
                     return true

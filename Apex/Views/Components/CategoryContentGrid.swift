@@ -318,14 +318,14 @@ enum CategoryArtwork {
             var descriptor = FetchDescriptor<Movie>(predicate: #Predicate { $0.categoryId == categoryId })
             descriptor.fetchLimit = 8
             descriptor.propertiesToFetch = [\.streamIcon]
-            for movie in (try? context.fetch(descriptor)) ?? [] {
+            for movie in SafeFetch.fetch(descriptor, context: context) {
                 if let url = mediaURL(from: movie.streamIcon) { return url }
             }
         case "series":
             var descriptor = FetchDescriptor<Series>(predicate: #Predicate { $0.categoryId == categoryId })
             descriptor.fetchLimit = 8
             descriptor.propertiesToFetch = [\.cover]
-            for show in (try? context.fetch(descriptor)) ?? [] {
+            for show in SafeFetch.fetch(descriptor, context: context) {
                 if let url = mediaURL(from: show.cover) { return url }
             }
         default:
@@ -462,7 +462,7 @@ struct MovieCategoryView: View {
         )
         descriptor.fetchOffset = movies.count
         descriptor.fetchLimit = pageSize
-        let page = (try? modelContext.fetch(descriptor)) ?? []
+        let page = SafeFetch.fetch(descriptor, context: modelContext)
         movies.append(contentsOf: page)
         if page.count < pageSize { canLoadMore = false }
     }
@@ -560,7 +560,7 @@ struct SeriesCategoryView: View {
         )
         descriptor.fetchOffset = series.count
         descriptor.fetchLimit = pageSize
-        let page = (try? modelContext.fetch(descriptor)) ?? []
+        let page = SafeFetch.fetch(descriptor, context: modelContext)
         series.append(contentsOf: page)
         if page.count < pageSize { canLoadMore = false }
     }
@@ -604,7 +604,7 @@ struct SeriesCategoryPreview: View {
 
 #Preview("Movie Category Grid") {
     let container = previewContainer()
-    let categories = (try? container.mainContext.fetch(FetchDescriptor<Category>())) ?? []
+    let categories = SafeFetch.fetch(FetchDescriptor<Category>(), context: container.mainContext)
     let category = categories.first { $0.typeRaw == "vod" } ?? categories[0]
     return NavigationStack {
         MovieCategoryView(category: category, animationNamespace: nil)
@@ -623,7 +623,7 @@ struct SeriesCategoryPreview: View {
 
 #Preview("Series Category Grid") {
     let container = previewContainer()
-    let categories = (try? container.mainContext.fetch(FetchDescriptor<Category>())) ?? []
+    let categories = SafeFetch.fetch(FetchDescriptor<Category>(), context: container.mainContext)
     let category = categories.first { $0.typeRaw == "series" } ?? categories[0]
     return NavigationStack {
         SeriesCategoryView(category: category, animationNamespace: nil)

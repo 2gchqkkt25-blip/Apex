@@ -8,7 +8,7 @@
 import SwiftUI
 
 struct OpenSubtitlesSettingsView: View {
-    @AppStorage(SubtitleSettings.enabledKey) private var isEnabled = false
+    @AppStorage(SubtitleSettings.enabledKey) private var isEnabled = SubtitleSettings.enabledDefault
     @AppStorage(SubtitleSettings.wyzieApiKeyKey) private var wyzieApiKey = ""
     @AppStorage(SubtitleSettings.languageKey) private var language = "en"
 
@@ -264,15 +264,13 @@ struct OpenSubtitlesSettingsView: View {
                                 saveAppearance()
                             } label: {
                                 Text("\(Int(size))")
-                                    .frame(minWidth: 48)
-                                    .padding(.vertical, 10)
-                                    .background(fontSize == size ? Color.blue : Color.white.opacity(0.15))
-                                    .clipShape(RoundedRectangle(cornerRadius: 8))
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(TVSettingsChipButtonStyle(isSelected: fontSize == size))
+                            .focusEffectDisabled()
                         }
                     }
                     .padding(.horizontal, TVSettingsMetrics.rowHPadding)
+                    .padding(.vertical, 8)
                 }
 
                 Text("Text Color")
@@ -280,7 +278,7 @@ struct OpenSubtitlesSettingsView: View {
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, TVSettingsMetrics.rowHPadding)
 
-                HStack(spacing: 12) {
+                HStack(spacing: 16) {
                     ForEach(colorOptions, id: \.0) { hex, color in
                         Button {
                             textColorHex = hex
@@ -288,13 +286,10 @@ struct OpenSubtitlesSettingsView: View {
                         } label: {
                             Circle()
                                 .fill(color)
-                                .frame(width: 40, height: 40)
-                                .overlay(
-                                    Circle()
-                                        .stroke(textColorHex == hex ? Color.blue : Color.clear, lineWidth: 3)
-                                )
+                                .frame(width: 44, height: 44)
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(TVSettingsColorSwatchStyle(isSelected: textColorHex == hex))
+                        .focusEffectDisabled()
                     }
                 }
                 .padding(.horizontal, TVSettingsMetrics.rowHPadding)
@@ -311,12 +306,9 @@ struct OpenSubtitlesSettingsView: View {
                             saveAppearance()
                         } label: {
                             Text("\(Int(opacity * 100))%")
-                                .frame(minWidth: 48)
-                                .padding(.vertical, 10)
-                                .background(backgroundOpacity == opacity ? Color.blue : Color.white.opacity(0.15))
-                                .clipShape(RoundedRectangle(cornerRadius: 8))
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(TVSettingsChipButtonStyle(isSelected: backgroundOpacity == opacity))
+                        .focusEffectDisabled()
                     }
                 }
                 .padding(.horizontal, TVSettingsMetrics.rowHPadding)
@@ -333,12 +325,9 @@ struct OpenSubtitlesSettingsView: View {
                             saveAppearance()
                         } label: {
                             Text("\(Int(offset))")
-                                .frame(minWidth: 48)
-                                .padding(.vertical, 10)
-                                .background(bottomOffset == offset ? Color.blue : Color.white.opacity(0.15))
-                                .clipShape(RoundedRectangle(cornerRadius: 8))
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(TVSettingsChipButtonStyle(isSelected: bottomOffset == offset))
+                        .focusEffectDisabled()
                     }
                 }
                 .padding(.horizontal, TVSettingsMetrics.rowHPadding)
@@ -355,12 +344,9 @@ struct OpenSubtitlesSettingsView: View {
                             saveAppearance()
                         } label: {
                             Text(pos == .bottom ? "Bottom" : "Center")
-                                .frame(minWidth: 100)
-                                .padding(.vertical, 10)
-                                .background(position == pos ? Color.blue : Color.white.opacity(0.15))
-                                .clipShape(RoundedRectangle(cornerRadius: 8))
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(TVSettingsChipButtonStyle(isSelected: position == pos))
+                        .focusEffectDisabled()
                     }
                 }
                 .padding(.horizontal, TVSettingsMetrics.rowHPadding)
@@ -374,6 +360,8 @@ struct OpenSubtitlesSettingsView: View {
                     position = def.position
                     saveAppearance()
                 }
+                .buttonStyle(TVSettingsActionButtonStyle())
+                .focusEffectDisabled()
                 .padding(.horizontal, TVSettingsMetrics.rowHPadding)
             }
             .frame(maxWidth: .infinity, alignment: .leading)

@@ -99,7 +99,9 @@ actor WatchProgressWriter {
         guard let movie = try context.fetch(descriptor).first else { return nil }
 
         movie.watchProgress = progress
-        movie.lastWatchedDate = Date()
+        if progress >= RecentlyWatchedEvidence.minimumProgress || completed {
+            movie.lastWatchedDate = Date()
+        }
 
         var completion: Completion?
         if completed, !movie.isWatched {
@@ -122,9 +124,11 @@ actor WatchProgressWriter {
         guard let episode = try context.fetch(descriptor).first else { return nil }
 
         episode.watchProgress = progress
-        episode.lastWatchedDate = Date()
-        if let series = episode.series {
-            series.lastWatchedDate = Date()
+        if progress >= RecentlyWatchedEvidence.minimumProgress || completed {
+            episode.lastWatchedDate = Date()
+            if let series = episode.series {
+                series.lastWatchedDate = Date()
+            }
         }
 
         var completion: Completion?

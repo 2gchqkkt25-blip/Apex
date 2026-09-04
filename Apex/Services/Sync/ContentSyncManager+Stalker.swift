@@ -83,6 +83,8 @@ extension ContentSyncManager {
             )
         }
 
+        enqueueEpisodeRefresh(playlistId: playlistId)
+
         try await syncStalkerChannels(client: client, playlistId: playlistId, progress: progress)
 
         markStalkerPlaylistUpdated(playlistId)

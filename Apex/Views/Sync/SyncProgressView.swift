@@ -2,7 +2,8 @@
 //  SyncProgressView.swift
 //  Apex
 //
-//  Branded step-by-step progress for ContentSyncManager + inline EPG refresh.
+//  Branded step-by-step progress for ContentSyncManager. The TV guide fills
+//  in after this sheet dismisses so catalog refresh is not blocked on XMLTV.
 //  Two presentations share this view: the blocking auto-sync cover (autoStart)
 //  and the manual "Sync Now" flow.
 //
@@ -56,7 +57,7 @@ struct SyncProgressView: View {
         switch phase {
         case .ready: "Ready to sync"
         case .syncing:
-            includesGuideStep ? "Updating library & guide" : "Syncing your library"
+            includesGuideStep ? "Updating library" : "Syncing your library"
         case .finished: "You're all set"
         case .failed: "Sync failed"
         }
@@ -64,10 +65,10 @@ struct SyncProgressView: View {
 
     private var headerSubtitle: LocalizedStringKey {
         switch phase {
-        case .ready: "Content and TV guide refresh together."
-        case .syncing: "This may take a few minutes…"
+        case .ready: "Content refreshes first. The TV guide continues in the background."
+        case .syncing: "This usually finishes once the provider lists are in…"
         case .finished:
-            includesGuideStep ? "Your playlist and TV guide are up to date." : "Your playlist is up to date."
+            includesGuideStep ? "Your playlist is up to date. The TV guide is filling in." : "Your playlist is up to date."
         case .failed: "Something went wrong. You can try again."
         }
     }
@@ -91,10 +92,14 @@ struct SyncProgressView: View {
 
                 if SyncStep.includesEPG(for: playlist.sourceType) {
                     try Task.checkCancellation()
-                    // Lightweight inline guide pass on every platform (3 light
-                    // feeds). Full/bundled fill runs after the sheet dismisses so
-                    // playlist sync isn't blocked on minutes of XMLTV parse.
-                    await runEPGStep(mode: .tvOSQuick)
+                    // Do not wait on XMLTV here. The old inline `.tvOSQuick` pass
+                    // held this sheet on "TV guide" for up to two minutes (and
+                    // longer when cancel didn't reach the awaited sync). Catalog
+                    // refresh should finish when the provider lists are in;
+                    // the guide fills in the background like other IPTV apps.
+                    progress.start(.epgGuide)
+                    progress.update(detail: "Updating in background", fraction: 1)
+                    progress.complete(.epgGuide)
                 }
 
                 await schedulePostSyncIndexing()
@@ -114,41 +119,8 @@ struct SyncProgressView: View {
         }
     }
 
-    @MainActor
-    private func runEPGStep(mode: EPGSyncMode = .withPlaylist) async {
-        progress.start(.epgGuide)
-        let epgPoll = Task {
-            while !Task.isCancelled {
-                if let label = EPGSyncService.shared.syncProgressLabel {
-                    progress.update(
-                        detail: label,
-                        fraction: EPGSyncService.shared.syncProgress ?? 0
-                    )
-                }
-                try? await Task.sleep(for: .milliseconds(250))
-            }
-        }
-        defer { epgPoll.cancel() }
-
-        _ = await EPGSyncService.shared.syncAwaiting(
-            container: modelContext.container,
-            mode: mode
-        ) { fraction, label in
-            let pct = Int(((fraction ?? 0) * 100).rounded())
-            let detail: String
-            if let label, !label.isEmpty {
-                detail = label.contains("%") ? label : "\(pct)% · \(label)"
-            } else {
-                detail = "\(pct)%"
-            }
-            progress.update(detail: detail, fraction: fraction ?? 0)
-        }
-        progress.complete(.epgGuide)
-        EPGSyncService.shared.forceGuideRefresh()
-    }
-
-    /// Indexing (all platforms) plus deferred guide fill after the light inline
-    /// EPG pass. Background work runs after the sheet can dismiss.
+    /// Indexing plus deferred guide fill. Background work runs after the sheet
+    /// can dismiss — playlist refresh must not wait on XMLTV.
     private func schedulePostSyncIndexing() async {
         #if os(tvOS)
         await MainActor.run {
@@ -156,14 +128,10 @@ struct SyncProgressView: View {
             // Update Top Shelf content so the extension shows fresh data
             TopShelfDataWriter.update(container: modelContext.container)
         }
-        // Run the guide import well after the sheet dismisses so the content
-        // sync's memory is fully released first, giving the feed parse the whole
-        // budget. Uses the lighter bundled feed set (US, no US_LOCALS1). The
-        // inline quick pass already populated the store with the 3 lightest
-        // feeds; this background pass fills remaining channels from the rest of
-        // the bundled set. 10s is enough headroom for ARC to reclaim buffers.
+        // Short delay so the sync sheet can tear down and release catalog
+        // buffers before the bundled US feed parse starts.
         Task.detached(priority: .utility) {
-            try? await Task.sleep(for: .seconds(10))
+            try? await Task.sleep(for: .seconds(2))
             await MainActor.run {
                 EPGSyncService.shared.syncBundledInBackground()
             }
@@ -172,10 +140,8 @@ struct SyncProgressView: View {
         await MainActor.run {
             ContentIndexingService.shared.kick(after: .seconds(3))
         }
-        // Same pattern as tvOS: finish the guide after playlist sync so the
-        // sync sheet isn't blocked on a full XMLTV pass.
         Task.detached(priority: .utility) {
-            try? await Task.sleep(for: .seconds(3))
+            try? await Task.sleep(for: .seconds(1))
             await MainActor.run {
                 EPGSyncService.shared.syncBundledInBackground()
             }

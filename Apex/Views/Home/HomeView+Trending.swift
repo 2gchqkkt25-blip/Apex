@@ -19,17 +19,15 @@ extension HomeView {
         let playlistStamp = activePlaylist?.lastSyncDate?.timeIntervalSince1970 ?? 0
         let playlistChanged = lastTrendingPlaylistStamp != playlistStamp
 
-        if playlistChanged {
-            if heroItems.isEmpty {
-                trendingState = .loading
-            }
+        if playlistChanged, heroItems.isEmpty {
+            trendingState = .loading
             trendingMovies = []
             trendingSeries = []
         }
 
         if trendingState == .loaded,
            lastTrendingPlaylistStamp == playlistStamp,
-           (!heroItems.isEmpty || !trendingMovies.isEmpty || !trendingSeries.isEmpty)
+           !heroItems.isEmpty || !trendingMovies.isEmpty || !trendingSeries.isEmpty
         {
             return
         }
@@ -76,39 +74,48 @@ extension HomeView {
     }
 
     private func upgradeTrendingFromTMDB(client: TMDBClient, playlistStamp: Double) async {
-        #if os(tvOS)
-        if !DeviceMemoryTier.current.isConstrained {
-            await waitUntilPlaylistSyncIdle()
-        }
-        #else
-        await waitUntilPlaylistSyncIdle()
+        let hadHeroes = !heroItems.isEmpty
+        // Library heroes already on screen must not wait for catalog sync.
+        // tvOS also skips the wait when Home is still empty — first-launch
+        // playlist sync would otherwise stall trending until the whole library
+        // finishes (Apple TV HD already skipped this; 4K was waiting).
+        #if !os(tvOS)
+            if !hadHeroes {
+                await waitUntilPlaylistSyncIdle()
+            }
         #endif
         guard !Task.isCancelled else { return }
 
         let prefix = playlistPrefix ?? ""
         let restriction = restriction
         let container = modelContext.container
-        let hadHeroes = !heroItems.isEmpty
 
         do {
-            async let movieTitles = client.trending(.movie)
-            async let tvTitles = client.trending(.tvShow)
-            let (movies, tvSeries) = try await (movieTitles, tvTitles)
-
-            let match = await HomeHeroBuilder.matchTrending(
+            #if os(tvOS)
+                // Paint rails from TMDB page 1, then widen the match pool.
+                try await applyTMDBPages(
+                    client: client,
+                    pages: 1,
+                    playlistStamp: playlistStamp,
+                    prefix: prefix,
+                    restriction: restriction,
+                    container: container,
+                    preserveExistingHeroes: hadHeroes
+                )
+                guard !Task.isCancelled else { return }
+            #endif
+            try await applyTMDBPages(
+                client: client,
+                pages: 3,
+                playlistStamp: playlistStamp,
+                prefix: prefix,
+                restriction: restriction,
                 container: container,
-                movies: movies,
-                tvSeries: tvSeries,
-                playlistPrefix: prefix,
-                restriction: restriction
+                preserveExistingHeroes: hadHeroes
             )
 
-            applyTrendingMatch(match, preserveExistingHeroes: hadHeroes)
-            trendingState = .loaded
-            lastTrendingPlaylistStamp = playlistStamp
-
             #if os(tvOS)
-            guard !DeviceMemoryTier.current.isConstrained else { return }
+                guard !DeviceMemoryTier.current.isConstrained else { return }
             #endif
             Task(priority: .utility) {
                 try? await Task.sleep(for: .seconds(3))
@@ -125,6 +132,30 @@ extension HomeView {
         }
     }
 
+    private func applyTMDBPages(
+        client: TMDBClient,
+        pages: Int,
+        playlistStamp: Double,
+        prefix: String,
+        restriction: ContentRestriction,
+        container: ModelContainer,
+        preserveExistingHeroes: Bool
+    ) async throws {
+        async let movieTitles = client.trending(.movie, pages: pages)
+        async let tvTitles = client.trending(.tvShow, pages: pages)
+        let (movies, tvSeries) = try await (movieTitles, tvTitles)
+        let match = await HomeHeroBuilder.matchTrending(
+            container: container,
+            movies: movies,
+            tvSeries: tvSeries,
+            playlistPrefix: prefix,
+            restriction: restriction
+        )
+        applyTrendingMatch(match, preserveExistingHeroes: preserveExistingHeroes)
+        trendingState = .loaded
+        lastTrendingPlaylistStamp = playlistStamp
+    }
+
     private func applyTrendingMatch(_ match: TrendingCatalogMatch, preserveExistingHeroes: Bool = false) {
         let movieLookup = fetchMoviesByCatalogID(Set(match.movieIDs + match.heroSlots.compactMap {
             $0.media == .movie ? $0.catalogID : nil
@@ -139,12 +170,6 @@ extension HomeView {
         if !match.seriesIDs.isEmpty {
             trendingSeries = match.seriesIDs.compactMap { seriesLookup[$0].map(HomeMediaItem.series) }
         }
-        #if os(tvOS)
-        if DeviceMemoryTier.current.isConstrained {
-            trendingMovies = Array(trendingMovies.prefix(6))
-            trendingSeries = Array(trendingSeries.prefix(6))
-        }
-        #endif
 
         let trendingHeroes = match.heroSlots.compactMap { slot -> HeroItem? in
             switch slot.media {
@@ -173,7 +198,7 @@ extension HomeView {
     private func prefetchFirstHeroBackdrop() {
         guard let url = heroItems.first?.imageURL else { return }
         #if os(tvOS)
-        guard !DeviceMemoryTier.current.isConstrained else { return }
+            guard !DeviceMemoryTier.current.isConstrained else { return }
         #endif
         Task {
             await ImagePipeline.shared.prefetch(
@@ -185,7 +210,7 @@ extension HomeView {
 
     private func enrichHeroLogos() async {
         #if os(tvOS)
-        guard !DeviceMemoryTier.current.isConstrained else { return }
+            guard !DeviceMemoryTier.current.isConstrained else { return }
         #endif
         let manager = ContentSyncManager(modelContainer: modelContext.container)
         for hero in heroItems.prefix(2) {
@@ -276,7 +301,7 @@ extension HomeView {
         let idSet = ids
         let descriptor = FetchDescriptor<Movie>(predicate: #Predicate { idSet.contains($0.id) })
         var byID: [String: Movie] = [:]
-        for movie in (try? modelContext.fetch(descriptor)) ?? []
+        for movie in SafeFetch.fetch(descriptor, context: modelContext)
             where belongsToActivePlaylist(movie.id) && !restriction.hides(categoryID: movie.categoryId)
         {
             byID[movie.id] = movie
@@ -289,7 +314,7 @@ extension HomeView {
         let idSet = ids
         let descriptor = FetchDescriptor<Series>(predicate: #Predicate { idSet.contains($0.id) })
         var byID: [String: Series] = [:]
-        for series in (try? modelContext.fetch(descriptor)) ?? []
+        for series in SafeFetch.fetch(descriptor, context: modelContext)
             where belongsToActivePlaylist(series.id) && !restriction.hides(categoryID: series.categoryId)
         {
             byID[series.id] = series
@@ -307,9 +332,9 @@ extension HomeView {
             let context = ModelContext(container)
             let descriptor = FetchDescriptor<Movie>(predicate: #Predicate { idSet.contains($0.id) })
             var byID: [String: Movie] = [:]
-            for movie in (try? context.fetch(descriptor)) ?? []
+            for movie in SafeFetch.fetch(descriptor, context: context)
                 where HomeCatalogScope.includes(movie.id, playlistPrefix: prefix)
-                    && !restriction.hides(categoryID: movie.categoryId)
+                && !restriction.hides(categoryID: movie.categoryId)
             {
                 byID[movie.id] = movie
             }
@@ -327,9 +352,9 @@ extension HomeView {
             let context = ModelContext(container)
             let descriptor = FetchDescriptor<Series>(predicate: #Predicate { idSet.contains($0.id) })
             var byID: [String: Series] = [:]
-            for series in (try? context.fetch(descriptor)) ?? []
+            for series in SafeFetch.fetch(descriptor, context: context)
                 where HomeCatalogScope.includes(series.id, playlistPrefix: prefix)
-                    && !restriction.hides(categoryID: series.categoryId)
+                && !restriction.hides(categoryID: series.categoryId)
             {
                 byID[series.id] = series
             }

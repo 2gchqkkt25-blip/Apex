@@ -166,6 +166,145 @@ Without these keys, the app works but metadata is limited to what the IPTV provi
 | 97 | **Build 46 — final playback, subtitle, and tvOS performance hardening** | ✅ **Done (Jul 20)** — Restored end-of-playback signaling for KSPlayer, VLCKit, and AVPlayer so Next Episode and Auto Play Next work consistently. Fixed Skip Intro/Recap looping, kept the macOS Next Episode button reachable when pointer movement reveals controls, and removed duplicate macOS subtitles using engine-reported embedded-track availability. Replaced unbounded browse-count queries and reduced Stalker background-save churn for responsive large Xtream/Stalker libraries on tvOS. Hardened the Stalker resolution timeout, aligned the app and Top Shelf build number, and corrected the macOS Retina icon asset. |
 | 98 | **In-player Live TV Guide** | ✅ **Done (Jul 27)** — Compact multi-channel EPG over video while watching live TV (`PlayerEPGGuidePanel`). tvOS Guide tab + Up-from-play focus; iOS/macOS expandable Guide in the track pill. Channel/programme tap switches without leaving playback. |
 | 99 | **Live TV mini preview** | ✅ **Done (Jul 27)** — Wi‑Fi AVPlayer preview while browsing Live TV (`LiveTVMiniPreview`). tvOS/macOS: in-flow leading column, display-/window-scaled width. iOS: top-leading float. Expand to fullscreen; retarget on new channel. Skips cellular / Stalker / Stremio / external player. |
+| 100 | **Build 52 — Media tab (Plex / Jellyfin / Emby)** | ✅ **Done (Aug 31)** — Dedicated Media tab; iPhone five-tab bar (Search on Home); Plex HD transcode path; media-server iCloud tombstones. See `CHANGELOG.md`. |
+| 101 | **Build 53 — tvOS Home keep-mounted + trending + nav + iCloud catalog** | ✅ **Done (Sep 1)** — Home stays resident on tvOS; trending 20 titles; Movies/Series local path; Settings Media Servers in-pane; IPTV vs media-server ids; playlist CloudKit tombstone; catalog-sync lease; full Sync Now fetch. See § Build 53. |
+| 102 | **Build 54 — episodes, Recently Added/Watched, subtitles, skip** | ✅ **Done (Sep 3)** — Sync Now refreshes Xtream `last_modified` series; Recently Added is playlist-scoped; Recently Watched requires real playback; skip works with unknown duration; subtitles on by default. See § Build 54. |
+| 103 | **Build 55 — in-player Guide, exclusive playback, hidden iCloud** | ✅ **Done (Sep 4)** — Compact tvOS mini-Guide scrolls the full list; iPhone portrait Guide; leftover audio; second-playlist spinner; hidden channels/categories sync. See § Build 55. |
+
+---
+
+## Build 55 — In-player Guide, Playback, Hidden iCloud (Sep 4, 2026)
+
+> **Context:** After TestFlight 54: Apple TV in-player Guide showed ~5 channels with a giant white focus box and jumpy scroll; iPhone portrait Guide left a black band above the video; starting a new title could overlap the previous soundtrack; adding a second playlist could spin forever; hidden channels/categories did not sync.
+
+### ✅ tvOS in-player Guide
+
+- Compact 480 pt overlay (not full screen). Programme grid is lazy; focus is on programme cells so Down realizes the next rows. Channel column is not a focus rail. Custom focus chrome (no system white box). No `scrollTo(y:)` snap.
+
+### ✅ iPhone portrait Guide
+
+- `PlayerPortraitGuideLayout` pins 16:9 video to the top; Guide fills below. Landscape / macOS / tvOS / Guide-closed unchanged.
+
+### ✅ Exclusive playback
+
+- `PlaybackSession` — one engine at a time. New player `becomeActive` stops the previous immediately (series → movie leftover audio).
+
+### ✅ Playlist add
+
+- `PlaylistAddPersistence` persists off the main actor so a catalog-syncing first playlist cannot deadlock the add sheet.
+
+### ✅ Hidden channels / categories over iCloud
+
+- `UserContentState.isHidden` plus `SyncedContentKind.category` (cloud ids `{uuid}-category-{type}-{apiId}` so they cannot collide with live stream ids). Hides follow the active profile. Flush on background. Player settings, EPG layout, and parental PIN stay local.
+
+### Files
+
+- `Apex/Views/Player/PlayerEPGGuidePanel.swift`, `PlayerPortraitGuideLayout.swift`, `TVPlayerControlsOverlay.swift`
+- `Apex/Services/Player/PlaybackSession.swift`, `LiveChannelNavigator.swift`
+- `Apex/Services/Sync/PlaylistAddPersistence.swift`
+- `Apex/Models/UserContentState.swift`, `CloudSyncMerge.swift`, `CloudSyncEngine+Fetch.swift`
+
+---
+
+## Build 54 — Episodes, Recently Added/Watched, Subtitles, Skip (Sep 3, 2026)
+
+> **Context:** After TestFlight 53: new series episodes stayed frozen until you opened the show; Recently Added mixed other playlists; Recently Watched listed titles you never played; skip/rewind no-op’d on IPTV VOD with duration 0; a missing subtitle toggle counted as off.
+
+### ✅ New episodes after Sync Now
+
+- Opening a series always refreshes episodes from the provider (`SeriesDetailView` / `TVSeriesDetailView` / `MediaSeriesDetailView`).
+- Xtream series upsert records existing rows whose `last_modified` changed; Sync Now then `get_series_info`s those plus recently watched (`EpisodeRefreshPlanner`, cap 80). Stalker/Stremio still use the watched-only path.
+- TMDB art/ratings, EPG now/next, and the playback engine never decide whether a title exists. Missing poster ≠ missing item. After the provider adds something: **Sync Now**, then Recently Added or Show All / search — not only the 20-poster category row.
+
+### ✅ Recently Added is this playlist
+
+- Movies and Series collection `@Query` predicates include the active playlist id prefix (`LibraryCollectionRows`). Another playlist’s newest titles cannot crowd out this one.
+
+### ✅ Daily auto-sync default
+
+- `SyncFrequency.defaultValue = .daily`. Existing `@AppStorage` 3-day/weekly choices are unchanged.
+
+### ✅ Recently Watched is actual playback
+
+- Movies: `lastWatchedDate` plus `isWatched` or `watchProgress >= 5`.
+- Series: in-memory `RecentlyWatchedEvidence.seriesQualifies` (episode id prefix; do not walk `series.episodes`).
+- `WatchProgressWriter` stamps `lastWatchedDate` only after ≥ 5 s or completed. Media-server series uses `lastPlayedDate` only (no `?? Date()`).
+
+### ✅ Skip / rewind on IPTV VOD
+
+- `PlaybackSeek.target` only clamps when `duration > 1` (duration 0 used to pin skip at 0).
+- tvOS: with controls hidden, Siri Remote left/right skip 10 s on VOD (live still channel-surfs). Some MPEG-TS streams are not seekable.
+
+### ✅ Subtitles on by default
+
+- `SubtitleSettings.enabledDefault` — missing `opensubtitles.enabled` is **on**. KSPlayer `autoSelectEmbedSubtitle = true` except Apple TV HD heavy MKV remux.
+
+### Files
+
+- `Apex/Views/Components/LibraryCollectionRows.swift`, `HomeView.swift`
+- `Apex/Services/Sync/ContentSyncManager.swift`, `SyncFrequency.swift`
+- `Apex/Services/Subtitles/OpenSubtitlesSettings.swift`
+- `Apex/Views/Player/PlaybackClock.swift`, `WatchProgressWriter.swift`, `RecentlyWatchedEvidence.swift`
+- Engine overlays: `KSPlayerEngineView.swift`, `AVPlayerEngineView.swift`, `VLCPlayerEngineView.swift`, `TVPlayerControlsOverlay.swift`
+- Tests: `ContentSyncManagerLogicTests.swift`, `SubtitleSettingsTests.swift`, `PlaybackSeekTests.swift`
+
+---
+
+## Build 53 — tvOS Home, Navigation, Playlist iCloud (Sep 1, 2026)
+
+> **Context:** TestFlight 52 on Apple TV: Home took a long time to load, trending movies/series lagged and hitching the UI, and switching to Movies then back rebuilt Home from scratch. iOS and macOS did not. Same session also fixed tvOS Movies/Series Play, Settings → Media Servers, stale catalog after Sync Now, playlists that reappeared after delete, and iPhone Sync Now popping the blocking cover on Apple TV.
+
+### ✅ tvOS Home stays mounted
+
+- **Root cause:** `lazyTab` on tvOS unmounted **every** tab, including Home, so `@State` (heroes, trending, playlist stamp) and the immersive `TVHomeScreen` were destroyed on every tab change.
+- **Fix:** Home stays mounted on all platforms (`selection == tab || tab == .home`). Movies / Series / Live TV / Media / Settings still unmount when inactive. tvOS does **not** keep Media resident — Apple TV HD cannot hold Home + Plex connect + EPG at once.
+- **Do not regress:** `ContentIndexingService.pauseForBrowse()` still runs on tab switch. Do not observe `ContentIndexingService` from `HomeView`.
+
+### ✅ tvOS Home / trending first paint
+
+- tvOS no longer waits on `waitUntilPlaylistSyncIdle()` before TMDB (4K was waiting; HD already skipped).
+- iOS/macOS still wait only when phase 1 produced no library heroes.
+- tvOS paints trending from TMDB **page 1**, then widens to 3 pages.
+- `trendingTaskKey` is playlist identity only — folding `lastSyncDate` in cancelled in-flight TMDB on every catalog sync.
+- Sync-end refresh no longer wipes rails that are already on screen.
+
+### ✅ tvOS trending count
+
+- `HomeHeroBuilder.trendingRowLimit = 20` on all platforms. Trending rails pass `constrainedCap: nil`. Recently Watched / Favorites / Trakt still cap at 6 on constrained tvOS.
+
+### ✅ tvOS Movies / Series / Settings
+
+- Movies and Series use a **local** `NavigationStack` path on tvOS + `consumeDeepLinkPath()` on appear (`DeepLinkRouter` path bindings do not drive the focus engine).
+- Settings → Media Servers: tvOS `tvBody` (no `List` nested in Settings’ outer `ScrollView`); drill via `selectedMediaServer` in `SettingsView`.
+
+### ✅ IPTV Play vs media-server ids
+
+- `MediaServerIdentity.isMediaServerCategoryID` requires `{uuid}-library-…`. IPTV `{playlistUUID}-movie-…` / `-series-…` must not take the media-server path (that produced disabled Play / “No episodes available”).
+
+### ✅ Playlist delete via iCloud
+
+- `SyncedPlaylist.deletedAt` tombstone. `CloudSyncCoordinator.deletePlaylist(id:)` from UI **and** reconcile.
+- Missing CloudKit row **without** a tombstone still re-publishes (slow import), same as media servers.
+- Deletes made on Build 52 or earlier never wrote a tombstone — user must delete once more on 53.
+
+### ✅ Catalog sync lease
+
+- `CatalogSyncLease` / `CatalogSyncDeviceIdentity` — 30-minute quiet period on `SyncedPlaylist.catalogSyncDeviceID` / `catalogSyncHeartbeatAt`.
+- `MainTabView.enqueueDueSyncs` skips auto-cover for iCloud-imported playlists and remote leases; still presents first-time covers on a fresh Apple TV (`hasCompletedInitialAutoSync` starts false). Skip while `isPlaybackActive`.
+- Manual Sync Now on the device that started it is unchanged.
+
+### ✅ Stale catalog after Sync Now
+
+- Manual/auto Sync Now (`full: true`) uses an unfiltered provider fetch when the per-category pass looks incomplete. Prune only when the fetch looks complete.
+
+### Files
+
+- `Apex/Views/MainTabView.swift`, `HomeView.swift`, `HomeView+Trending.swift`, `HomeHeroBuilder.swift`
+- `Apex/Views/Movies/MoviesView.swift`, `Series/SeriesView.swift`, `Settings/SettingsView.swift`, `Settings/MediaServersSettingsView.swift`
+- `Apex/Services/MediaServer/MediaServerIdentity.swift`
+- `Apex/Services/Sync/PlaylistDeletion.swift`, `ContentSyncManager.swift`
+- `Apex/Services/Sync/CloudSync/CatalogSyncLease.swift`, `CloudSyncCoordinator+CatalogSync.swift`, `CloudSyncEngine+Playlists.swift`
+- Tests: `ApexTests/CloudSyncTests.swift`, `MediaServerIdentityTests.swift`
 
 ---
 
@@ -748,10 +887,10 @@ Full rules: `EPG.md` § **Stability rules (do not regress)**. Highlights:
 - [ ] `ContentIndexingService.pauseForBrowse()` still called on tab switch
 - [ ] `NetworkMonitor` still gates background indexer + EPG `syncIfDue` on cellular
 - [ ] `HomeView` does **not** observe `ContentIndexingService`
-- [ ] `loadTrending()`: library heroes first; TMDB phase 2 non-blocking when heroes exist
+- [ ] `loadTrending()`: library heroes first; TMDB phase 2 non-blocking when heroes exist; tvOS does **not** wait on playlist sync before TMDB
 - [ ] `ApexApp`: CloudKit `Task { await cloudSync.start() }` — not blocking launch
 - [ ] `CachedAsyncImage`: preserve `.success` phase on re-evaluation
-- [ ] Lazy tab mount: content shows when `selection == tab`
+- [ ] Lazy tab mount: content shows when `selection == tab`; **Home stays resident on all platforms**
 - [ ] Live TV performance edits did **not** violate EPG UI checklist above
 
 ### TMDB detail checklist
@@ -772,6 +911,9 @@ Full rules: `EPG.md` § **Stability rules (do not regress)**. Highlights:
 | 32→41 | iOS guide blank until Sync Now | Build 32 store-only browse + iOS `persist` gated by `EPGSyncGate` → `forceGuideRefresh` re-read empty store; fixed Jul 15 (persist always + warm live cache) |
 | 50–51 | Mini preview → fullscreen SIGABRT (all platforms) | `VLCPlayerCoordinator.tearDown` cleared `mediaPlayer.media` right after the **asynchronous** `stop()` — races VLC's player thread (`libvlc_media_retain` assert). `stop()` alone closes the input; never mutate `media` while a stop is in flight |
 | 50–51 | macOS: all tab content drawn under titlebar (search filters unclickable, hours of misdiagnosis) | `themeBackground()` applied `ignoresSafeArea()` to the **whole TabView** instead of only the background fill, stripping the safe area from every page. Scope `ignoresSafeArea` to the fill: `background(fill.ignoresSafeArea())`. The Live TV sidebar's 52 pt `contentMargins` workaround existed only because of this and was removed with the fix |
+| 52→53 | tvOS Home reloads on every tab switch; trending capped at 6 and waits on catalog sync | `lazyTab` unmounted Home on tvOS (HD memory pass); `trendingRowLimit` 6 on constrained devices; 4K waited on `waitUntilPlaylistSyncIdle()` before TMDB — see § Build 53 |
+| 53→54 | New episodes frozen after Sync Now; Recently Watched listed unplayed titles; skip no-op on duration 0 | Lazy episode fetch only when empty; `lastWatchedDate` alone; skip clamped to reported duration — see § Build 54 |
+| 54→55 | tvOS mini-Guide ~5 rows, white focus box, jumpy scroll; leftover audio; second playlist spinner; hides not in iCloud | Eager overlay stacks; no exclusive playback session; MainActor playlist save; `isHidden` not in `UserContentState` — see § Build 55 |
 | Pre-41 | Xtream skipped after tvOS reinstall with Stremio | Empty selection used unsorted `.first`; tvOS deferred all sync covers on Home — see § Build 41 |
 
 **Rule:** Performance passes must not edit Live TV EPG UI without running the EPG UI checklist. EPG fixes must not edit sync layer without running EPG sync checklist.
@@ -798,7 +940,7 @@ Full rules: `EPG.md` § **Stability rules (do not regress)**. Highlights:
 2. ~~**Website / support email**~~ — ✅ support@streaminfinitytv.com, GitHub as homepage
 3. ~~**Apple Developer setup**~~ — ✅ Team `VS7D6GB238`, bundle ID registered, IAP products created, iOS TestFlight builds uploaded (July 2, 2026)
 4. ~~**CloudKit Development schema**~~ — ✅ Bootstrapped; **Production deployed** — playlist + user data sync verified on TestFlight (July 2, 2026)
-5. **TestFlight build 24** — 🔄 Testing now (Jul 9). Bump build number, archive, run EPG + performance checklist in § Build 24. Build 19 EPG sync layer intact; UI regressions restored.
+5. **TestFlight build 55** — 🔄 Ready to archive (Sep 4). Deploy `CD_UserContentState.isHidden` Development → Production before upload. See § Build 55, `CHANGELOG.md`, `TESTFLIGHT_CHECKLIST.md`.
 6. **External TestFlight** — Age rating + privacy URL + App Privacy + What to Test → Beta App Review (~1–2 days)
 7. ~~**tvOS large-library hardening**~~ — ✅ Lazy tab mount, deferred indexing/EPG (tvOS-only); in build 17
 8. ~~**EPG guide**~~ — ✅ Working (`xmltv.php` bulk download, offset-honest parse; slow-sync + mismatch fixed); notes in `EPG.md`
@@ -1235,7 +1377,7 @@ Only the last two are actual network west feeds. The others were name-based coll
 
 **Fixes:**
 - **`HomeHeroBuilder.libraryHeroMatch()`** — instant heroes from local catalog (no TMDB wait).
-- **`HomeView+Trending.swift`** — two-phase load (library heroes first, TMDB enrichment second); **`waitUntilPlaylistSyncIdle()`** (playlist sync only — not full CloudKit reconcile).
+- **`HomeView+Trending.swift`** — two-phase load (library heroes first, TMDB enrichment second); **`waitUntilPlaylistSyncIdle()`** only when phase 1 produced no heroes (tvOS never waits — Build 53).
 - **`ApexApp.swift`** — content indexer deferred **20 s** (iOS) / **30 s** (tvOS); EPG **`syncIfDue()`** deferred **90 s** (iOS) / **60 s** (tvOS) so Home paints first.
 - **`SyncProgressView`** — post-sync indexer kick only (EPG now inline in playlist sync, not a deferred `syncIfDue()`).
 
@@ -1404,11 +1546,11 @@ Quick reference for [App Store Connect](https://appstoreconnect.apple.com) → *
 | Field | Value |
 |-------|-------|
 | Marketing version | **1.2.0** |
-| Build | **18+** (`CURRENT_PROJECT_VERSION` — bump before next upload) |
+| Build | **55** (`CURRENT_PROJECT_VERSION`) |
 | Bundle ID | `com.streaminfinity.apex` |
 | Team ID | `VS7D6GB238` |
 
-**Bump build before each upload:** General → Apex target → **Build** → increment (e.g. 17 → 18). Archive with **Release**; `.env` keys inject at build time.
+**Bump build before each upload:** General → Apex target → **Build** → increment (e.g. 55 → 56). Archive with **Release**; `.env` keys inject at build time.
 
 ### URLs (App Information — shared iOS + tvOS)
 
@@ -1471,9 +1613,19 @@ Internal TestFlight (team only): upload build, no Beta App Review.
 **What to Test** (paste in TestFlight → External Testing):
 
 ```
+Build 55 (1.2.0)
+
 Apex is an IPTV player—users add their own Xtream or M3U playlist. No content is bundled.
 
-Add a playlist, wait for sync, browse Live TV / Movies / Series, and play a stream. Test iCloud sync in Settings if signed into iCloud. Premium IAP unlocks optional features only.
+Apple TV: In-player Guide stays a compact overlay. Scroll the full channel list with the Siri Remote. The focus highlight should sit on the programme, not a giant white box, and scrolling should be smooth (not jumpy). OpenSubtitles chips should use a tight highlight. After Stop, posters should not keep spinning.
+
+iPhone: Open the in-player Guide in portrait — picture stays on top, Guide fills below (no black band above the video).
+
+Playback: Start a movie right after a series (or the reverse) — only one soundtrack. Skip/rewind still works on VOD. Adding a second playlist while the first is syncing should not spin forever; Cancel still works.
+
+iCloud: Hide a Live TV category or channel on one device, leave the app for a few seconds, then check the other device (same profile). Favorites, progress, and playlists still sync. Sync Now should not hang on the TV Guide download.
+
+Add a playlist, wait for sync, browse Live TV / Movies / Series, and play a stream. Test Media (Plex/Jellyfin/Emby) if you use it.
 
 Contact: support@streaminfinitytv.com
 ```
@@ -1552,7 +1704,7 @@ When ready for public listing (after TestFlight):
 |-------|----------|
 | **Catalog** | Local `default.store` only — never CloudKit-synced |
 | **User data** | `CloudUserData.store` → CloudKit (`SyncedPlaylist`, `UserContentState`, `UserProfile`, `SyncedEPGSource`) |
-| **Tab lifecycle** | **Inactive tabs unmount** — only the current tab + Home are mounted at any time. Releases `@Query` memory when switching away. Re-mount reads from SQLite page cache (instant). This is the key reason other IPTV apps handle 17K+ channels without crashing. |
+| **Tab lifecycle** | **Inactive tabs unmount** — only the current tab + **Home** are mounted. Releases `@Query` memory when switching away. Re-mount reads from SQLite page cache (instant). tvOS does **not** keep Media mounted with Home (Apple TV HD). |
 | **Xtream sync** | Per-category API fetch → batch writes (2000) |
 | **Provider HTTP** | `ProviderURLSession` — TLS bypass for mismatched provider certs |
 | **Home hero** | Batched TMDB ID query + bounded title/library fallback (`HomeHeroBuilder`) |
@@ -1584,7 +1736,7 @@ See **What's Been Built → iOS Device — Large Library Fix** above for full de
 2. ~~**Deploy CloudKit schema** Development → Production~~ — ✅ Done; sync verified
 3. ~~**Archive + upload build 19**~~ — ✅ Done.
 4. ~~**EPG on device**~~ — ✅ **Working (Jul 8)** on both iOS and tvOS.
-5. **TestFlight build 23** — 🔄 **Testing now** — EPG loading fixed (playlist passed directly); watchdog crash fixed (watchlist off main thread); performance fixes retained.
+5. **TestFlight build 55** — 🔄 **Ready to archive** — compact tvOS in-player Guide (full-list scroll), iPhone portrait Guide, exclusive playback, second-playlist add, hidden channels/categories over iCloud. Deploy `isHidden` to Production first. See § Build 55 and `TESTFLIGHT_CHECKLIST.md`.
 6. **External TestFlight** — Age rating 17+, privacy URL, App Privacy, What to Test → Beta App Review
 7. **Smoke-test** — sync (branded UI + TV Guide **%**), hero, subtitles, Discord, tvOS home, **EPG** (cards populate immediately after sync, grid + in-player browser, persistence after force-quit)
 8. **Screenshots + store copy** — when ready for **public** App Store
@@ -1684,4 +1836,4 @@ See **What's Been Built → iOS Device — Large Library Fix** above for full de
 
 ---
 
-*Last updated: August 31, 2026 (Build 52 — Media tab for Plex/Jellyfin/Emby, iPhone five-tab navigation, Apple TV HD transcode path).*
+*Last updated: September 4, 2026 (Build 55 — in-player Guide, exclusive playback, hidden iCloud, playlist add).*

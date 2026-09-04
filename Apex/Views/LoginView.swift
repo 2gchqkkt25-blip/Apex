@@ -1,3 +1,4 @@
+import OSLog
 import SwiftData
 import SwiftUI
 #if !os(tvOS)
@@ -130,7 +131,6 @@ struct LoginView: View {
                     if isModal {
                         ToolbarItem(placement: .cancellationAction) {
                             Button("Cancel") { dismiss() }
-                                .disabled(isLoading)
                         }
                     }
                 }
@@ -345,12 +345,11 @@ struct LoginView: View {
                         .buttonStyle(TVSettingsActionButtonStyle(prominent: true))
                         .disabled(!isFormValid || isLoading)
 
-                        // Only offer Cancel when presented modally (the Settings
-                        // cover); on first launch there is nothing to cancel to.
+                        // Keep Cancel available while connecting so a hung
+                        // provider test can't trap the user on a spinner.
                         if isModal {
                             Button("Cancel") { dismiss() }
                                 .buttonStyle(TVSettingsActionButtonStyle())
-                                .disabled(isLoading)
                         }
                     }
                     .padding(.top, 8)
@@ -434,8 +433,8 @@ struct LoginView: View {
                     playlist.maxConnections = String(info.userInfo.maxConnections ?? "0")
                     playlist.activeConnections = String(info.userInfo.activeCons ?? "0")
                     playlist.expDate = info.userInfo.expDate
-                    insertAndFinish(playlist)
                 }
+                await persistAndFinish(playlist)
             } catch {
                 errorMessage = Self.verboseError(error, context: "Xtream login to \(serverURL)")
                 isLoading = false
@@ -458,9 +457,9 @@ struct LoginView: View {
                     // for m3u markers, so adding a huge playlist stays instant —
                     // the full download happens during the first sync.
                     try await M3UClient().validatePlaylist(at: urlString)
-                    let playlist = Playlist(name: playlistName, m3uURL: urlString, epgURL: epgURLString)
-                    insertAndFinish(playlist)
                 }
+                let playlist = Playlist(name: playlistName, m3uURL: urlString, epgURL: epgURLString)
+                await persistAndFinish(playlist)
             } catch {
                 errorMessage = Self.verboseError(error, context: "M3U validation of \(urlString)")
                 isLoading = false
@@ -492,8 +491,8 @@ struct LoginView: View {
                     let profile = try await client.authenticate()
                     playlist.userStatus = profile.status
                     playlist.expDate = profile.expDate
-                    insertAndFinish(playlist)
                 }
+                await persistAndFinish(playlist)
             } catch {
                 errorMessage = Self.verboseError(error, context: "Stalker portal \(portal)")
                 isLoading = false
@@ -510,16 +509,18 @@ struct LoginView: View {
 
         Task {
             do {
-                let client = StremioClient()
-                let manifest = try await client.fetchManifest(from: url)
+                var resolvedName = playlistName
+                try await withConnectionTimeout {
+                    let client = StremioClient()
+                    let manifest = try await client.fetchManifest(from: url)
+                    resolvedName = manifest.name
+                }
                 guard let normalized = StremioURL.normalize(url) else {
-                    errorMessage = StremioError.invalidURL.localizedDescription
-                    isLoading = false
-                    return
+                    throw StremioError.invalidURL
                 }
                 let playlist = Playlist(name: playlistName, stremioURL: normalized.absoluteString)
-                playlist.name = manifest.name
-                insertAndFinish(playlist)
+                playlist.name = resolvedName
+                await persistAndFinish(playlist)
             } catch {
                 errorMessage = Self.verboseError(error, context: "Stremio manifest \(url)")
                 isLoading = false
@@ -527,25 +528,33 @@ struct LoginView: View {
         }
     }
 
-    private func insertAndFinish(_ playlist: Playlist) {
-        modelContext.insert(playlist)
-        // Set up the playlist's EPG source so the guide refreshes on its own
-        // schedule — EPG is no longer part of the content sync.
-        EPGSourceReconciler.reconcile(playlist, in: modelContext)
-        // Persist immediately so the ContentSyncManager actor's
-        // separate ModelContext can fetch the playlist. Without this
-        // the autosave is deferred and the sync's fresh context
-        // fetches nil, silently completing without syncing.
-        try? modelContext.save()
-        isLoading = false
-        // Only dismiss when presented modally (e.g. the Settings
-        // sheet). On first launch LoginView is the window's root
-        // content, where dismiss() closes the window on macOS and
-        // leaves the app with no visible window. Inserting the
-        // playlist already swaps the root over to MainTabView via
-        // ContentView's @Query.
-        if isModal {
-            dismiss()
+    /// Snapshots the in-memory playlist, writes it on a background context, then
+    /// dismisses. Saving on the view context while another playlist's catalog
+    /// sync holds the store can stall MainActor — the add sheet's timeout never
+    /// fires and the spinner never stops.
+    private func persistAndFinish(_ playlist: Playlist) async {
+        guard !Task.isCancelled else { return }
+        let draft = PlaylistAddPersistence.Draft(playlist)
+        let container = modelContext.container
+        do {
+            try await Task.detached(priority: .userInitiated) {
+                try PlaylistAddPersistence.persist(draft, in: container)
+            }.value
+            UserDefaults.standard.set(draft.id.uuidString, forKey: PlaylistSelectionStore.key)
+            isLoading = false
+            // Only dismiss when presented modally (e.g. the Settings
+            // sheet). On first launch LoginView is the window's root
+            // content, where dismiss() closes the window on macOS and
+            // leaves the app with no visible window. Inserting the
+            // playlist already swaps the root over to MainTabView via
+            // ContentView's @Query.
+            if isModal {
+                dismiss()
+            }
+        } catch {
+            Logger.database.error("Failed to persist new playlist: \(error.localizedDescription)")
+            errorMessage = error.localizedDescription
+            isLoading = false
         }
     }
 
@@ -600,25 +609,26 @@ private extension LoginView {
         }
     }
 
-    /// Runs an add-playlist connection test under an overall deadline, cancelling
-    /// the in-flight request and surfacing a timeout when it's exceeded.
+    /// Caps the add-playlist connection test. Each client has its own per-request
+    /// timeout and (for Xtream) retry/backoff tuned for *sync*; left unbounded, a
+    /// wrong URL or a busy provider (first playlist still syncing) can hang the
+    /// add sheet on a spinner. Racing a hard deadline actually stops the wait —
+    /// cancelling a nested Task does not, if the URLSession call ignores cancel.
     ///
-    /// Each client has its own per-request timeout and (for Xtream) retry/backoff
-    /// tuned for *sync*, where retries matter; left unbounded, a wrong URL or
-    /// dead host can hang the add sheet for ~30–90s on a spinner with no way out.
-    /// This caps the test (default 20s) without weakening the sync path.
-    func withConnectionTimeout(_ seconds: Double = 20, _ operation: @escaping () async throws -> Void) async throws {
-        let work = Task { try await operation() }
-        let watchdog = Task {
-            try? await Task.sleep(for: .seconds(seconds))
-            work.cancel()
-        }
-        defer { watchdog.cancel() }
-        do {
-            try await work.value
-        } catch {
-            if work.isCancelled { throw ConnectionTimeoutError() }
-            throw error
+    /// Persist (`modelContext.save()`) must stay *outside* this helper: a
+    /// MainActor save that blocks the store also blocks the timeout from
+    /// resuming on MainActor.
+    func withConnectionTimeout(_ seconds: Double = 20, _ operation: @escaping @MainActor () async throws -> Void) async throws {
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            group.addTask { @MainActor in
+                try await operation()
+            }
+            group.addTask {
+                try await Task.sleep(for: .seconds(seconds))
+                throw ConnectionTimeoutError()
+            }
+            try await group.next()
+            group.cancelAll()
         }
     }
 }

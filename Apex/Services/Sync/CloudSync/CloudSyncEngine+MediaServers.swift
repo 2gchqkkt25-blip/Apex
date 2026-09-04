@@ -27,22 +27,24 @@ extension CloudSyncEngine {
         let locals = try catalogContext.fetch(localDescriptor)
         let mirrors = try cloudContext.fetch(mirrorDescriptor)
 
-        // Retain the last value as a tombstone baseline until the follow-up
-        // reconcile observes both rows absent. If CloudKit briefly re-imports
-        // the old mirror while its deletion is exporting, the merge still
-        // resolves toward deletion instead of resurrecting the connection.
-        if let baseline = locals.first.map(Self.mediaServerValues(from:))
+        let baseline = locals.first.map(Self.mediaServerValues(from:))
             ?? mirrors.first.map(Self.mediaServerValues(from:))
             ?? shadow.mediaServerShadow(id.uuidString)
-        {
+        // Keep the last live value as a shadow baseline. If CloudKit briefly
+        // re-imports the pre-delete record, merge still resolves toward deletion.
+        if let baseline {
             shadow.setMediaServerShadow(id.uuidString, baseline)
         }
 
         for local in locals {
             MediaServerDeletion.delete(local, in: catalogContext)
         }
-        for mirror in mirrors {
-            cloudContext.delete(mirror)
+        if mirrors.isEmpty, let baseline {
+            insertMediaServerTombstone(id: id, baseline: baseline)
+        } else {
+            for mirror in mirrors {
+                tombstoneMediaServerMirror(mirror)
+            }
         }
 
         try saveStores()
@@ -60,17 +62,26 @@ extension CloudSyncEngine {
 
         var live = Set<String>()
         for id in ids {
+            let mirror = mirrorsByID[id]
+            let isTombstone = mirror?.deletedAt != nil
+            let cloudValues: MediaServerConfigValues? = {
+                guard let mirror, !isTombstone else { return nil }
+                return Self.mediaServerValues(from: mirror)
+            }()
             var verdict = CloudSyncMerge.reconcile(
                 local: localByID[id].map(Self.mediaServerValues(from:)),
-                cloud: mirrorsByID[id].map(Self.mediaServerValues(from:)),
+                cloud: cloudValues,
                 shadow: shadow.mediaServerShadow(id.uuidString),
                 mergeConflict: MediaServerConfigValues.mergeConflict
             )
-            // Same hole as playlists: a missing `SyncedMediaServer` while the
-            // local connection still exists is treated as a remote delete and
-            // `MediaServerDeletion` wipes the Plex/Jellyfin catalog. Refuse and
-            // re-publish so iCloud can stay enabled.
-            if case .pullToLocal(.none) = verdict, let local = localByID[id] {
+            if isTombstone {
+                // Explicit delete from another device always wins, including
+                // when this device has no shadow baseline yet (which would
+                // otherwise look like a local create and un-delete the tombstone).
+                if localByID[id] != nil {
+                    verdict = .pullToLocal(nil)
+                }
+            } else if case .pullToLocal(.none) = verdict, let local = localByID[id] {
                 Logger.sync.error("Refusing iCloud media-server deletion for \(id.uuidString, privacy: .public) — local connection still present; re-publishing instead of wiping the library")
                 verdict = .pushToCloud(Self.mediaServerValues(from: local))
             }
@@ -78,14 +89,14 @@ extension CloudSyncEngine {
                 verdict,
                 id: id,
                 local: localByID[id],
-                mirror: mirrorsByID[id],
+                mirror: mirror,
                 into: &result
             )
 
             if mediaServerRemains(
                 verdict: verdict,
                 hadLocal: localByID[id] != nil,
-                hadCloud: mirrorsByID[id] != nil
+                hadLiveCloud: mirror != nil && !isTombstone
             ) {
                 live.insert(id.uuidString)
             }
@@ -126,10 +137,15 @@ extension CloudSyncEngine {
 
     func applyMediaServerToCloud(_ value: MediaServerConfigValues?, id: UUID, mirror: SyncedMediaServer?) {
         guard let value else {
-            if let mirror { cloudContext.delete(mirror) }
+            if let mirror {
+                tombstoneMediaServerMirror(mirror)
+            } else {
+                insertMediaServerTombstone(id: id, baseline: nil)
+            }
             return
         }
         if let mirror {
+            mirror.deletedAt = nil
             mirror.name = value.name
             mirror.baseURL = value.baseURL
             mirror.kindRaw = value.kindRaw
@@ -198,13 +214,39 @@ extension CloudSyncEngine {
     private func mediaServerRemains(
         verdict: MergeVerdict<MediaServerConfigValues>,
         hadLocal: Bool,
-        hadCloud: Bool
+        hadLiveCloud: Bool
     ) -> Bool {
         switch verdict {
-        case .noChange: hadLocal || hadCloud
+        case .noChange: hadLocal || hadLiveCloud
         case let .pushToCloud(value), let .pullToLocal(value): value != nil
         case .writeBoth: true
         }
+    }
+
+    func tombstoneMediaServerMirror(_ mirror: SyncedMediaServer) {
+        mirror.deletedAt = Date()
+        mirror.updatedAt = Date()
+        mirror.password = ""
+        mirror.accessToken = nil
+        mirror.plexToken = nil
+    }
+
+    func insertMediaServerTombstone(id: UUID, baseline: MediaServerConfigValues?) {
+        cloudContext.insert(SyncedMediaServer(
+            id: id,
+            name: baseline?.name ?? "",
+            baseURL: baseline?.baseURL ?? "",
+            kindRaw: baseline?.kindRaw ?? MediaServerKind.jellyfin.rawValue,
+            username: "",
+            password: "",
+            accessToken: nil,
+            plexToken: nil,
+            userId: nil,
+            plexServerIdentifier: baseline?.plexServerIdentifier,
+            syncEnabled: false,
+            sortOrder: baseline?.sortOrder ?? 0,
+            deletedAt: Date()
+        ))
     }
 }
 

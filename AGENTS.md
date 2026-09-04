@@ -75,18 +75,27 @@ Two separate `ModelContainer`s:
 ### SwiftData
 - Enrichment saves run on a **background** `ModelContext` (`ContentSyncManager.enrich*`) — not the view context.
 - Main-thread saves during playback stall KSPlayer every ~5 s. Buffer to `UserDefaults`; flush at playback boundaries.
-- `PlaylistDeletion` helper must be used for any playlist removal (UI **and** iCloud reconcile) — `Movie`/`Series`/`LiveStream` have no cascade relationship to `Playlist`.
+- `PlaylistDeletion` helper must be used for any playlist removal (UI **and** iCloud reconcile) — `Movie`/`Series`/`LiveStream` have no cascade relationship to `Playlist`. Call `CloudSyncCoordinator.deletePlaylist(id:)` so CloudKit gets a `SyncedPlaylist.deletedAt` tombstone. A missing mirror **without** a tombstone is treated as a slow import and re-published, not as a delete.
 - The reconciler after `switchProfile` rebuilds the dropped content shadow — don't remove that pass; optimize the fetch predicate instead.
 
 ### iCloud sync
 - Guard reconcile against `LocalCatalogReadiness`; an empty `default.store` would push mass deletions to CloudKit.
 - `UserProfile` must be deduped on every reconcile (not just launch) — fixed-id default profiles multiply per device in CloudKit.
+- `CatalogSyncLease` (30 min on `SyncedPlaylist`) — the device that started Sync Now keeps the blocking cover; siblings must not treat an iCloud-imported `lastSyncDate == nil` playlist as first-time auto-sync.
 
 ### tvOS-specific
 - `Color.accentColor` resolves to white on tvOS — never use it for fills/tints.
 - `.onMoveCommand` runs inside the focus engine's animated context; defer layout mutations with `Task { }`.
 - Full-width focus targets needed for vertical navigation — a narrow target won't catch "down" from a full-width section.
 - `@FocusState` must not drive layout sizing in the hero fold — use `TVHomeScreen`'s `ScrollTargetBehavior`.
+- `lazyTab` keeps **Home** mounted on tvOS (same as iOS/macOS). Do not unmount Home when leaving the tab — that rebuilds hero + trending from scratch. Other tabs still unmount; do not keep Media mounted with Home on Apple TV HD.
+- Movies/Series: local `NavigationStack` path on tvOS + `consumeDeepLinkPath()` — do not bind `path` to `DeepLinkRouter` (focus engine ignores it).
+- Settings → Media Servers: tvOS `tvBody` in-pane drill. Never nest a `List` inside Settings’ outer `ScrollView`.
+- Live TV player: Up/Down on Siri Remote **always** surf channels (`onSwitchChannel`) during live playback, whether controls are visible or hidden. The Guide panel is reachable only via its tab pill — do not re-add the old "Up opens Guide" shortcut in `TVPlayerControlsOverlay.onMoveCommand`.
+- Live TV rail: `LiveTVSectionSettings.showAllChannelsKey` gates the `.all` section in `sortedSections`. When off, Favorites (or Recents / Categories) leads the rail. Toggle lives in EPG Settings alongside Channel Preview.
+
+### Media servers
+- IPTV catalog ids are `{playlistUUID}-movie-…` / `-series-…`. Media-server detection is `{serverUUID}-library-…` or `mediaserver://` only — never treat IPTV rows as Plex/Jellyfin/Emby.
 
 ### KSPlayer
 - Hardware decode requires **both** `asynchronousDecompression = true` **and** `hardwareDecode = true`; `async` defaults to `false` → silent software decode → frame drops on tvOS.

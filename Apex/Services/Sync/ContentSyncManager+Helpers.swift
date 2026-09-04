@@ -226,4 +226,37 @@ extension ContentSyncManager {
         return ((try? context.fetch(descriptor)) ?? [])
             .filter { $0.id.hasPrefix(prefix) }
     }
+
+    /// True when a fetch returned far fewer ids than the local catalog — the
+    /// signature of a truncated / category-filtered API that would otherwise
+    /// leave new titles out and, if pruned, wipe the library.
+    func catalogFetchLooksIncomplete(seenCount: Int, existingCount: Int) -> Bool {
+        existingCount > 0 && seenCount * 2 < existingCount
+    }
+
+    /// Sweep dropped titles only when the fetch looks like a complete catalog.
+    func shouldPruneStaleCatalog(seenCount: Int, existingCount: Int) -> Bool {
+        seenCount > 0 && !catalogFetchLooksIncomplete(seenCount: seenCount, existingCount: existingCount)
+    }
+
+    func countMovies(playlistId: UUID) -> Int {
+        let context = ModelContext(modelContainer)
+        let prefix = "\(playlistId.uuidString)-movie-"
+        let descriptor = FetchDescriptor<Movie>(predicate: #Predicate { $0.id.starts(with: prefix) })
+        return (try? context.fetchCount(descriptor)) ?? 0
+    }
+
+    func countSeries(playlistId: UUID) -> Int {
+        let context = ModelContext(modelContainer)
+        let prefix = "\(playlistId.uuidString)-series-"
+        let descriptor = FetchDescriptor<Series>(predicate: #Predicate { $0.id.starts(with: prefix) })
+        return (try? context.fetchCount(descriptor)) ?? 0
+    }
+
+    func countLiveStreams(playlistId: UUID) -> Int {
+        let context = ModelContext(modelContainer)
+        let prefix = "\(playlistId.uuidString)-live-"
+        let descriptor = FetchDescriptor<LiveStream>(predicate: #Predicate { $0.id.starts(with: prefix) })
+        return (try? context.fetchCount(descriptor)) ?? 0
+    }
 }

@@ -5,6 +5,9 @@ struct SettingsView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
     @Environment(ThemeManager.self) private var themeManager
+    #if !os(tvOS)
+        @Environment(CloudSyncCoordinator.self) private var cloudSync: CloudSyncCoordinator?
+    #endif
     /// Not `private`: read by the SettingsView+Profiles extension (separate file).
     @Environment(ProfileManager.self) var profileManager: ProfileManager?
     /// Not `private`: read by the SettingsView+AutoSync extension (separate file).
@@ -64,6 +67,10 @@ struct SettingsView: View {
         /// strands remote focus once the content scrolls. Not `private`: read by
         /// the SettingsView+Playlists extension (separate file).
         @State var selectedPlaylist: Playlist?
+        /// Media server drilled into within the Media Servers category. Same
+        /// in-pane drill as playlists — a `NavigationLink`/`List` inside the
+        /// Settings `ScrollView` jumps focus and renders blank on tvOS.
+        @State var selectedMediaServer: MediaServer?
         /// The engine whose options are drilled into within the Player category,
         /// replacing the player detail in place (same reasoning as `selectedPlaylist`).
         /// Not `private`: read by the SettingsView+TVPlayer extension (separate file).
@@ -402,8 +409,16 @@ struct SettingsView: View {
         }
 
         private func deletePlaylists(offsets: IndexSet) {
-            let container = modelContext.container
             let ids = offsets.map { playlists[$0].id }
+            if let cloudSync {
+                Task {
+                    for id in ids {
+                        try? await cloudSync.deletePlaylist(id: id)
+                    }
+                }
+                return
+            }
+            let container = modelContext.container
             Task.detached(priority: .userInitiated) {
                 let context = ModelContext(container)
                 context.autosaveEnabled = false
@@ -457,6 +472,7 @@ extension SettingsView {
                         // detail (a playlist, or an engine's options), so the
                         // pane reverts to its top-level list.
                         selectedPlaylist = nil
+                        selectedMediaServer = nil
                         selectedEngineOptions = nil
                     }
                 }
@@ -529,7 +545,15 @@ extension SettingsView {
                             tvPlaylistsDetail
                         }
                     case .mediaServers:
-                        MediaServersSettingsView()
+                        if let selectedMediaServer {
+                            MediaServerDetailSettingsView(server: selectedMediaServer) {
+                                self.selectedMediaServer = nil
+                            }
+                        } else {
+                            MediaServersSettingsView { server in
+                                selectedMediaServer = server
+                            }
+                        }
                     case .profiles: TVProfilesSettingsView()
                     case .home: tvHomeLayoutDetail
                     case .topShelf: TopShelfSettingsView()

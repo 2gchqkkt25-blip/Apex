@@ -15,6 +15,7 @@ struct MainTabView: View {
     @Environment(PlaylistSwitchModel.self) private var playlistSwitch: PlaylistSwitchModel?
     @Environment(ProfileManager.self) private var profileManager: ProfileManager?
     @Environment(ThemeManager.self) private var themeManager
+    @Environment(CloudSyncCoordinator.self) private var cloudSync: CloudSyncCoordinator?
     @Query private var playlists: [Playlist]
     /// Categories marked restricted. Fetched once here so a single source feeds
     /// the restriction context every content surface reads from the environment.
@@ -38,13 +39,17 @@ struct MainTabView: View {
     /// launch / switch / foreground triggers don't re-present the cover for one
     /// that's already been handled.
     @State private var autoSyncAttempted: Set<UUID> = []
+    /// First `enqueueDueSyncs` on this appearance may auto-present first-time
+    /// covers (fresh Apple TV restore). Later iCloud imports of the same
+    /// playlists must not pop the blocking UI while someone is using the app.
+    @State private var hasCompletedInitialAutoSync = false
 
-    /// Browse tabs mount only while selected (see `lazyTab`). On tvOS every tab
-    /// unmounts when inactive — Apple TV HD cannot hold Home + Media connect +
-    /// background EPG in memory at once. iOS/macOS keep Home mounted, and keep
-    /// Media mounted from launch so the new `Tab` content closure never caches a
-    /// `Color.clear` placeholder before its activation callback runs. Media only
-    /// retains capped rails, so this is bounded while preserving sync results.
+    /// Browse tabs mount only while selected (see `lazyTab`). Home stays mounted
+    /// on every platform so returning from Movies/Series does not rebuild the
+    /// hero and trending rails. iOS/macOS also keep Media mounted from launch so
+    /// the `Tab` content closure never caches a `Color.clear` placeholder before
+    /// its activation callback runs. tvOS still unmounts Media — Apple TV HD
+    /// cannot hold Home + Plex connect + background EPG at once.
     @State private var activatedTabs: Set<AppTab> = [.home]
 
     private var syncFrequency: SyncFrequency {
@@ -80,45 +85,48 @@ struct MainTabView: View {
             .windowToolbarFullScreenVisibility(.visible)
         #endif
         #if os(iOS)
-            .tabBarMinimizeOnScrollDownIfAvailable()
+        .tabBarMinimizeOnScrollDownIfAvailable()
         #endif
-            .onOpenURL { url in
-                handleDeepLink(url)
+        .onOpenURL { url in
+            handleDeepLink(url)
+        }
+        .task(id: playlists.map(\.id)) {
+            // On launch (and whenever a playlist is added/removed) pin a
+            // preferred default if needed, then sync any playlist that is
+            // due per the configured frequency.
+            settleDefaultPlaylistSelection()
+            enqueueDueSyncs(playlists)
+        }
+        .onChange(of: cloudSync?.catalogSyncEpoch ?? 0) {
+            enqueueDueSyncs(playlists)
+        }
+        .onChange(of: selectedPlaylistID) {
+            // On playlist switch, sync the newly selected one if it's due.
+            if let playlist = playlists.active(for: selectedPlaylistID) {
+                enqueueDueSyncs([playlist])
             }
-            .task(id: playlists.map(\.id)) {
-                // On launch (and whenever a playlist is added/removed) pin a
-                // preferred default if needed, then sync any playlist that is
-                // due per the configured frequency.
+        }
+        .onChange(of: scenePhase) { _, phase in
+            // Returning to the foreground re-checks staleness — for a long-lived
+            // app this is the practical equivalent of "on launch".
+            if phase == .active {
                 settleDefaultPlaylistSelection()
                 enqueueDueSyncs(playlists)
             }
-            .onChange(of: selectedPlaylistID) {
-                // On playlist switch, sync the newly selected one if it's due.
-                if let playlist = playlists.active(for: selectedPlaylistID) {
-                    enqueueDueSyncs([playlist])
-                }
+        }
+        .onChange(of: router.selectedTab) { _, _ in
+            // tvOS may defer refresh covers until Settings; promote when the
+            // user navigates so a queued restore sync can still start.
+            promoteNextIfIdle()
+        }
+        .syncCover(item: $activeSyncPlaylist, onDismiss: handleSyncCoverDismissed)
+        .overlay {
+            if playlistSwitch?.isSwitching == true {
+                PlaylistSwitchOverlay(playlistName: playlistSwitch?.targetName ?? "")
+                    .transition(.opacity)
             }
-            .onChange(of: scenePhase) { _, phase in
-                // Returning to the foreground re-checks staleness — for a long-lived
-                // app this is the practical equivalent of "on launch".
-                if phase == .active {
-                    settleDefaultPlaylistSelection()
-                    enqueueDueSyncs(playlists)
-                }
-            }
-            .onChange(of: router.selectedTab) { _, _ in
-                // tvOS may defer refresh covers until Settings; promote when the
-                // user navigates so a queued restore sync can still start.
-                promoteNextIfIdle()
-            }
-            .syncCover(item: $activeSyncPlaylist, onDismiss: handleSyncCoverDismissed)
-            .overlay {
-                if playlistSwitch?.isSwitching == true {
-                    PlaylistSwitchOverlay(playlistName: playlistSwitch?.targetName ?? "")
-                        .transition(.opacity)
-                }
-            }
-            .animation(.easeInOut(duration: 0.2), value: playlistSwitch?.isSwitching)
+        }
+        .animation(.easeInOut(duration: 0.2), value: playlistSwitch?.isSwitching)
     }
 
     #if os(tvOS)
@@ -212,24 +220,24 @@ struct MainTabView: View {
     #endif
 
     /// Mounts the tab's content only when it is the active selection. Inactive
-    /// tabs unmount so their `@Query` subscriptions release memory. On tvOS every
-    /// tab (including Home) unmounts when not selected — Apple TV HD cannot keep
-    /// Home's hero + trending queries resident while the user connects Plex on
-    /// the Media tab. iOS/macOS keep Home mounted for instant tab switches.
+    /// browse tabs unmount so their `@Query` subscriptions release memory. Home
+    /// stays mounted on all platforms (its queries are capped) so switching back
+    /// does not re-run TMDB matching or reload hero artwork. tvOS does not keep
+    /// Media mounted — connecting Plex on Apple TV HD cannot also hold Home.
     @ViewBuilder
     private func lazyTab(_ tab: AppTab, selection: AppTab, @ViewBuilder content: () -> some View) -> some View {
         #if os(tvOS)
-        if selection == tab {
-            content()
-        } else {
-            Color.clear
-        }
+            if selection == tab || tab == .home {
+                content()
+            } else {
+                Color.clear
+            }
         #else
-        if selection == tab || tab == .home || tab == .media {
-            content()
-        } else {
-            Color.clear
-        }
+            if selection == tab || tab == .home || tab == .media {
+                content()
+            } else {
+                Color.clear
+            }
         #endif
     }
 
@@ -298,7 +306,8 @@ struct MainTabView: View {
         guard let preferred = playlists.preferredDefault() else { return }
 
         if selectedPlaylistID.isEmpty
-            || !playlists.contains(where: { $0.id.uuidString == selectedPlaylistID }) {
+            || !playlists.contains(where: { $0.id.uuidString == selectedPlaylistID })
+        {
             selectedPlaylistID = preferred.id.uuidString
             return
         }
@@ -314,27 +323,49 @@ struct MainTabView: View {
     /// presents the first one. Covers the never-synced first launch (where
     /// `lastSyncDate == nil` makes a playlist due) as well as periodic refreshes.
     /// Catalog playlists (Xtream / M3U / Stalker) are queued ahead of Stremio.
+    /// Playlists that just arrived from iCloud after this screen was already
+    /// showing are marked handled without a cover — Sync Now on another device
+    /// must not pop this UI.
     private func enqueueDueSyncs(_ candidates: [Playlist]) {
         guard !isUITesting else { return }
 
-        for playlist in candidates.orderedForAutoSync() where shouldAutoSync(playlist) {
+        let imported = hasCompletedInitialAutoSync ? (cloudSync?.importedPlaylistIDs ?? []) : []
+        let playbackActive = ContentIndexingService.shared.isPlaybackActive
+
+        for playlist in candidates.orderedForAutoSync() {
+            let remoteLease = cloudSync?.hasRemoteCatalogSyncLease(for: playlist.id) == true
+            let suppressCover = imported.contains(playlist.id) || remoteLease
+            let due = AutoSync.shouldSync(
+                syncEnabled: playlist.syncEnabled,
+                status: playlist.syncStatus,
+                lastSyncDate: playlist.lastSyncDate,
+                frequency: syncFrequency,
+                alreadyStarted: autoSyncAttempted.contains(playlist.id),
+                playbackActive: playbackActive,
+                remoteLeaseActive: false
+            )
+            if suppressCover, due {
+                autoSyncAttempted.insert(playlist.id)
+                continue
+            }
+            guard AutoSync.shouldSync(
+                syncEnabled: playlist.syncEnabled,
+                status: playlist.syncStatus,
+                lastSyncDate: playlist.lastSyncDate,
+                frequency: syncFrequency,
+                alreadyStarted: autoSyncAttempted.contains(playlist.id),
+                playbackActive: playbackActive,
+                remoteLeaseActive: remoteLease
+            ) else { continue }
+
             autoSyncAttempted.insert(playlist.id)
             if !syncQueue.contains(where: { $0.id == playlist.id }) {
                 syncQueue.append(playlist)
             }
         }
+        hasCompletedInitialAutoSync = true
         syncQueue = syncQueue.orderedForAutoSync()
         promoteNextIfIdle()
-    }
-
-    private func shouldAutoSync(_ playlist: Playlist) -> Bool {
-        AutoSync.shouldSync(
-            syncEnabled: playlist.syncEnabled,
-            status: playlist.syncStatus,
-            lastSyncDate: playlist.lastSyncDate,
-            frequency: syncFrequency,
-            alreadyStarted: autoSyncAttempted.contains(playlist.id)
-        )
     }
 
     /// Presents the next queued playlist's sync cover when none is showing. The
@@ -343,15 +374,15 @@ struct MainTabView: View {
     private func promoteNextIfIdle() {
         guard activeSyncPlaylist == nil, !syncQueue.isEmpty else { return }
         #if os(tvOS)
-        // Defer periodic *refresh* covers while browsing (don't interrupt Home).
-        // Always present first-time syncs (`lastSyncDate == nil`) so CloudKit-
-        // restored Xtream/M3U catalogs pull immediately after install. Also
-        // present when the user is already in Settings.
-        let next = syncQueue[0]
-        let isFirstTimeSync = next.lastSyncDate == nil
-        if !isFirstTimeSync, router.selectedTab != .settings, scenePhase == .active {
-            return
-        }
+            // Defer periodic *refresh* covers while browsing (don't interrupt Home).
+            // Always present first-time syncs (`lastSyncDate == nil`) so CloudKit-
+            // restored Xtream/M3U catalogs pull immediately after install. Also
+            // present when the user is already in Settings.
+            let next = syncQueue[0]
+            let isFirstTimeSync = next.lastSyncDate == nil
+            if !isFirstTimeSync, router.selectedTab != .settings, scenePhase == .active {
+                return
+            }
         #endif
         activeSyncPlaylist = syncQueue.removeFirst()
     }

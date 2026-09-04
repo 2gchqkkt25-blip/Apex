@@ -282,4 +282,73 @@
         }
     }
 
+    /// Compact pill for subtitle appearance (font size, opacity, offset, position).
+    /// The system tvOS focus highlight is disabled — it draws a large white
+    /// rectangle that doesn't match these small chips.
+    struct TVSettingsChipButtonStyle: ButtonStyle {
+        var isSelected: Bool = false
+
+        func makeBody(configuration: Configuration) -> some View {
+            StyleBody(configuration: configuration, isSelected: isSelected)
+        }
+
+        struct StyleBody: View {
+            let configuration: ButtonStyleConfiguration
+            let isSelected: Bool
+            @Environment(\.isFocused) private var isFocused
+
+            var body: some View {
+                configuration.label
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(isFocused ? .black : .white)
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 12)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(fill)
+                    )
+                    .animation(.easeOut(duration: 0.15), value: isFocused)
+                    .animation(.easeOut(duration: 0.15), value: isSelected)
+            }
+
+            private var fill: AnyShapeStyle {
+                if isFocused { return AnyShapeStyle(Color.white.opacity(0.95)) }
+                if isSelected { return AnyShapeStyle(Color.white.opacity(0.28)) }
+                return AnyShapeStyle(Color.white.opacity(0.08))
+            }
+        }
+    }
+
+    /// Colour swatch that draws its own focus ring instead of the system box.
+    struct TVSettingsColorSwatchStyle: ButtonStyle {
+        var isSelected: Bool = false
+
+        func makeBody(configuration: Configuration) -> some View {
+            StyleBody(configuration: configuration, isSelected: isSelected)
+        }
+
+        struct StyleBody: View {
+            let configuration: ButtonStyleConfiguration
+            let isSelected: Bool
+            @Environment(\.isFocused) private var isFocused
+
+            var body: some View {
+                configuration.label
+                    .overlay(
+                        Circle()
+                            .stroke(ring, lineWidth: isFocused ? 4 : (isSelected ? 3 : 0))
+                            .padding(-4)
+                    )
+                    .scaleEffect(isFocused ? 1.08 : 1)
+                    .animation(.easeOut(duration: 0.15), value: isFocused)
+            }
+
+            private var ring: Color {
+                if isFocused { return .white }
+                if isSelected { return Color.white.opacity(0.85) }
+                return .clear
+            }
+        }
+    }
+
 #endif

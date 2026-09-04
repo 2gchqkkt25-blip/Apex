@@ -304,12 +304,8 @@ final class AVPlayerCoordinator: NSObject, ObservableObject {
 
     func skip(by seconds: Double) {
         let current = player.currentTime().seconds
-        let base = current.isFinite ? current : 0
-        var target = base + seconds
-        if let duration = item?.duration.seconds, duration.isFinite {
-            target = min(target, duration)
-        }
-        seek(to: max(target, 0))
+        let duration = item?.duration.seconds ?? 0
+        seek(to: PlaybackSeek.target(current: current, duration: duration, delta: seconds))
     }
 
     /// Seek to an absolute time (in seconds).

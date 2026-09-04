@@ -14,6 +14,7 @@ struct MediaConnectSheet: View {
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
+    @Environment(CloudSyncCoordinator.self) private var cloudSync: CloudSyncCoordinator?
 
     @State private var serverURL = ""
     @State private var username = ""
@@ -62,6 +63,11 @@ struct MediaConnectSheet: View {
             .onDisappear {
                 plexPollTask?.cancel()
                 MediaConnectGate.isActive = false
+                // Connect writes only the local catalog `MediaServer`. Publish it
+                // to iCloud now — reconcile was blocked while the gate was up, and
+                // tvOS never auto-syncs the library (which would have been the
+                // only other kick).
+                cloudSync?.reconcile(reason: .queued)
             }
             .onAppear {
                 MediaConnectGate.isActive = true

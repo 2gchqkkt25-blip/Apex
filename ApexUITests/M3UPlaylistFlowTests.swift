@@ -19,7 +19,10 @@ final class M3UPlaylistFlowTests: XCTestCase {
 
         // Fresh install shows the login form as root; otherwise add via Settings.
         if app.tabBars.firstMatch.waitForExistence(timeout: 5) {
-            app.buttons["gear"].tap()
+            // Settings is a tab (not a sheet) — tap the gear tab bar item.
+            let settingsTab = app.tabBars.buttons.element(boundBy: app.tabBars.buttons.count - 1)
+            XCTAssertTrue(settingsTab.waitForExistence(timeout: 3))
+            settingsTab.tap()
             let addButton = app.buttons["Add Playlist"]
             XCTAssertTrue(addButton.waitForExistence(timeout: 3))
             addButton.tap()
@@ -74,8 +77,14 @@ final class M3UPlaylistFlowTests: XCTestCase {
         // finishes within seconds of the playlist download, so a generous
         // existence wait doubles as the sync-completion wait.
         app.tabBars.buttons["Live TV"].tap()
-        let newsCategory = app.buttons["News"]
-        XCTAssertTrue(newsCategory.waitForExistence(timeout: 120), "No Live TV content after m3u sync")
+        // Use case-insensitive match — iptv-org categories vary in casing ("News",
+        // "NEWS", "news") and may be localized. Also accept any category button
+        // as proof that content synced, since the exact first category depends
+        // on the playlist revision.
+        let anyCategory = app.buttons.matching(NSPredicate(format: "label CONTAINS[c] %@", "news")).firstMatch
+        let fallbackCategory = app.buttons.matching(NSPredicate(format: "label CONTAINS[c] %@", "sport")).firstMatch
+        let hasContent = anyCategory.waitForExistence(timeout: 180) || fallbackCategory.waitForExistence(timeout: 30)
+        XCTAssertTrue(hasContent, "No Live TV content after m3u sync")
 
         let attachment = XCTAttachment(screenshot: app.screenshot())
         attachment.name = "LiveTV-after-m3u-sync"

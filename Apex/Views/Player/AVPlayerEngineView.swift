@@ -60,6 +60,9 @@ struct AVPlayerEngineView: View {
     /// While an overlay panel (episodes / info) is open the controls must not
     /// auto-hide out from under the viewer.
     @State private var isPanelOpen = false
+    /// Token for `PlaybackSession` so a second player can stop this engine's
+    /// audio before `onDisappear` runs.
+    @State private var playbackSessionToken = 0
     /// Bumped to ask the overlay to close its open panel (Menu/back press).
     @State private var panelCloseToken = 0
     #if os(tvOS)
@@ -96,7 +99,10 @@ struct AVPlayerEngineView: View {
                 .ignoresSafeArea()
 
             AVPlayerVideoContainer(coordinator: coordinator)
-                .ignoresSafeArea()
+                .playerVideoPinnedToTopWhileGuideOpen(
+                    guideOpen: isPanelOpen,
+                    aspectFill: coordinator.isScaleAspectFill
+                )
 
             // Always-present transparent layer that reliably catches taps over
             // the player surface, mirroring the VLCKit/KSPlayer hosts.
@@ -164,12 +170,14 @@ struct AVPlayerEngineView: View {
             #if os(tvOS)
                 seekBridge.onAfterSeek = { Task { @MainActor in catcherFocused = true } }
             #endif
+            claimPlaybackSession()
             scheduleHide()
         }
         .onDisappear {
             hideTask?.cancel()
             hoverHideTask?.cancel()
             seekBridge.reset()
+            releasePlaybackSession()
             coordinator.tearDown()
         }
         .onChange(of: coordinator.isPlaying) { _, _ in
@@ -218,8 +226,8 @@ struct AVPlayerEngineView: View {
                     }
                 }
             }
-            .onKeyPress(.leftArrow) { coordinator.skip(by: -15); resetHideTimer(); return .handled }
-            .onKeyPress(.rightArrow) { coordinator.skip(by: 15); resetHideTimer(); return .handled }
+            .onKeyPress(.leftArrow) { skipWhileWatching(-15); resetHideTimer(); return .handled }
+            .onKeyPress(.rightArrow) { skipWhileWatching(15); resetHideTimer(); return .handled }
             .onKeyPress(.space) { togglePlay(); return .handled }
             .onKeyPress(.escape) { closePlayer(); return .handled }
         #endif
@@ -244,6 +252,10 @@ struct AVPlayerEngineView: View {
                     openChannelBrowser()
                 } else if media.isLive, direction == .up || direction == .down || direction == .right {
                     switchLiveChannel(direction)
+                } else if !media.isLive, direction == .left {
+                    skipWhileWatching(-10)
+                } else if !media.isLive, direction == .right {
+                    skipWhileWatching(10)
                 } else {
                     showControls()
                 }
@@ -295,6 +307,12 @@ struct AVPlayerEngineView: View {
 
     private func togglePlay() {
         coordinator.togglePlay()
+        resetHideTimer()
+    }
+
+    private func skipWhileWatching(_ delta: TimeInterval) {
+        coordinator.skip(by: delta)
+        clock.current = PlaybackSeek.target(current: clock.current, duration: clock.duration, delta: delta)
         resetHideTimer()
     }
 
@@ -419,6 +437,7 @@ struct AVPlayerEngineView: View {
     }
 
     private func closePlayer() {
+        PlaybackSession.stopActive()
         #if os(macOS)
             if let window = NSApp.keyWindow, window.styleMask.contains(.fullScreen) {
                 window.toggleFullScreen(nil)
@@ -427,6 +446,16 @@ struct AVPlayerEngineView: View {
         #else
             dismiss()
         #endif
+    }
+
+    private func claimPlaybackSession() {
+        playbackSessionToken = PlaybackSession.becomeActive { [coordinator] in
+            coordinator.tearDown()
+        }
+    }
+
+    private func releasePlaybackSession() {
+        PlaybackSession.resign(playbackSessionToken)
     }
 
     /// The coordinator reported it can't start the stream. On an initial-load

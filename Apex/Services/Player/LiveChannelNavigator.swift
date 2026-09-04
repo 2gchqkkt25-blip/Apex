@@ -55,17 +55,21 @@ enum LiveChannelNavigator {
     }
 
     /// Channels available for the in-player Guide panel. Same scope/sort as
-    /// `adjacentMedia`, but capped and centred on the playing channel so the
-    /// overlay stays viewport-sized.
+    /// `adjacentMedia`. Pass `limit` to window around the playing channel;
+    /// `nil` returns the full surf list so the overlay can scroll every row.
     static func surfChannels(
         for media: PlayableMedia,
         sort: ContentSortOption,
         scope: LiveChannelScope? = nil,
-        limit: Int = 40,
+        limit: Int? = nil,
         in context: ModelContext
     ) -> [LiveStream] {
-        guard case let .live(id) = media.contentRef else { return [] }
+        guard case .live = media.contentRef else { return [] }
         let streams = fetchSurfChannels(for: media, sort: sort, scope: scope, in: context)
+        guard let limit, limit > 0, streams.count > limit else { return streams }
+        guard case let .live(id) = media.contentRef else {
+            return Array(streams.prefix(limit))
+        }
         guard let index = streams.firstIndex(where: { $0.id == id }) else {
             return Array(streams.prefix(limit))
         }
@@ -76,7 +80,7 @@ enum LiveChannelNavigator {
     }
 
     /// Full surf list for the active scope (uncapped beyond fetch limits). Used
-    /// by channel up/down; the Guide windows this further via `surfChannels`.
+    /// by channel up/down. The in-player Guide uses this list as well.
     private static func fetchSurfChannels(
         for media: PlayableMedia,
         sort: ContentSortOption,

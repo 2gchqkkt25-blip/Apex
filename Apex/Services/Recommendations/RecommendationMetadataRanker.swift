@@ -62,7 +62,7 @@ nonisolated enum RecommendationMetadataRanker {
             sortBy: [SortDescriptor(\.lastWatchedDate, order: .reverse)]
         )
         movies.fetchLimit = signalLimit
-        for movie in (try? context.fetch(movies)) ?? [] {
+        for movie in SafeFetch.fetch(movies, context: context) {
             let weight = (movie.isFavorite || movie.recommendationVoteRaw == upvote) ? favoriteWeight : watchedWeight
             absorb(genres: normalizedGenres(movie.genre), weight: weight, into: &genreWeights)
             if let tmdbId = movie.tmdbId {
@@ -82,7 +82,7 @@ nonisolated enum RecommendationMetadataRanker {
             sortBy: [SortDescriptor(\.lastWatchedDate, order: .reverse)]
         )
         series.fetchLimit = signalLimit
-        for show in (try? context.fetch(series)) ?? [] {
+        for show in SafeFetch.fetch(series, context: context) {
             let weight = (show.isFavorite || show.recommendationVoteRaw == upvote) ? favoriteWeight : watchedWeight
             absorb(genres: normalizedGenres(show.genre), weight: weight, into: &genreWeights)
             if let tmdbId = show.tmdbId {
@@ -98,13 +98,13 @@ nonisolated enum RecommendationMetadataRanker {
         let downMovies = FetchDescriptor<Movie>(
             predicate: #Predicate { $0.recommendationVoteRaw == downvote }
         )
-        for movie in (try? context.fetch(downMovies)) ?? [] {
+        for movie in SafeFetch.fetch(downMovies, context: context) {
             absorb(genres: normalizedGenres(movie.genre), weight: 1, into: &dislikedGenreWeights)
         }
         let downSeries = FetchDescriptor<Series>(
             predicate: #Predicate { $0.recommendationVoteRaw == downvote }
         )
-        for show in (try? context.fetch(downSeries)) ?? [] {
+        for show in SafeFetch.fetch(downSeries, context: context) {
             absorb(genres: normalizedGenres(show.genre), weight: 1, into: &dislikedGenreWeights)
         }
 

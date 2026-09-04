@@ -72,6 +72,13 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
+				Services/MediaServer/.smbdeleteAAA181384.4,
+				Services/Recommendations/.smbdeleteAAA181384.4,
+				Services/Recommendations/.smbdeleteBAA181384.4,
+				Services/Sync/.smbdeleteAAA766b4.4,
+				Views/Components/.smbdeleteAAA766b4.4,
+				Views/Home/.smbdeleteAAA181384.4,
+				Views/Home/.smbdeleteBAA181384.4,
 			);
 			target = C67C02BF2F880F2200842DBA /* Apex */;
 		};
@@ -465,7 +472,7 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = TopShelfExtension/TopShelfExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 52;
+				CURRENT_PROJECT_VERSION = 55;
 				DEVELOPMENT_TEAM = VS7D6GB238;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -498,7 +505,7 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = TopShelfExtension/TopShelfExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 52;
+				CURRENT_PROJECT_VERSION = 55;
 				DEVELOPMENT_TEAM = VS7D6GB238;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -531,7 +538,7 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = TopShelfExtension/TopShelfExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 52;
+				CURRENT_PROJECT_VERSION = 55;
 				DEVELOPMENT_TEAM = VS7D6GB238;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -567,12 +574,13 @@
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
 				CODE_SIGN_ENTITLEMENTS = Apex/Apex.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 52;
+				CURRENT_PROJECT_VERSION = 55;
 				DEVELOPMENT_TEAM = VS7D6GB238;
 				ENABLE_APP_SANDBOX = YES;
 				"ENABLE_APP_SANDBOX[sdk=macosx*]" = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
+				EXCLUDED_SOURCE_FILE_NAMES = "*.smbdelete*";
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Apex/Info.plist;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.entertainment";
@@ -616,12 +624,13 @@
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
 				CODE_SIGN_ENTITLEMENTS = "Apex/Apex-Release.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 52;
+				CURRENT_PROJECT_VERSION = 55;
 				DEVELOPMENT_TEAM = VS7D6GB238;
 				ENABLE_APP_SANDBOX = YES;
 				"ENABLE_APP_SANDBOX[sdk=macosx*]" = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
+				EXCLUDED_SOURCE_FILE_NAMES = "*.smbdelete*";
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Apex/Info.plist;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.entertainment";
@@ -935,12 +944,13 @@
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
 				CODE_SIGN_ENTITLEMENTS = "Apex/Apex-Release.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 52;
+				CURRENT_PROJECT_VERSION = 55;
 				DEVELOPMENT_TEAM = VS7D6GB238;
 				ENABLE_APP_SANDBOX = YES;
 				"ENABLE_APP_SANDBOX[sdk=macosx*]" = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
+				EXCLUDED_SOURCE_FILE_NAMES = "*.smbdelete*";
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Apex/Info.plist;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.entertainment";

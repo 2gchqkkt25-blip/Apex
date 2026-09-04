@@ -143,7 +143,7 @@ actor RecommendationEngine {
             sortBy: [SortDescriptor(\.lastWatchedDate, order: .reverse)]
         )
         movies.fetchLimit = signalLimit
-        for movie in (try? context.fetch(movies)) ?? [] {
+        for movie in SafeFetch.fetch(movies, context: context) {
             guard let vector = movie.embeddingData.map(TextEmbedder.decode) else { continue }
             let weight = (movie.isFavorite || movie.recommendationVoteRaw == upvote) ? favoriteWeight : watchedWeight
             signals.append(.init(vector: vector, weight: weight))
@@ -157,7 +157,7 @@ actor RecommendationEngine {
             sortBy: [SortDescriptor(\.lastWatchedDate, order: .reverse)]
         )
         series.fetchLimit = signalLimit
-        for show in (try? context.fetch(series)) ?? [] {
+        for show in SafeFetch.fetch(series, context: context) {
             guard let vector = show.embeddingData.map(TextEmbedder.decode) else { continue }
             let weight = (show.isFavorite || show.recommendationVoteRaw == upvote) ? favoriteWeight : watchedWeight
             signals.append(.init(vector: vector, weight: weight))
@@ -176,7 +176,7 @@ actor RecommendationEngine {
         let movies = FetchDescriptor<Movie>(
             predicate: #Predicate { $0.embeddingData != nil && $0.recommendationVoteRaw == downvote }
         )
-        for movie in (try? context.fetch(movies)) ?? [] {
+        for movie in SafeFetch.fetch(movies, context: context) {
             if let vector = movie.embeddingData.map(TextEmbedder.decode) {
                 signals.append(.init(vector: vector, weight: 1))
             }
@@ -185,7 +185,7 @@ actor RecommendationEngine {
         let series = FetchDescriptor<Series>(
             predicate: #Predicate { $0.embeddingData != nil && $0.recommendationVoteRaw == downvote }
         )
-        for show in (try? context.fetch(series)) ?? [] {
+        for show in SafeFetch.fetch(series, context: context) {
             if let vector = show.embeddingData.map(TextEmbedder.decode) {
                 signals.append(.init(vector: vector, weight: 1))
             }

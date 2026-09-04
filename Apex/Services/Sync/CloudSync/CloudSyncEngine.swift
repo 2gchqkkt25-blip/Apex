@@ -8,6 +8,10 @@ nonisolated struct CloudSyncReconcileResult: Equatable {
     var playlistsPushed = 0
     var playlistsPulled = 0
     var playlistsCreatedLocally = 0
+    /// Playlist UUIDs materialised from iCloud on this pass. The auto-sync cover
+    /// uses these so a Sync Now on one device does not pop the progress UI on
+    /// the others.
+    var importedPlaylistIDs: Set<UUID> = []
     var contentPushed = 0
     var contentPulled = 0
     var epgSourcesPushed = 0
@@ -222,48 +226,6 @@ actor CloudSyncEngine {
         if cloudContext.hasChanges { try cloudContext.save() }
     }
 
-    // MARK: - Playlists
-
-    /// Returns the set of "live" playlist UUID strings (present locally or in the
-    /// cloud after this pass) so the content pass can garbage-collect state whose
-    /// playlist is gone.
-    private func reconcilePlaylists(into result: inout CloudSyncReconcileResult) throws -> Set<String> {
-        let localByID = try fetchLocalPlaylists()
-        let mirrorsByID = try fetchPlaylistMirrors()
-
-        var ids = Set(localByID.keys).union(mirrorsByID.keys)
-        ids.formUnion(shadow.playlistShadowIDs().compactMap(UUID.init(uuidString:)))
-
-        var live = Set<String>()
-        for id in ids {
-            let key = id.uuidString
-            var verdict = CloudSyncMerge.reconcile(
-                local: localByID[id].map(Self.values(from:)),
-                cloud: mirrorsByID[id].map(Self.values(from:)),
-                shadow: shadow.playlistShadow(key),
-                mergeConflict: PlaylistConfigValues.mergeConflict
-            )
-            // `pullToLocal(nil)` means "the cloud mirror is gone, so delete locally".
-            // That is only safe when *this device* already deleted the playlist
-            // (`pushToCloud(nil)`). A missing mirror while the playlist is still
-            // here is how a slow/partial CloudKit import looks — and applying it
-            // wipes the catalog (`PlaylistDeletion.delete`). Keep iCloud on:
-            // refuse the wipe and re-publish the local playlist instead. A real
-            // delete on another device then reappears here until the user
-            // removes it on this device too — cheaper than losing the library.
-            if case .pullToLocal(.none) = verdict, let local = localByID[id] {
-                Logger.sync.error("Refusing iCloud playlist deletion for \(key, privacy: .public) — local playlist still present; re-publishing instead of wiping the catalog")
-                verdict = .pushToCloud(Self.values(from: local))
-            }
-            applyPlaylistVerdict(verdict, id: id, local: localByID[id], mirror: mirrorsByID[id], into: &result)
-
-            if Self.playlistRemains(verdict: verdict, hadLocal: localByID[id] != nil, hadCloud: mirrorsByID[id] != nil) {
-                live.insert(key)
-            }
-        }
-        return live
-    }
-
     // MARK: - Content state
 
     private func reconcileContent(livePrefixes: Set<String>, into result: inout CloudSyncReconcileResult) throws {
@@ -336,6 +298,7 @@ actor CloudSyncEngine {
                 existing.isWatched = existing.isWatched || mirror.isWatched
                 existing.lastWatchedDate = laterDate(existing.lastWatchedDate, mirror.lastWatchedDate)
                 existing.isFavorite = existing.isFavorite || mirror.isFavorite
+                existing.isHidden = existing.isHidden || mirror.isHidden
                 if existing.addedToWatchlistDate == nil {
                     existing.addedToWatchlistDate = mirror.addedToWatchlistDate
                 }
@@ -361,6 +324,8 @@ actor CloudSyncEngine {
         case let series as Series: series.id
         case let episode as Episode: episode.id
         case let stream as LiveStream: stream.id
+        case let category as Category:
+            ContentIdentity.categoryCloudId(forCategoryId: category.id) ?? category.id
         default: ""
         }
     }
@@ -424,6 +389,17 @@ actor CloudSyncEngine {
                 properties: [\.id],
                 stableKey: stableKey
             )
+        case .category:
+            guard let localKey = ContentIdentity.categoryLocalStableKey(fromCloudStableKey: stableKey) else {
+                return nil
+            }
+            let localNeedle = "-\(localKey)"
+            return firstCatalogMatch(
+                FetchDescriptor<Category>(predicate: #Predicate { $0.id.contains(localNeedle) }),
+                id: \.id,
+                properties: [\.id],
+                stableKey: localKey
+            )
         }
     }
 
@@ -476,33 +452,6 @@ actor CloudSyncEngine {
 // MARK: - Verdict application
 
 private extension CloudSyncEngine {
-    func applyPlaylistVerdict(
-        _ verdict: MergeVerdict<PlaylistConfigValues>,
-        id: UUID,
-        local: Playlist?,
-        mirror: SyncedPlaylist?,
-        into result: inout CloudSyncReconcileResult
-    ) {
-        let key = id.uuidString
-        switch verdict {
-        case .noChange:
-            break
-        case let .pushToCloud(value):
-            applyPlaylistToCloud(value, id: id, mirror: mirror)
-            if value != nil { result.playlistsPushed += 1 }
-            shadow.setPlaylistShadow(key, value)
-        case let .pullToLocal(value):
-            if applyPlaylistToLocal(value, id: id, local: local) { result.playlistsCreatedLocally += 1 }
-            if value != nil { result.playlistsPulled += 1 }
-            shadow.setPlaylistShadow(key, value)
-        case let .writeBoth(value):
-            applyPlaylistToCloud(value, id: id, mirror: mirror)
-            if applyPlaylistToLocal(value, id: id, local: local) { result.playlistsCreatedLocally += 1 }
-            result.playlistsPushed += 1
-            shadow.setPlaylistShadow(key, value)
-        }
-    }
-
     func applyEPGSourceVerdict(
         _ verdict: MergeVerdict<EPGSourceValues>,
         id: UUID,
@@ -565,70 +514,9 @@ private extension CloudSyncEngine {
     }
 }
 
-// MARK: - Playlist mutations
+// MARK: - EPG source mutations
 
 private extension CloudSyncEngine {
-    func applyPlaylistToCloud(_ value: PlaylistConfigValues?, id: UUID, mirror: SyncedPlaylist?) {
-        guard let value else {
-            if let mirror { cloudContext.delete(mirror) }
-            return
-        }
-        if let mirror {
-            mirror.name = value.name
-            mirror.serverURL = value.serverURL
-            mirror.username = value.username
-            mirror.password = value.password
-            mirror.macAddress = value.macAddress
-            mirror.sourceTypeRaw = value.sourceTypeRaw
-            mirror.epgURL = value.epgURL
-            mirror.syncEnabled = value.syncEnabled
-            mirror.updatedAt = Date()
-        } else {
-            cloudContext.insert(SyncedPlaylist(
-                id: id,
-                name: value.name,
-                serverURL: value.serverURL,
-                username: value.username,
-                password: value.password,
-                macAddress: value.macAddress,
-                sourceTypeRaw: value.sourceTypeRaw,
-                epgURL: value.epgURL,
-                syncEnabled: value.syncEnabled
-            ))
-        }
-    }
-
-    /// Returns true if a new local `Playlist` was created (it has no
-    /// `lastSyncDate`, so the UI's auto-sync will fetch its catalog).
-    func applyPlaylistToLocal(_ value: PlaylistConfigValues?, id: UUID, local: Playlist?) -> Bool {
-        guard let value else {
-            // Only reached when *this device* already removed the playlist
-            // (`pushToCloud(nil)` is the sibling-device path). A still-present
-            // local playlist is converted to a re-publish before we get here.
-            if let local { PlaylistDeletion.delete(local, in: catalogContext) }
-            return false
-        }
-        if let local {
-            local.name = value.name
-            local.serverURL = value.serverURL
-            local.username = value.username
-            local.password = value.password
-            local.macAddress = value.macAddress.isEmpty ? nil : value.macAddress
-            local.sourceTypeRaw = value.sourceTypeRaw
-            local.epgURL = value.epgURL
-            local.syncEnabled = value.syncEnabled
-            return false
-        }
-        let playlist = Playlist(name: value.name, serverURL: value.serverURL, username: value.username, password: value.password)
-        playlist.id = id
-        playlist.macAddress = value.macAddress.isEmpty ? nil : value.macAddress
-        playlist.sourceTypeRaw = value.sourceTypeRaw
-        playlist.epgURL = value.epgURL
-        playlist.syncEnabled = value.syncEnabled
-        catalogContext.insert(playlist)
-        return true
-    }
-
     func applyEPGSourceToCloud(_ value: EPGSourceValues?, id: UUID, mirror: SyncedEPGSource?) {
         guard let value else {
             if let mirror { cloudContext.delete(mirror) }
@@ -660,14 +548,6 @@ private extension CloudSyncEngine {
             catalogContext.insert(source)
         }
     }
-
-    static func playlistRemains(verdict: MergeVerdict<PlaylistConfigValues>, hadLocal: Bool, hadCloud: Bool) -> Bool {
-        switch verdict {
-        case .noChange: hadLocal || hadCloud
-        case let .pushToCloud(value), let .pullToLocal(value): value != nil
-        case .writeBoth: true
-        }
-    }
 }
 
 // MARK: - Content mutations
@@ -681,6 +561,7 @@ extension CloudSyncEngine {
         case is Series: .series
         case is Episode: .episode
         case is LiveStream: .live
+        case is Category: .category
         default: nil
         }
     }
@@ -700,6 +581,7 @@ extension CloudSyncEngine {
             mirror.isFavorite = value.isFavorite
             mirror.addedToWatchlistDate = value.addedToWatchlistDate
             mirror.favoriteOrder = value.favoriteOrder
+            mirror.isHidden = value.isHidden
             mirror.recommendationVoteRaw = value.recommendationVoteRaw
             mirror.updatedAt = Date()
         } else {
@@ -713,6 +595,7 @@ extension CloudSyncEngine {
                 isFavorite: value.isFavorite,
                 addedToWatchlistDate: value.addedToWatchlistDate,
                 favoriteOrder: value.favoriteOrder,
+                isHidden: value.isHidden,
                 recommendationVoteRaw: value.recommendationVoteRaw
             ))
         }
@@ -723,7 +606,7 @@ extension CloudSyncEngine {
     /// device yet, so the change stays pending for a later pass.
     func applyContentToLocal(_ value: ContentStateValues?, id: String, kind: SyncedContentKind?, loaded: (any PersistentModel)?) throws -> Bool {
         guard let kind else { return true } // nothing to apply (shadow-only id)
-        let values = value ?? ContentStateValues(watchProgress: 0, isWatched: false, lastWatchedDate: nil, isFavorite: false, addedToWatchlistDate: nil, favoriteOrder: nil)
+        let values = value ?? ContentStateValues(watchProgress: 0, isWatched: false, lastWatchedDate: nil, isFavorite: false, addedToWatchlistDate: nil, favoriteOrder: nil, isHidden: false)
 
         switch kind {
         case .movie:
@@ -750,6 +633,11 @@ extension CloudSyncEngine {
             stream.isFavorite = values.isFavorite
             stream.favoriteOrder = values.favoriteOrder
             stream.lastWatchedDate = values.lastWatchedDate
+            stream.isHidden = values.isHidden
+        case .category:
+            let localId = ContentIdentity.categoryId(fromCloudContentId: id) ?? id
+            guard let category = try (loaded as? Category) ?? fetchCategory(localId) else { return false }
+            category.isHidden = values.isHidden
         }
         return true
     }
@@ -777,6 +665,9 @@ extension CloudSyncEngine {
         case let stream as LiveStream:
             stream.isFavorite = false
             stream.favoriteOrder = nil
+            stream.isHidden = false
+        case let category as Category:
+            category.isHidden = false
         default:
             break
         }

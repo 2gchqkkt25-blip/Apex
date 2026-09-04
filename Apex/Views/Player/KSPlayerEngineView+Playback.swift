@@ -88,6 +88,12 @@ extension KSPlayerEngineView {
         cancelStartupWatchdog()
     }
 
+    func skipWhileWatching(_ delta: TimeInterval) {
+        let target = PlaybackSeek.target(current: clock.current, duration: clock.duration, delta: delta)
+        coordinator.seek(time: target)
+        clock.current = target
+    }
+
     // MARK: - Reconnect
 
     /// React to a KSPlayer state change for reconnect purposes. A mid-stream

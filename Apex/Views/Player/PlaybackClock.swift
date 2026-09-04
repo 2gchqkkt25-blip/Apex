@@ -43,3 +43,17 @@ final class PlayerSeekBridge {
         onAfterSeek = nil
     }
 }
+
+/// Absolute seek target for skip / rewind. IPTV VOD often reports `duration == 0`
+/// (or NaN) until the container is parsed — clamping to that value made
+/// fast-forward a no-op.
+nonisolated enum PlaybackSeek {
+    static func target(current: TimeInterval, duration: TimeInterval, delta: TimeInterval) -> TimeInterval {
+        let base = current.isFinite ? max(current, 0) : 0
+        var destination = base + delta
+        if duration.isFinite, duration > 1 {
+            destination = min(destination, duration)
+        }
+        return max(destination, 0)
+    }
+}

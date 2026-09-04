@@ -18,6 +18,25 @@ enum SubtitleSettings {
     static let enabledKey = "opensubtitles.enabled"
     static let languageKey = "opensubtitles.language"
 
+    /// External (Wyzie) fetch is on unless the user has turned it off.
+    /// `UserDefaults.bool(forKey:)` treats a missing key as `false`, which left
+    /// subtitles off until Settings was toggled.
+    static let enabledDefault = true
+
+    static func isEnabled(in defaults: UserDefaults = .standard) -> Bool {
+        if defaults.object(forKey: enabledKey) == nil {
+            return enabledDefault
+        }
+        return defaults.bool(forKey: enabledKey)
+    }
+
+    /// Persist the on-by-default value when neither this device nor iCloud has
+    /// an explicit choice, so later `bool(forKey:)` reads stay consistent.
+    static func applyEnabledDefaultIfNeeded(in defaults: UserDefaults = .standard) {
+        guard enabledDefault, defaults.object(forKey: enabledKey) == nil else { return }
+        defaults.set(true, forKey: enabledKey)
+    }
+
     /// Wyzie Subs (primary)
     static let wyzieApiKeyKey = "subtitles.wyzie.apiKey"
 
@@ -215,6 +234,7 @@ enum OpenSubtitlesSettings {
         if store.object(forKey: enabledKey) != nil {
             defaults.set(store.bool(forKey: enabledKey), forKey: enabledKey)
         }
+        SubtitleSettings.applyEnabledDefaultIfNeeded(in: defaults)
     }
 
     /// Supported subtitle languages (ISO 639-1 codes shared by both providers).

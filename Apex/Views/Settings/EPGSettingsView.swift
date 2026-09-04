@@ -18,6 +18,7 @@ struct EPGSettingsView: View {
     @AppStorage(SyncFrequency.epgStorageKey) private var freqRaw = SyncFrequency.epgDefaultValue.rawValue
     @AppStorage(LiveTVLayoutMode.storageKey) private var defaultViewRaw = LiveTVLayoutMode.list.rawValue
     @AppStorage(LiveTVPreviewSettings.enabledKey) private var previewEnabled = LiveTVPreviewSettings.enabledDefault
+    @AppStorage(LiveTVSectionSettings.showAllChannelsKey) private var showAllChannels = LiveTVSectionSettings.showAllChannelsDefault
 
     @State private var showingAdd = false
     #if os(tvOS)
@@ -114,10 +115,11 @@ struct EPGSettingsView: View {
                 .pickerStyle(.menu)
 
                 Toggle("Channel Preview", isOn: $previewEnabled)
+                Toggle("Show All Channels", isOn: $showAllChannels)
             } header: {
                 Text("Live TV")
             } footer: {
-                Text("Default view chooses list or guide. Channel Preview plays a corner window when you pick a channel on Wi‑Fi so you can keep browsing; turn it off to open fullscreen immediately.")
+                Text("Default view chooses list or guide. Channel Preview plays a corner window when you pick a channel on Wi‑Fi so you can keep browsing; turn it off to open fullscreen immediately. Hide All Channels to let Favorites lead the rail.")
             }
         }
 
@@ -350,6 +352,29 @@ struct EPGSettingsView: View {
                 .buttonStyle(TVSettingsRowButtonStyle())
 
                 Text("When on, picking a channel on Wi‑Fi opens a corner preview so you can keep browsing. When off, channels open fullscreen immediately.")
+                    .font(.system(size: 20))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, TVSettingsMetrics.rowHPadding)
+                    .padding(.top, 6)
+
+                TVSettingsSectionLabel("All Channels Section")
+                    .padding(.top, 16)
+
+                Button {
+                    showAllChannels.toggle()
+                } label: {
+                    HStack(spacing: 16) {
+                        Image(systemName: "rectangle.stack")
+                            .font(.system(size: 22))
+                        Text("Show All Channels")
+                        Spacer(minLength: 0)
+                        Text(showAllChannels ? "On" : "Off")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .buttonStyle(TVSettingsRowButtonStyle())
+
+                Text("Hide the All Channels section so Favorites leads the Live TV rail.")
                     .font(.system(size: 20))
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, TVSettingsMetrics.rowHPadding)

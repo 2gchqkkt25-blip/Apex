@@ -39,14 +39,13 @@ import SwiftUI
             ZStack {
                 scrim
 
-                VStack(spacing: 0) {
-                    topBar
-                    Spacer(minLength: 0)
-                    if !isGuideOpen {
-                        centerTransport
-                        Spacer(minLength: 0)
-                    }
-                    if isGuideOpen, media.isLive {
+                PlayerPortraitGuideChrome(
+                    isGuideOpen: isGuideOpen,
+                    isLive: media.isLive,
+                    aspectFill: coordinator.isScaleAspectFill,
+                    topBar: { topBar },
+                    centerTransport: { centerTransport },
+                    guide: {
                         PlayerEPGGuidePanel(
                             media: media,
                             onSelect: { newMedia in
@@ -55,12 +54,9 @@ import SwiftUI
                             },
                             onClose: closeGuide
                         )
-                        .padding(.horizontal, 16)
-                        .padding(.bottom, 12)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                    }
-                    bottomControls
-                }
+                    },
+                    bottomControls: { bottomControls }
+                )
             }
             .animation(.easeInOut(duration: 0.22), value: isGuideOpen)
             .task(id: media.id) {
@@ -128,8 +124,7 @@ import SwiftUI
             HStack(spacing: 32) {
                 if !media.isLive {
                     Button {
-                        coordinator.skip(by: -15)
-                        onResetHideTimer()
+                        skipPlayback(by: -15)
                     } label: {
                         circleGlyph("gobackward.15", size: 22, diameter: 60)
                     }
@@ -158,8 +153,7 @@ import SwiftUI
 
                 if !media.isLive {
                     Button {
-                        coordinator.skip(by: 15)
-                        onResetHideTimer()
+                        skipPlayback(by: 15)
                     } label: {
                         circleGlyph("goforward.15", size: 22, diameter: 60)
                     }
@@ -176,6 +170,13 @@ import SwiftUI
                     .accessibilityLabel("Next channel")
                 }
             }
+        }
+
+        private func skipPlayback(by delta: TimeInterval) {
+            let target = PlaybackSeek.target(current: currentTime, duration: duration, delta: delta)
+            coordinator.seek(to: target)
+            currentTime = target
+            onResetHideTimer()
         }
 
         // MARK: - Bottom Controls

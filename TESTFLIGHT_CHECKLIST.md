@@ -1,6 +1,71 @@
-# TestFlight Checklist — Build 52
+# TestFlight Checklist — Build 55
 
-## August 31 Media Server and iOS Navigation Regression
+## What to Test (paste in App Store Connect → TestFlight → What to Test)
+
+```
+Build 55 (1.2.0)
+
+Apex is an IPTV player—users add their own Xtream or M3U playlist. No content is bundled.
+
+Apple TV: In-player Guide stays a compact overlay. Scroll the full channel list with the Siri Remote. The focus highlight should sit on the programme, not a giant white box, and scrolling should be smooth (not jumpy). OpenSubtitles chips should use a tight highlight. After Stop, posters should not keep spinning.
+
+iPhone: Open the in-player Guide in portrait — picture stays on top, Guide fills below (no black band above the video).
+
+Playback: Start a movie right after a series (or the reverse) — only one soundtrack. Skip/rewind still works on VOD. Adding a second playlist while the first is syncing should not spin forever; Cancel still works.
+
+iCloud: Hide a Live TV category or channel on one device, leave the app for a few seconds, then check the other device (same profile). Favorites, progress, and playlists still sync. Sync Now should not hang on the TV Guide download.
+
+Add a playlist, wait for sync, browse Live TV / Movies / Series, and play a stream. Test Media (Plex/Jellyfin/Emby) if you use it.
+
+Contact: support@streaminfinitytv.com
+```
+
+**Before archive:** CloudKit Console → container `iCloud.com.streaminfinity.apex` → Schema → **Deploy Schema Changes…** Development → Production (`CD_UserContentState.isHidden`).
+
+## September 4 — in-player Guide, playback, hidden iCloud (Build 55)
+
+- [ ] CloudKit Console: deploy Development → Production so `CD_UserContentState` has `isHidden` (hide-sync). Build 53 playlist tombstone / catalog-sync lease fields should already be in Production
+- [ ] tvOS live TV: open in-player Guide — overlay is compact (not full screen); Down/Up scroll the full category; focus is a tight highlight on the programme; scrolling is smooth
+- [ ] tvOS: switch channel from the Guide; live playback starts without a long hitch
+- [ ] tvOS: Settings → Subtitles → OpenSubtitles chips — focus is not a huge white rectangle
+- [ ] tvOS: play something, Stop, return to Home/Movies — posters are not stuck spinning
+- [ ] iPhone portrait live TV: open Guide — 16:9 picture at the top, Guide underneath, no black band above
+- [ ] Play a series, close it, immediately play a movie — only the movie’s audio
+- [ ] Add a second playlist while the first is still syncing — spinner does not hang forever; Cancel works; timeout ~20s if the provider never answers
+- [ ] Hide a Live TV category on iPhone, go to Home for a few seconds, open the same profile on Apple TV — category is hidden (and the reverse)
+- [ ] Hide a single channel; it stays hidden on the other device after iCloud flush
+- [ ] Un-hide on one device; it returns on the other
+- [ ] Sync Now completes without waiting on the full XMLTV TV Guide download
+- [ ] Live TV channel up/down surfs the full category, not a short window of ~40
+
+## September 3 catalog, episodes, subtitles, skip (Build 54)
+
+- [ ] Sync Now on a playlist whose provider added a new episode — the episode appears after Sync Now without opening the show first (Recently Added / Show All / search, not only the 20-poster row)
+- [ ] Opening any series refreshes its episode list from the provider
+- [ ] After Sync Now, Recently Added on Movies/Series shows titles from **this** playlist only
+- [ ] Recently Watched does **not** list titles you never played (open-and-back or Sync Now is not enough)
+- [ ] Play a movie/episode, skip forward and back — playhead moves (IPTV files with unknown duration included)
+- [ ] tvOS: with player controls hidden, Siri Remote left/right skips 10 seconds on VOD
+- [ ] Settings → Subtitles is **On** after launch if you had never toggled it; captions appear when a Wyzie key is set
+- [ ] Settings → Automatic Sync defaults to **Daily** on a fresh install (existing 3-day choice stays if already set)
+
+## September 1 tvOS Home, Navigation, and iCloud Sync (Build 53)
+
+- [ ] CloudKit Console: deploy Development → Production so `CD_SyncedPlaylist` has `deletedAt`, `catalogSyncDeviceID`, `catalogSyncHeartbeatAt` (and `CD_SyncedMediaServer.deletedAt` if it is not already in Production)
+- [ ] tvOS: open Home, wait until hero + trending settle, switch to Movies, come back — Home is still populated (no full reload)
+- [ ] tvOS: Trending Movies and Trending Series show about **20** titles, matching iPhone/Mac (not 6)
+- [ ] tvOS: first launch shows the hero without waiting for the whole playlist sync; trending fills in afterwards
+- [ ] tvOS: Movies tab — open a title, Play works (not disabled, no “No episodes available” on IPTV movies)
+- [ ] tvOS: Series tab — open a series, episodes list, play an episode
+- [ ] tvOS: Settings → Media Servers stays in-pane (focus does not jump; pane does not go blank)
+- [ ] Delete a playlist on one device; after iCloud reconcile the same playlist is gone on the other (if it was already deleted on Build 52, delete it once more on this build)
+- [ ] Sync Now on iPhone — Apple TV does **not** show the full-screen sync cover; iPhone still does
+- [ ] Fresh Apple TV with no local catalog still auto-syncs playlists on first launch
+- [ ] Sync Now on a playlist whose provider catalog changed — Movies/Series/Live TV pick up new titles and drop removed ones
+- [ ] IPTV (Xtream/M3U) movie and series Play still works on iOS and macOS
+- [ ] Delete a Plex/Jellyfin/Emby server; after relaunch + iCloud it stays gone
+
+## Build 52 Media Server and iOS Navigation Regression
 
 - [ ] iPhone tab bar shows exactly **Home, Movies, Series, Live TV, Media**; there is no automatic More tab
 - [ ] iPhone Home magnifying-glass button opens Search and the sheet dismisses normally

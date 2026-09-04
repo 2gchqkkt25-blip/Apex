@@ -142,6 +142,7 @@ extension ContentSyncManager {
         pruneStaleSeries(playlistId: playlistId, seenIds: seenSeriesIDs)
         pruneStaleLiveStreams(playlistId: playlistId, seenIds: seenChannelIDs)
         await progress?.complete(.playlistImport)
+        enqueueEpisodeRefresh(playlistId: playlistId)
     }
 
     // MARK: - Import helpers

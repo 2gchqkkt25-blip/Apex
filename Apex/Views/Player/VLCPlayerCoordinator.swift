@@ -537,11 +537,8 @@ final class VLCPlayerCoordinator: NSObject, ObservableObject {
     }
 
     func skip(by seconds: Double) {
-        if seconds < 0 {
-            mediaPlayer.jumpBackward(-seconds)
-        } else {
-            mediaPlayer.jumpForward(seconds)
-        }
+        let duration = Double(mediaPlayer.media?.length.value?.int64Value ?? 0) / 1000
+        seek(to: PlaybackSeek.target(current: lastKnownTime, duration: duration, delta: seconds))
     }
 
     /// Seek to an absolute time (in seconds).

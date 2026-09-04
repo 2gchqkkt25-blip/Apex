@@ -190,9 +190,10 @@ struct MediaSeriesDetailView: View {
     }
 
     private func loadEpisodesIfNeeded() async {
-        guard episodes.isEmpty, let server else { return }
-        isLoadingEpisodes = true
-        defer { isLoadingEpisodes = false }
+        guard let server else { return }
+        let showSpinner = episodes.isEmpty
+        if showSpinner { isLoadingEpisodes = true }
+        defer { if showSpinner { isLoadingEpisodes = false } }
         do {
             try await MediaServerSyncService.shared.loadEpisodes(
                 for: series,

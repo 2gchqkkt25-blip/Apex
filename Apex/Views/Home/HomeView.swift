@@ -105,7 +105,7 @@ struct HomeView: View {
     init() {
         // Recently watched: non-nil lastWatchedDate, newest first.
         var movies = FetchDescriptor<Movie>(
-            predicate: #Predicate { $0.lastWatchedDate != nil },
+            predicate: #Predicate { $0.lastWatchedDate != nil && ($0.isWatched || $0.watchProgress >= 5) },
             sortBy: [SortDescriptor(\.lastWatchedDate, order: .reverse)]
         )
         movies.fetchLimit = 20
@@ -269,14 +269,14 @@ struct HomeView: View {
                 }
                 .task(id: watchlistTaskKey) {
                     #if os(tvOS)
-                    guard !DeviceMemoryTier.current.isConstrained else { return }
+                        guard !DeviceMemoryTier.current.isConstrained else { return }
                     #endif
                     try? await Task.sleep(for: .seconds(3))
                     await loadWatchlist()
                 }
                 .task(id: recommendationsKey) {
                     #if os(tvOS)
-                    guard !DeviceMemoryTier.current.isConstrained else { return }
+                        guard !DeviceMemoryTier.current.isConstrained else { return }
                     #endif
                     try? await Task.sleep(for: .seconds(8))
                     await loadRecommendations()
@@ -320,9 +320,9 @@ struct HomeView: View {
                     animationNamespace: animationNamespace
                 )
             case .trendingMovies:
-                rail("Trending Movies", trendingMovies)
+                rail("Trending Movies", trendingMovies, constrainedCap: nil)
             case .trendingSeries:
-                rail("Trending Series", trendingSeries)
+                rail("Trending Series", trendingSeries, constrainedCap: nil)
             case .traktWatchlist:
                 rail("From Your Trakt Watchlist", watchlist)
             }
@@ -340,20 +340,26 @@ struct HomeView: View {
 
     /// A standard Home rail that only renders when it has items. The Recently
     /// Watched rail passes `onRemove` to add its remove-from-history action.
+    /// `constrainedCap` shortens unbounded rows on Apple TV HD; trending uses
+    /// `nil` so tvOS shows the same count as iOS and Mac.
     @ViewBuilder
     private func rail(
         _ title: LocalizedStringKey,
         _ items: [HomeMediaItem],
-        onRemove: ((HomeMediaItem) -> Void)? = nil
+        onRemove: ((HomeMediaItem) -> Void)? = nil,
+        constrainedCap: Int? = 6
     ) -> some View {
         let hiddenIDs = Set(hiddenCategories.map(\.id))
         let filtered = items.filter { !hiddenIDs.contains($0.categoryId ?? "") }
         #if os(tvOS)
-        let visible = DeviceMemoryTier.current.isConstrained
-            ? Array(filtered.prefix(6))
-            : filtered
+            let visible: [HomeMediaItem] = {
+                if let constrainedCap, DeviceMemoryTier.current.isConstrained {
+                    return Array(filtered.prefix(constrainedCap))
+                }
+                return filtered
+            }()
         #else
-        let visible = filtered
+            let visible = filtered
         #endif
         if !visible.isEmpty {
             HomeRow(title: title, items: visible, onPlayLive: playChannel, onRemove: onRemove, animationNamespace: animationNamespace)
@@ -392,7 +398,11 @@ struct HomeView: View {
         }
         if includeSeriesInRecentlyWatched {
             items += watchedSeries
-                .filter { belongsToActivePlaylist($0.id) && !hidden.contains($0.categoryId ?? "") }
+                .filter {
+                    belongsToActivePlaylist($0.id)
+                        && !hidden.contains($0.categoryId ?? "")
+                        && RecentlyWatchedEvidence.seriesQualifies(id: $0.id, in: modelContext)
+                }
                 .excludingRestricted(restriction)
                 .map(HomeMediaItem.series)
         }
@@ -469,7 +479,10 @@ private extension HomeView {
     }
 
     var trendingTaskKey: String {
-        "trending-\(selectedPlaylistID)-\(activePlaylist?.lastSyncDate?.timeIntervalSince1970 ?? 0)"
+        // Playlist identity only. Folding `lastSyncDate` in here cancelled an
+        // in-flight TMDB load and rebuilt Home every time a catalog sync
+        // finished; `onChange(of: isPlaylistSyncBusy)` already refreshes.
+        "trending-\(selectedPlaylistID)"
     }
 
     var watchlistTaskKey: String {

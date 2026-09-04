@@ -33,7 +33,7 @@ final class Category {
     // `MainTabView` queries restricted categories on every Category-table change
     // (i.e. every sync) to build the child-profile restriction set; index
     // `isRestricted` so that query seeks instead of scanning all categories.
-    #Index<Category>([\.isRestricted])
+    #Index<Category>([\.isRestricted], [\.isHidden])
 
     @Attribute(.unique) var id: String
     var apiId: String

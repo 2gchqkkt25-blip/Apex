@@ -13,4 +13,29 @@ enum ContentIdentity {
         let key = String(id[id.index(after: split)...])
         return key.isEmpty ? nil : key
     }
+
+    /// Marker inserted after the playlist UUID so a hidden category's cloud id
+    /// (`{uuid}-category-live-5`) cannot collide with a live stream (`{uuid}-live-5`).
+    private static let categoryMarker = "category-"
+
+    /// Cloud `UserContentState.contentId` for a local `Category.id`.
+    static func categoryCloudId(forCategoryId id: String) -> String? {
+        guard let key = stableKey(for: id) else { return nil }
+        return "\(id.prefix(36))-\(categoryMarker)\(key)"
+    }
+
+    /// Local `Category.id` recovered from a category cloud content id.
+    static func categoryId(fromCloudContentId id: String) -> String? {
+        guard let key = stableKey(for: id), key.hasPrefix(categoryMarker) else { return nil }
+        let rest = String(key.dropFirst(categoryMarker.count))
+        guard !rest.isEmpty else { return nil }
+        return "\(id.prefix(36))-\(rest)"
+    }
+
+    /// `live-5` from a category cloud stable key `category-live-5`.
+    static func categoryLocalStableKey(fromCloudStableKey key: String) -> String? {
+        guard key.hasPrefix(categoryMarker) else { return nil }
+        let rest = String(key.dropFirst(categoryMarker.count))
+        return rest.isEmpty ? nil : rest
+    }
 }

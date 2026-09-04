@@ -64,14 +64,20 @@ actor ImagePipeline {
     /// Returns a decoded image for `url`, downsampled to `maxPixelSize` (longest
     /// edge in pixels) when provided. Throws on permanent failure.
     func image(for url: URL, maxPixelSize: CGFloat?) async throws -> PlatformImage {
-        if MemoryPressureGate.isActive || PlaybackMemoryGate.suppressesImageLoads {
-            throw CancellationError()
-        }
-
         let key = Self.memoryKey(url, maxPixelSize: maxPixelSize)
 
         if let cached = ImageMemoryCache.shared.image(for: key) {
             return cached
+        }
+
+        // Playback and memory-warning gates exist to keep the decoder fed, not
+        // to hide artwork that is already on disk. Serve disk hits even while
+        // the gate is up so returning from the player is instant.
+        if MemoryPressureGate.isActive || PlaybackMemoryGate.suppressesImageLoads {
+            if let diskImage = Self.imageFromDisk(url: url, maxPixelSize: maxPixelSize, key: key) {
+                return diskImage
+            }
+            throw CancellationError()
         }
 
         if let existing = inFlight[key] {
@@ -117,18 +123,23 @@ actor ImagePipeline {
 
     // MARK: - Loading (runs off-actor)
 
+    private nonisolated static func imageFromDisk(url: URL, maxPixelSize: CGFloat?, key: String) -> PlatformImage? {
+        let diskKey = url.absoluteString
+        guard let data = ImageDiskCache.shared.data(for: diskKey),
+              let image = ImageDecoder.decode(data, maxPixelSize: maxPixelSize)
+        else { return nil }
+        ImageMemoryCache.shared.insert(image, for: key)
+        return image
+    }
+
     private nonisolated static func load(url: URL, maxPixelSize: CGFloat?, key: String, retries: Int) async throws -> PlatformImage {
         // Disk holds the original bytes keyed by URL; reuse across target sizes.
-        let diskKey = url.absoluteString
-        if let data = ImageDiskCache.shared.data(for: diskKey),
-           let image = ImageDecoder.decode(data, maxPixelSize: maxPixelSize)
-        {
-            ImageMemoryCache.shared.insert(image, for: key)
+        if let image = imageFromDisk(url: url, maxPixelSize: maxPixelSize, key: key) {
             return image
         }
 
         let data = try await fetch(url: url, retries: retries)
-        ImageDiskCache.shared.store(data, for: diskKey)
+        ImageDiskCache.shared.store(data, for: url.absoluteString)
 
         guard let image = ImageDecoder.decode(data, maxPixelSize: maxPixelSize) else {
             throw ImagePipelineError.decodingFailed

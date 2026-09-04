@@ -82,7 +82,7 @@ extension ContentSyncManager {
         guard dbCount > seenIds.count else { return }
 
         var removed = 0
-        for movie in (try? context.fetch(descriptor)) ?? [] where !seenIds.contains(movie.id) {
+        for movie in SafeFetch.fetch(descriptor, context: context) where !seenIds.contains(movie.id) {
             context.delete(movie)
             removed += 1
         }
@@ -101,11 +101,11 @@ extension ContentSyncManager {
         let descriptor = FetchDescriptor<Series>(
             predicate: #Predicate { $0.id.localizedStandardContains(prefix) }
         )
-        let dbCount = (try? context.fetchCount(descriptor)) ?? 0
+        let dbCount = SafeFetch.fetchCount(descriptor, context: context)
         guard dbCount > seenIds.count else { return }
 
         var removed = 0
-        for show in (try? context.fetch(descriptor)) ?? [] where !seenIds.contains(show.id) {
+        for show in SafeFetch.fetch(descriptor, context: context) where !seenIds.contains(show.id) {
             context.delete(show)
             removed += 1
         }
@@ -123,11 +123,11 @@ extension ContentSyncManager {
         let descriptor = FetchDescriptor<LiveStream>(
             predicate: #Predicate { $0.id.localizedStandardContains(prefix) }
         )
-        let dbCount = (try? context.fetchCount(descriptor)) ?? 0
+        let dbCount = SafeFetch.fetchCount(descriptor, context: context)
         guard dbCount > seenIds.count else { return }
 
         var removed = 0
-        for stream in (try? context.fetch(descriptor)) ?? [] where !seenIds.contains(stream.id) {
+        for stream in SafeFetch.fetch(descriptor, context: context) where !seenIds.contains(stream.id) {
             context.delete(stream)
             removed += 1
         }
@@ -148,11 +148,11 @@ extension ContentSyncManager {
         let descriptor = FetchDescriptor<Episode>(
             predicate: #Predicate { $0.id.localizedStandardContains(prefix) }
         )
-        let dbCount = (try? context.fetchCount(descriptor)) ?? 0
+        let dbCount = SafeFetch.fetchCount(descriptor, context: context)
         guard dbCount > seenIds.count else { return }
 
         var removed = 0
-        for episode in (try? context.fetch(descriptor)) ?? [] where !seenIds.contains(episode.id) {
+        for episode in SafeFetch.fetch(descriptor, context: context) where !seenIds.contains(episode.id) {
             context.delete(episode)
             removed += 1
         }
@@ -177,7 +177,7 @@ extension ContentSyncManager {
             predicate: #Predicate { $0.typeRaw == typeRaw }
         )
         var removed = 0
-        for category in (try? context.fetch(descriptor)) ?? []
+        for category in SafeFetch.fetch(descriptor, context: context)
             where category.id.hasPrefix(prefix) && !seenApiIds.contains(category.apiId)
         {
             context.delete(category)

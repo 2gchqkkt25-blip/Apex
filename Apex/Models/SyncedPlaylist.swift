@@ -42,6 +42,16 @@ final class SyncedPlaylist {
     /// diagnostics / "last write wins" tie-breaks); the reconciler's correctness
     /// rests on the shadow baseline, not on this clock.
     var updatedAt: Date = Date()
+    /// Set when the user deletes this playlist. Kept as a CloudKit row so other
+    /// devices apply the removal instead of treating a missing record as
+    /// "import hasn't arrived yet" and re-publishing the playlist.
+    var deletedAt: Date?
+    /// Install that is fetching this playlist's catalog (or just finished).
+    /// Empty when no device holds the quiet-period lease.
+    var catalogSyncDeviceID: String = ""
+    /// When `catalogSyncDeviceID` last claimed the lease. Sibling devices skip
+    /// auto-sync while this is within `CatalogSyncLease.ttl`.
+    var catalogSyncHeartbeatAt: Date?
 
     init(
         id: UUID,
@@ -53,7 +63,10 @@ final class SyncedPlaylist {
         sourceTypeRaw: String,
         epgURL: String?,
         syncEnabled: Bool,
-        updatedAt: Date = Date()
+        updatedAt: Date = Date(),
+        deletedAt: Date? = nil,
+        catalogSyncDeviceID: String = "",
+        catalogSyncHeartbeatAt: Date? = nil
     ) {
         self.id = id
         self.name = name
@@ -65,5 +78,8 @@ final class SyncedPlaylist {
         self.epgURL = epgURL
         self.syncEnabled = syncEnabled
         self.updatedAt = updatedAt
+        self.deletedAt = deletedAt
+        self.catalogSyncDeviceID = catalogSyncDeviceID
+        self.catalogSyncHeartbeatAt = catalogSyncHeartbeatAt
     }
 }

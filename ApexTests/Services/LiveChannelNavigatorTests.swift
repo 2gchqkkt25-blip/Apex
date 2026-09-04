@@ -150,4 +150,27 @@ struct LiveChannelNavigatorTests {
 
         #expect(LiveChannelNavigator.adjacentMedia(for: movie, offset: 1, sort: .playlist, in: context) == nil)
     }
+
+    // MARK: - In-player guide list
+
+    @Test func `guide lists every channel in the category`() throws {
+        let specs = (0 ..< 50).map { (num: $0 + 1, name: "Ch \($0)", category: "cat-a") }
+        let (context, playlist) = try makeWorld(streams: specs)
+        let middle = try media(forStreamId: 124, playlist: playlist, in: context)
+
+        let listed = LiveChannelNavigator.surfChannels(
+            for: middle,
+            sort: .playlist,
+            in: context
+        )
+        #expect(listed.count == 50)
+
+        let windowed = LiveChannelNavigator.surfChannels(
+            for: middle,
+            sort: .playlist,
+            limit: 40,
+            in: context
+        )
+        #expect(windowed.count == 40)
+    }
 }

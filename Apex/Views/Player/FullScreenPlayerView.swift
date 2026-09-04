@@ -340,7 +340,7 @@ struct FullScreenPlayerView: View {
             if DeviceMemoryTier.current.isConstrained { return }
             #endif
             guard WyzieSubsClient.shared.isConfigured else { return }
-            guard UserDefaults.standard.bool(forKey: SubtitleSettings.enabledKey) else { return }
+            guard SubtitleSettings.isEnabled() else { return }
 
             // Wait briefly for the stream to load and expose its tracks.
             // If embedded subs exist, the user can pick those instead.
@@ -445,7 +445,7 @@ struct FullScreenPlayerView: View {
         .onDisappear {
             // Capture the clock synchronously, then flush off the main thread.
             persistProgressDetached(force: true)
-            releaseAudioSession()
+            PlaybackSession.scheduleAudioSessionRelease()
             seekBridge.reset()
             ContentIndexingService.shared.isPlaybackActive = false
         }
@@ -780,6 +780,10 @@ struct FullScreenPlayerView: View {
     }
 
     private func closePlayer() {
+        // Clear the playback image gate before dismiss so the detail screen
+        // remounting underneath can load TMDB artwork on the first attempt.
+        ContentIndexingService.shared.isPlaybackActive = false
+        PlaybackSession.stopActive()
         #if os(macOS)
             // Exit fullscreen first so the window animation is graceful, then close.
             if let window = NSApp.keyWindow, window.styleMask.contains(.fullScreen) {
@@ -825,12 +829,6 @@ struct FullScreenPlayerView: View {
             nil
         }
     #endif
-
-    private func releaseAudioSession() {
-        #if os(iOS)
-            try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
-        #endif
-    }
 
     #if os(macOS)
         private func enterMacFullScreen() {

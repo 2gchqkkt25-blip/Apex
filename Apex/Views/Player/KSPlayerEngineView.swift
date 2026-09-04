@@ -105,6 +105,9 @@ struct KSPlayerEngineView: View {
     /// While an overlay panel (Guide / episodes / info) is open the controls
     /// must not auto-hide out from under the viewer.
     @State private var isPanelOpen = false
+    /// Token for `PlaybackSession` so a second player can stop this engine's
+    /// audio before `onDisappear` runs.
+    @State private var playbackSessionToken = 0
 
     #if os(tvOS)
         /// Republishes KSPlayer state to the shared overlay (`isPlaying`,
@@ -270,6 +273,7 @@ struct KSPlayerEngineView: View {
                 engine.attach(coordinator: coordinator)
                 seekBridge.seekTo = { [engine] time in engine.seek(to: time) }
                 seekBridge.onAfterSeek = { Task { @MainActor in catcherFocused = true } }
+                claimPlaybackSession()
                 scheduleHide()
                 startStartupWatchdog()
             }
@@ -279,6 +283,7 @@ struct KSPlayerEngineView: View {
                 cancelStartupWatchdog()
                 cancelStallWatchdog()
                 seekBridge.reset()
+                releasePlaybackSession()
                 coordinator.resetPlayer()
             }
             .onChange(of: engine.isPlaying) { _, _ in
@@ -292,7 +297,9 @@ struct KSPlayerEngineView: View {
             }
             .onChange(of: media) { _, _ in
                 // The host swapped the stream (KSPlayer reloads its URL
-                // automatically). Reset local scrubbing / panel state.
+                // automatically). Mute the outgoing item immediately so a
+                // series → movie/episode switch cannot overlap soundtracks.
+                coordinator.playerLayer?.pause()
                 isSeeking = false
                 seekPosition = 0
                 isPanelOpen = false
@@ -340,12 +347,17 @@ struct KSPlayerEngineView: View {
             .onMoveCommand { direction in
                 // Watching live TV with the controls hidden, left opens the
                 // channel browser, up/down surf adjacent channels and right
-                // recalls the last channel watched. Any other move summons
-                // the controls.
+                // recalls the last channel watched. On VOD, left/right skip
+                // without summoning the overlay so the clicker can rewind /
+                // fast-forward repeatedly.
                 if media.isLive, direction == .left {
                     openChannelBrowser()
                 } else if media.isLive, direction == .up || direction == .down || direction == .right {
                     switchLiveChannel(direction)
+                } else if !media.isLive, direction == .left {
+                    skipWhileWatching(-10)
+                } else if !media.isLive, direction == .right {
+                    skipWhileWatching(10)
                 } else {
                     showControls()
                 }
@@ -358,8 +370,6 @@ struct KSPlayerEngineView: View {
             scheduleHide()
         }
 
-        /// Dismiss the controls overlay (Menu button when no panel is open). A
-        /// second Menu press, with the controls hidden, dismisses the player.
         private func hideControls() {
             hideTask?.cancel()
             withAnimation(.easeInOut(duration: 0.2)) { isControlsVisible = false }
@@ -405,7 +415,10 @@ struct KSPlayerEngineView: View {
                             noteClockDrift()
                         }
                     }
-                    .ignoresSafeArea()
+                    .playerVideoPinnedToTopWhileGuideOpen(
+                        guideOpen: isPanelOpen,
+                        aspectFill: coordinator.isScaleAspectFill
+                    )
 
                 ksSubtitleLayer
 
@@ -444,6 +457,7 @@ struct KSPlayerEngineView: View {
             .onAppear {
                 onControlsVisibilityChanged?(isControlsVisible && hasStartedPlayback)
                 seekBridge.seekTo = { [coordinator] time in coordinator.seek(time: time) }
+                claimPlaybackSession()
                 scheduleHide()
                 observePipState()
                 startStartupWatchdog()
@@ -455,6 +469,7 @@ struct KSPlayerEngineView: View {
                 cancelStartupWatchdog()
                 cancelStallWatchdog()
                 seekBridge.reset()
+                releasePlaybackSession()
                 coordinator.resetPlayer()
             }
             .onTapGesture {
@@ -469,6 +484,23 @@ struct KSPlayerEngineView: View {
             }
             .onChange(of: isControlsVisible) { _, visible in
                 onControlsVisibilityChanged?(visible && hasStartedPlayback)
+            }
+            .onChange(of: media) { _, _ in
+                coordinator.playerLayer?.pause()
+                isSeeking = false
+                seekPosition = 0
+                isPanelOpen = false
+                hasStartedPlayback = false
+                hasSeenReadyToPlay = false
+                isBuffering = true
+                loadFailed = false
+                lastPlayhead = -1
+                driftSince = nil
+                lastDriftRecovery = -.infinity
+                cancelStallWatchdog()
+                reconnector.reset()
+                startStartupWatchdog()
+                resetHideTimer()
             }
             #if os(macOS)
             .onContinuousHover(coordinateSpace: .local) { phase in
@@ -492,8 +524,8 @@ struct KSPlayerEngineView: View {
                     }
                 }
             }
-            .onKeyPress(.leftArrow) { coordinator.skip(interval: -15); resetHideTimer(); return .handled }
-            .onKeyPress(.rightArrow) { coordinator.skip(interval: 15); resetHideTimer(); return .handled }
+            .onKeyPress(.leftArrow) { skipWhileWatching(-15); resetHideTimer(); return .handled }
+            .onKeyPress(.rightArrow) { skipWhileWatching(15); resetHideTimer(); return .handled }
             .onKeyPress(.space) { togglePlay(); return .handled }
             .onKeyPress(.escape) { closePlayer(); return .handled }
             #endif
@@ -620,6 +652,7 @@ struct KSPlayerEngineView: View {
     }
 
     private func closePlayer() {
+        PlaybackSession.stopActive()
         #if os(macOS)
             if let window = NSApp.keyWindow, window.styleMask.contains(.fullScreen) {
                 window.toggleFullScreen(nil)
@@ -628,5 +661,18 @@ struct KSPlayerEngineView: View {
         #else
             dismiss()
         #endif
+    }
+
+    /// Claim the exclusive audio slot so a movie opening while this series
+    /// player is still dismissing cannot keep the outgoing soundtrack.
+    private func claimPlaybackSession() {
+        playbackSessionToken = PlaybackSession.becomeActive { [coordinator] in
+            coordinator.playerLayer?.pause()
+            coordinator.resetPlayer()
+        }
+    }
+
+    private func releasePlaybackSession() {
+        PlaybackSession.resign(playbackSessionToken)
     }
 }

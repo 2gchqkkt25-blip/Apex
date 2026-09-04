@@ -43,9 +43,7 @@
             _isLoadingTMDB = State(initialValue: false)
         }
 
-        private var detailWorkToken: String {
-            "\(series.id)-\(playingMedia?.id ?? "idle")"
-        }
+        @State private var detailWorkToken = UUID()
 
         private var tmdbEnrichmentToken: String {
             "\(series.tmdbId ?? 0)-\(playingMedia?.id ?? "idle")"
@@ -74,10 +72,20 @@
             }
             .background(Color.black)
             .ignoresSafeArea()
-            .onChange(of: playingMedia) { _, media in
-                guard media != nil else { return }
-                similar = []
-                otherSources = []
+            .onChange(of: playingMedia) { old, new in
+                if new != nil {
+                    // Player opening — clear transient data
+                    similar = []
+                    otherSources = []
+                } else if old != nil {
+                    if !series.isMediaServerCatalogItem {
+                        resolveSimilar()
+                        resolveOtherSources()
+                    }
+                    if series.tmdbEnrichedAt == nil {
+                        detailWorkToken = UUID()
+                    }
+                }
             }
             .fullScreenCover(item: $playingMedia) { media in
                 FullScreenPlayerView(media: media)
@@ -92,11 +100,26 @@
                 withAnimation(detailFadeAnimation) {
                     isLoadingTMDB = false
                 }
-                await loadEpisodesIfNeeded()
+                let hadCachedEpisodes = await loadEpisodesIfNeeded()
                 guard playingMedia == nil else { return }
                 maybeAutoplay()
-                await enrichIfNeeded()
+                if hadCachedEpisodes {
+                    Task { await refreshEpisodesFromProvider() }
+                }
+                // Cap enrichment at 15 s so a hung TMDB/OMDb call can't freeze
+                // the detail screen forever (tvOS network timeouts, rate limits).
+                await withTaskGroup(of: Bool.self) { group in
+                    group.addTask { await enrichIfNeeded() }
+                    group.addTask {
+                        try? await Task.sleep(for: .seconds(15))
+                        return false
+                    }
+                    _ = await group.next()
+                    group.cancelAll()
+                }
                 guard playingMedia == nil else { return }
+                // Ratings are best-effort; run inline but don't let them block
+                // the rest of the setup if they hang.
                 await enrichSeriesRatingsIfNeeded(series, context: modelContext)
                 if !series.isMediaServerCatalogItem {
                     resolveSimilar()
@@ -475,13 +498,38 @@
 
         // MARK: - Loading & enrichment
 
-        private func loadEpisodesIfNeeded() async {
+        /// Attaches cached episodes (or fetches if none exist). Returns `true`
+        /// when the store already had episodes so the caller can refresh from
+        /// the provider without blocking autoplay.
+        @discardableResult
+        private func loadEpisodesIfNeeded() async -> Bool {
             if series.episodes.isEmpty {
                 SeriesResume.attachStoredEpisodes(to: series, in: modelContext)
             }
-            if series.episodes.isEmpty {
+            let hadCached = !series.episodes.isEmpty
+            // Media-server episodes need a valid directSource to play. Stored
+            // episodes from a prior session may have stale or missing URLs
+            // (server reconnected, token rotated). Force a fresh load when no
+            // episode carries a playable mediaserver:// URL.
+            if hadCached, series.isMediaServerCatalogItem {
+                let hasPlayableSource = series.episodes.contains { ep in
+                    ep.directSource?.hasPrefix("mediaserver://") == true
+                }
+                if !hasPlayableSource {
+                    await loadEpisodes()
+                    selectedSeason = determineDefaultSeason()
+                    return true
+                }
+            }
+            if !hadCached {
                 await loadEpisodes()
             }
+            selectedSeason = determineDefaultSeason()
+            return hadCached
+        }
+
+        private func refreshEpisodesFromProvider() async {
+            await loadEpisodes()
             selectedSeason = determineDefaultSeason()
         }
 
@@ -546,6 +594,8 @@
         private func enrichIfNeeded() async -> Bool {
             if series.isMediaServerCatalogItem {
                 await MediaServerDetailEnrichment.enrichSeriesIfNeeded(series, context: modelContext)
+                // Background-context saves auto-merge into the main context;
+                // refreshToken below forces the view body to re-evaluate.
                 if series.tmdbEnrichedAt != nil {
                     refreshToken = UUID()
                     return true

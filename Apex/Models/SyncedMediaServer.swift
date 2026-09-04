@@ -27,6 +27,10 @@ final class SyncedMediaServer {
     var syncEnabled: Bool = true
     var sortOrder: Int = 0
     var updatedAt: Date = Date()
+    /// Set when the user deletes this connection. Kept as a CloudKit row so
+    /// other devices apply the removal instead of treating a missing record as
+    /// "import hasn't arrived yet" and re-publishing the server.
+    var deletedAt: Date?
 
     init(
         id: UUID,
@@ -41,7 +45,8 @@ final class SyncedMediaServer {
         plexServerIdentifier: String?,
         syncEnabled: Bool,
         sortOrder: Int,
-        updatedAt: Date = Date()
+        updatedAt: Date = Date(),
+        deletedAt: Date? = nil
     ) {
         self.id = id
         self.name = name
@@ -56,5 +61,6 @@ final class SyncedMediaServer {
         self.syncEnabled = syncEnabled
         self.sortOrder = sortOrder
         self.updatedAt = updatedAt
+        self.deletedAt = deletedAt
     }
 }

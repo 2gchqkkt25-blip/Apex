@@ -69,8 +69,11 @@ struct SeriesDetailView: View {
             #endif
                 .toolbar { toolbarContent }
                 .task(id: series.id) {
-                    await loadEpisodesIfNeeded()
+                    let hadCachedEpisodes = await loadEpisodesIfNeeded()
                     maybeAutoplay()
+                    if hadCachedEpisodes {
+                        await refreshEpisodesFromProvider()
+                    }
                     await enrichIfNeeded()
                     await enrichSeriesRatingsIfNeeded(series, context: modelContext)
                     resolveSimilar()
@@ -181,6 +184,11 @@ struct SeriesDetailView: View {
             }
             .scrollIndicators(.hidden)
             .ignoresSafeArea(edges: .top)
+            #if os(iOS)
+                .refreshable {
+                    await refreshEpisodesFromProvider()
+                }
+            #endif
         }
     }
 
@@ -451,13 +459,25 @@ struct SeriesDetailView: View {
 
     // MARK: - Loading & enrichment
 
-    private func loadEpisodesIfNeeded() async {
+    /// Attaches cached episodes (or fetches if none exist). Returns `true` when
+    /// the store already had episodes — the caller should then refresh from the
+    /// provider so new airings appear without blocking first paint / autoplay.
+    @discardableResult
+    private func loadEpisodesIfNeeded() async -> Bool {
         if series.episodes.isEmpty {
             SeriesResume.attachStoredEpisodes(to: series, in: modelContext)
         }
-        if series.episodes.isEmpty {
+        let hadCached = !series.episodes.isEmpty
+        if !hadCached {
             await loadEpisodes()
         }
+        recomputeSeasons()
+        selectedSeason = determineDefaultSeason()
+        return hadCached
+    }
+
+    private func refreshEpisodesFromProvider() async {
+        await loadEpisodes()
         recomputeSeasons()
         selectedSeason = determineDefaultSeason()
     }

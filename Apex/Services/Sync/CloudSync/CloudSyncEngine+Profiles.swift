@@ -189,6 +189,7 @@ private extension CloudSyncEngine {
             mirror.isFavorite = values.isFavorite
             mirror.addedToWatchlistDate = values.addedToWatchlistDate
             mirror.favoriteOrder = values.favoriteOrder
+            mirror.isHidden = values.isHidden
             mirror.recommendationVoteRaw = values.recommendationVoteRaw
             mirror.updatedAt = Date()
         } else {
@@ -202,6 +203,7 @@ private extension CloudSyncEngine {
                 isFavorite: values.isFavorite,
                 addedToWatchlistDate: values.addedToWatchlistDate,
                 favoriteOrder: values.favoriteOrder,
+                isHidden: values.isHidden,
                 recommendationVoteRaw: values.recommendationVoteRaw
             )
             cloudContext.insert(mirror)

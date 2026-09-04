@@ -4,6 +4,92 @@ All notable changes to Apex Stream Player.
 
 ---
 
+## Build 55 (1.2.0) — September 4, 2026
+
+### Bug Fixes
+
+- **Adding a second playlist spun forever** — The add sheet saved the new playlist on the main thread. If the first playlist was still catalog-syncing, that save blocked the UI and the connection timeout could not fire. New playlists now persist off the main actor, Cancel stays available while connecting, and a hung provider test times out after 20 seconds.
+- **iPhone portrait Guide left a black band above the video** — Opening the in-player mini-guide while holding the phone vertically kept the 16:9 picture centered, so the Guide sat in the bottom letterbox and the top stayed empty. The picture now pins to the top and the Guide uses the space underneath.
+- **Previous title kept playing audio after you started something else** — Dismissing a series player and immediately opening a movie could overlap both soundtracks. Only one playback session is allowed; starting or claiming a new player stops the outgoing engine immediately.
+- **Apple TV in-player Guide showed only a handful of channels** — The compact overlay is unchanged, but Down now walks the full category. Focus lands on programmes (not a giant white box). Scrolling no longer hitching or jumping from building every row at once.
+- **In-player channel surf stopped after ~40 channels** — Live up/down uses the full surf list for the current category or section.
+- **Sync Now waited on the full TV Guide XMLTV download** — Playlist catalog refresh is no longer blocked on that inline EPG wait.
+- **Posters kept spinning after Stop (tvOS)** — Returning from playback no longer leaves TMDB/`CachedAsyncImage` in a permanent loading state.
+- **OpenSubtitles chips on Apple TV used a huge white focus rectangle** — Chips and colour swatches draw their own focus chrome.
+
+### Improvements
+
+- **Hidden channels and categories sync over iCloud** — Hide or un-hide in Content Management on one device and the same profile on your other devices picks it up after iCloud flushes (leave the app so the background sync can run). Player settings, EPG layout, and the parental PIN stay on each device.
+
+### Verification
+
+- Playlist add persistence, exclusive playback session, portrait Guide layout, CloudKit hide merge, and channel-surf list covered by unit tests.
+- Manual: Apple TV in-player Guide — compact, full-list scroll, tight focus, smooth motion. iPhone portrait Guide — video on top. Hide a category on one device, background the app, confirm on another.
+
+### Release
+
+- Build number **55** (1.2.0).
+- Deploy CloudKit **Development → Production** before upload so `CD_UserContentState.isHidden` (and kind `category`) is in Production. Schema from Build 53 (`SyncedPlaylist.deletedAt`, catalog-sync lease) must already be in Production.
+
+---
+
+## Build 54 (1.2.0) — September 3, 2026
+
+### Bug Fixes
+
+- **New episodes stayed frozen after Sync Now** — Catalog sync only upserted the series row. Episode lists were lazy and only fetched when empty, so a cached show never picked up a new airing (e.g. The Ark S3E5). Opening a series now always refreshes from the provider. Sync Now also refreshes Xtream shows whose `last_modified` changed, plus the last 20 watched (capped).
+- **Recently Watched showed titles you never played** — A leftover `lastWatchedDate`, iCloud rematch, or tap-and-back was enough to land in the row. Recently Watched now requires several seconds of real progress (or marked watched).
+- **Fast-forward / rewind did nothing on many IPTV files** — Skip clamped to a reported duration of 0. Skip now keeps going when length is unknown. On Apple TV, Siri Remote left/right skip 10 seconds on movies and episodes while controls are hidden.
+
+### Improvements
+
+- **Recently Added is the active playlist** — Movies and Series collection rows query this playlist’s id prefix, so another playlist’s newest titles cannot crowd out this one.
+- **Default auto-sync is daily** — New installs (and unset Settings) refresh catalogs every day instead of every 3 days. A stored 3-day or weekly choice is unchanged.
+- **Subtitles on by default** — External subtitle fetch (Wyzie) is on unless you turn it off. A missing toggle used to count as off. KSPlayer still auto-selects embedded tracks (Apple TV HD still skips auto-select on heavy MKV remux).
+- **Catalog existence vs artwork** — TMDB art/ratings, EPG now/next, and the playback engine do not decide whether a title exists. Missing poster ≠ missing item. After the provider adds something: Sync Now, then Recently Added or Show All / search — not only the 20-poster category row.
+
+### Verification
+
+- Episode refresh planner, daily auto-sync default, subtitle enabled-by-default, skip math, and Recently Watched evidence covered by unit tests.
+- Manual: Sync Now → new episode without opening the show; Recently Added is this playlist; Recently Watched is only what you played; skip/rewind on VOD.
+
+### Release
+
+- Build number **54** (1.2.0).
+- CloudKit schema from Build 53 (`SyncedPlaylist.deletedAt`, catalog-sync lease fields) must already be in Production before this upload.
+
+---
+
+## Build 53 (1.2.0) — September 1, 2026
+
+### Bug Fixes
+
+- **tvOS Home reloads on every tab switch** — Leaving Home (Movies, Series, Live TV, …) unmounted the whole screen, so hero artwork, trending rails, and `@State` were thrown away and rebuilt from TMDB on return. Home now stays mounted on Apple TV the same way it already did on iOS and Mac. Other browse tabs still unmount so Apple TV HD does not hold Home + Media + EPG at once.
+- **tvOS Home and trending stall on first launch** — 4K Apple TV waited for the whole playlist catalog sync before fetching TMDB trending (HD already skipped that wait). Trending now starts immediately, paints from TMDB page 1, then widens the match pool. Finishing a catalog sync no longer wipes rails that are already on screen.
+- **tvOS trending showed fewer titles than iOS/Mac** — Constrained Apple TV (including Apple TV HD) capped Trending Movies/Series at 6. Those rails now show the same 20 titles as iOS and Mac. Recently Watched / Favorites / Trakt still cap at 6 on HD.
+- **tvOS Movies and Series tabs did not open or play titles** — `NavigationStack(path:)` was bound to `DeepLinkRouter`, which does not participate in the tvOS focus engine. Movies and Series keep a local path on Apple TV and consume deep links on appear.
+- **tvOS Settings → Media Servers jumped focus and painted blank** — A `List` nested in Settings’ outer `ScrollView` broke the focus engine. Media Servers now uses a tvOS in-pane layout and drills into a server from Settings instead of pushing a nested list.
+- **IPTV Play disabled / “No episodes available”** — Xtream/M3U catalog ids (`{playlistUUID}-movie-…`) were treated as Plex/Jellyfin/Emby items. Media-server detection now requires `{serverUUID}-library-…` (or a `mediaserver://` URL), so IPTV movies and series play again.
+- **Deleted playlists came back via iCloud** — Local `PlaylistDeletion` never wrote a CloudKit tombstone. A missing mirror was treated as a slow import and re-published. `SyncedPlaylist.deletedAt` now marks an explicit delete; siblings remove the playlist and its catalog. Deletes made on Build 52 or earlier need to be deleted once more on this build.
+- **Sync Now on iPhone popped the blocking sync cover on Apple TV** — iCloud created the playlist on tvOS with `lastSyncDate == nil`, so first-time auto-sync presented the full-screen cover. A per-install `CatalogSyncLease` (30-minute quiet period on `SyncedPlaylist`) lets the device that started Sync Now keep the cover; siblings skip it. Fresh Apple TV first launch still auto-syncs.
+- **Manual Sync Now left a stale catalog** — Per-category fetches that looked incomplete still pruned against a partial id set. Full sync now falls back to an unfiltered provider list, and prune only runs when the fetch looks complete.
+
+### Improvements
+
+- **Media-server iCloud deletions** — Connect sheet and media sync completion kick reconcile so a tombstoned Plex/Jellyfin/Emby connection does not briefly reappear.
+
+### Verification
+
+- tvOS Home stays populated after Movies → Home (confirmed on device).
+- Playlist iCloud tombstone, catalog-sync lease, and media-server identity covered by unit tests (`CloudSyncTests`, `SyncFrequencyTests`, `MediaServerIdentityTests`).
+
+### Release
+
+- Build number **53** (1.2.0).
+- Deploy CloudKit **Development → Production** before upload (`SyncedPlaylist.deletedAt`, `catalogSyncDeviceID`, `catalogSyncHeartbeatAt`).
+
+---
+
 ## Build 52 (1.2.0) — August 31, 2026
 
 ### Features

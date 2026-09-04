@@ -13,6 +13,7 @@ final class LiveStream {
     #Index<LiveStream>(
         [\.isFavorite],
         [\.lastWatchedDate],
+        [\.isHidden],
         [\.categoryId],
         [\.categoryId, \.isHidden]
     )

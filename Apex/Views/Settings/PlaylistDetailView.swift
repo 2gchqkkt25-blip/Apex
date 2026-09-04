@@ -4,6 +4,7 @@ import SwiftUI
 struct PlaylistDetailView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
+    @Environment(CloudSyncCoordinator.self) private var cloudSync: CloudSyncCoordinator?
     @Bindable var playlist: Playlist
 
     /// tvOS: called to leave this detail when it is shown inline in the Settings
@@ -470,13 +471,19 @@ struct PlaylistDetailView: View {
     }
 
     private func deletePlaylist() {
-        let container = modelContext.container
         let playlistID = playlist.id
         #if os(tvOS)
             onClose?()
         #else
             dismiss()
         #endif
+        if let cloudSync {
+            Task {
+                try? await cloudSync.deletePlaylist(id: playlistID)
+            }
+            return
+        }
+        let container = modelContext.container
         Task.detached(priority: .userInitiated) {
             let context = ModelContext(container)
             context.autosaveEnabled = false

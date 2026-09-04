@@ -8,9 +8,8 @@
 //  category — so they're driven by their own predicates rather than a
 //  `categoryId`, mirroring the Home screen's rows.
 //
-//  Each row scopes its @Query results to the active playlist in-memory (the same
-//  approach the rest of the app uses, since SwiftData can't parameterise a
-//  @Query on a playlist-prefixed id), then caps to a preview length. Rows render
+//  Each row's fetch predicate is scoped to the active playlist's id prefix, then
+//  hidden-category and parental-control filters apply in memory. Rows render
 //  nothing when empty so a fresh library degrades gracefully.
 //
 
@@ -52,11 +51,10 @@ struct LibraryCollection: Hashable {
 private let collectionPreviewLimit = 20
 
 /// Upper bound on the "Recently Added" fetch. Recently Watched and Favorites
-/// match small subsets, but every title carries an `added` timestamp, so that
-/// predicate matches the whole library — an unbounded fetch would hydrate the
-/// entire catalog on every change and stutter badly during sync. We only ever
-/// surface the newest slice, so the query is capped (then scoped in-memory to
-/// the active playlist, like the rest of the app).
+/// match small subsets, but every title carries an `added` / `lastModified`
+/// timestamp, so that predicate would otherwise match the whole playlist — an
+/// unbounded fetch would hydrate the catalog on every change and stutter during
+/// sync. We only surface the newest slice of the **active** playlist.
 private let recentlyAddedFetchLimit = 200
 
 /// Page size for collection "Show All" grids — matches category grids.
@@ -144,7 +142,7 @@ struct MovieCollectionRow: View {
         self.kind = kind
         self.playlistPrefix = playlistPrefix
         self.animationNamespace = animationNamespace
-        _movies = Query(MovieCollectionQuery.descriptor(for: kind))
+        _movies = Query(MovieCollectionQuery.descriptor(for: kind, playlistPrefix: playlistPrefix))
     }
 
     private var scoped: [Movie] {
@@ -230,21 +228,22 @@ struct MovieCollectionView: View {
 }
 
 private enum MovieCollectionQuery {
-    static func descriptor(for kind: LibraryCollection.Kind) -> FetchDescriptor<Movie> {
+    static func descriptor(for kind: LibraryCollection.Kind, playlistPrefix: String) -> FetchDescriptor<Movie> {
+        let prefix = playlistPrefix
         var descriptor = switch kind {
         case .recentlyWatched:
             FetchDescriptor<Movie>(
-                predicate: #Predicate { $0.lastWatchedDate != nil },
+                predicate: #Predicate { $0.lastWatchedDate != nil && $0.id.starts(with: prefix) && ($0.isWatched || $0.watchProgress >= 5) },
                 sortBy: [SortDescriptor(\.lastWatchedDate, order: .reverse)]
             )
         case .favorites:
             FetchDescriptor<Movie>(
-                predicate: #Predicate { $0.isFavorite },
+                predicate: #Predicate { $0.isFavorite && $0.id.starts(with: prefix) },
                 sortBy: [SortDescriptor(\.name)]
             )
         case .recentlyAdded:
             FetchDescriptor<Movie>(
-                predicate: #Predicate { $0.added != nil },
+                predicate: #Predicate { $0.added != nil && $0.id.starts(with: prefix) },
                 sortBy: [SortDescriptor(\.added, order: .reverse), SortDescriptor(\.num)]
             )
         }
@@ -253,6 +252,7 @@ private enum MovieCollectionQuery {
         case .favorites: descriptor.fetchLimit = 50
         case .recentlyAdded: descriptor.fetchLimit = recentlyAddedFetchLimit
         }
+        if prefix.isEmpty { descriptor.fetchLimit = 0 }
         return descriptor
     }
 
@@ -267,7 +267,7 @@ private enum MovieCollectionQuery {
         var descriptor = switch kind {
         case .recentlyWatched:
             FetchDescriptor<Movie>(
-                predicate: #Predicate { $0.lastWatchedDate != nil && $0.id.starts(with: prefix) },
+                predicate: #Predicate { $0.lastWatchedDate != nil && $0.id.starts(with: prefix) && ($0.isWatched || $0.watchProgress >= 5) },
                 sortBy: [SortDescriptor(\.lastWatchedDate, order: .reverse)]
             )
         case .favorites:
@@ -305,12 +305,18 @@ struct SeriesCollectionRow: View {
         self.kind = kind
         self.playlistPrefix = playlistPrefix
         self.animationNamespace = animationNamespace
-        _series = Query(SeriesCollectionQuery.descriptor(for: kind))
+        _series = Query(SeriesCollectionQuery.descriptor(for: kind, playlistPrefix: playlistPrefix))
     }
 
     private var scoped: [Series] {
         let hidden = Set(hiddenCategories.map(\.id))
-        return series.filter { $0.id.hasPrefix(playlistPrefix) && !hidden.contains($0.categoryId ?? "") }.excludingRestricted(restriction)
+        return series.filter { show in
+            guard show.id.hasPrefix(playlistPrefix), !hidden.contains(show.categoryId ?? "") else { return false }
+            if kind == .recentlyWatched {
+                return RecentlyWatchedEvidence.seriesQualifies(id: show.id, in: modelContext)
+            }
+            return true
+        }.excludingRestricted(restriction)
     }
 
     var body: some View {
@@ -385,27 +391,31 @@ struct SeriesCollectionView: View {
         )
         let page = (try? modelContext.fetch(descriptor)) ?? []
         fetchedFromStore += page.count
-        series.append(contentsOf: page.excludingRestricted(restriction))
+        let accepted = kind == .recentlyWatched
+            ? page.filter { RecentlyWatchedEvidence.seriesQualifies(id: $0.id, in: modelContext) }
+            : page
+        series.append(contentsOf: accepted.excludingRestricted(restriction))
         if page.count < collectionPageSize { canLoadMore = false }
     }
 }
 
 private enum SeriesCollectionQuery {
-    static func descriptor(for kind: LibraryCollection.Kind) -> FetchDescriptor<Series> {
+    static func descriptor(for kind: LibraryCollection.Kind, playlistPrefix: String) -> FetchDescriptor<Series> {
+        let prefix = playlistPrefix
         var descriptor = switch kind {
         case .recentlyWatched:
             FetchDescriptor<Series>(
-                predicate: #Predicate { $0.lastWatchedDate != nil },
+                predicate: #Predicate { $0.lastWatchedDate != nil && $0.id.starts(with: prefix) },
                 sortBy: [SortDescriptor(\.lastWatchedDate, order: .reverse)]
             )
         case .favorites:
             FetchDescriptor<Series>(
-                predicate: #Predicate { $0.isFavorite },
+                predicate: #Predicate { $0.isFavorite && $0.id.starts(with: prefix) },
                 sortBy: [SortDescriptor(\.name)]
             )
         case .recentlyAdded:
             FetchDescriptor<Series>(
-                predicate: #Predicate { $0.lastModified != nil },
+                predicate: #Predicate { $0.lastModified != nil && $0.id.starts(with: prefix) },
                 sortBy: [SortDescriptor(\.lastModified, order: .reverse), SortDescriptor(\.num)]
             )
         }
@@ -414,6 +424,7 @@ private enum SeriesCollectionQuery {
         case .favorites: descriptor.fetchLimit = 50
         case .recentlyAdded: descriptor.fetchLimit = recentlyAddedFetchLimit
         }
+        if prefix.isEmpty { descriptor.fetchLimit = 0 }
         return descriptor
     }
 

@@ -9,15 +9,18 @@ enum SyncedContentKind: String, Codable, CaseIterable {
     case series
     case episode
     case live
+    /// A `Category` hide flag. Cloud `contentId`s use `ContentIdentity.categoryCloudId`
+    /// so they cannot collide with `{uuid}-live-{streamId}` channel ids.
+    case category
 }
 
 /// CloudKit-synced per-content user state — the parts of the catalog the user
-/// actually creates: watch progress, watched flag, favorites and watchlist.
+/// actually creates: watch progress, watched flag, favorites, watchlist, and
+/// hidden channels / categories.
 ///
-/// Keyed by `contentId`, which equals the local model's `id` (`Movie.id`,
-/// `Series.id`, `Episode.id`, `LiveStream.id`). Those ids embed the playlist
-/// UUID, so a record produced on one device addresses the same catalog item on
-/// every other device once that device has synced the playlist's catalog.
+/// Keyed by `contentId`. For movies/series/episodes/live streams that equals
+/// the local model's `id`. For categories it is `ContentIdentity.categoryCloudId`
+/// so it cannot collide with a live-channel id that shares the same numeric tail.
 ///
 /// Only items with *some* non-default state ever get a record — the reconciler
 /// skips untouched catalog rows entirely, keeping the synced set small.
@@ -51,6 +54,10 @@ final class UserContentState {
     /// kinds.
     var favoriteOrder: Int?
 
+    /// Hidden from browsing (`LiveStream.isHidden` / `Category.isHidden`).
+    /// Defaulted so records written before hide-sync existed load as visible.
+    var isHidden: Bool = false
+
     /// The user's "For You" vote (`0` none, `1` up, `-1` down). Defaulted for
     /// CloudKit and additive, so records written before recommendations existed
     /// load as unvoted. Only movies and series ever set it.
@@ -73,6 +80,7 @@ final class UserContentState {
         isFavorite: Bool = false,
         addedToWatchlistDate: Date? = nil,
         favoriteOrder: Int? = nil,
+        isHidden: Bool = false,
         recommendationVoteRaw: Int = 0,
         updatedAt: Date = Date()
     ) {
@@ -85,6 +93,7 @@ final class UserContentState {
         self.isFavorite = isFavorite
         self.addedToWatchlistDate = addedToWatchlistDate
         self.favoriteOrder = favoriteOrder
+        self.isHidden = isHidden
         self.recommendationVoteRaw = recommendationVoteRaw
         self.updatedAt = updatedAt
     }

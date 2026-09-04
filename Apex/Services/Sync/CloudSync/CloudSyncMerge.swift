@@ -192,6 +192,9 @@ nonisolated struct ContentStateValues: Codable, Equatable {
     var isFavorite: Bool
     var addedToWatchlistDate: Date?
     var favoriteOrder: Int?
+    /// Hidden from browsing. Defaulted so shadows persisted before hide-sync
+    /// existed still decode.
+    var isHidden: Bool = false
     /// "For You" vote (`0` none, `1` up, `-1` down). Defaulted so the many
     /// call sites that don't carry a vote (episodes, live, older code) stay
     /// unchanged.
@@ -203,7 +206,7 @@ nonisolated struct ContentStateValues: Codable, Equatable {
     var isEmpty: Bool {
         watchProgress == 0 && !isWatched && lastWatchedDate == nil
             && !isFavorite && addedToWatchlistDate == nil && favoriteOrder == nil
-            && recommendationVoteRaw == 0
+            && !isHidden && recommendationVoteRaw == 0
     }
 
     /// Conflict policy (both devices changed this item since the last sync):
@@ -220,6 +223,10 @@ nonisolated struct ContentStateValues: Codable, Equatable {
             // doesn't reset the position of an older watchlist entry.
             addedToWatchlistDate: earlierDate(local.addedToWatchlistDate, cloud.addedToWatchlistDate),
             favoriteOrder: local.favoriteOrder ?? cloud.favoriteOrder,
+            // Prefer hidden on conflict so a hide on one device cannot lose to
+            // an overlapping unrelated edit on the other. A clean un-hide still
+            // syncs through the three-way merge when the other side is unchanged.
+            isHidden: local.isHidden || cloud.isHidden,
             recommendationVoteRaw: mergeVote(local.recommendationVoteRaw, cloud.recommendationVoteRaw)
         )
     }
@@ -252,7 +259,7 @@ nonisolated struct ContentStateValues: Codable, Equatable {
 extension ContentStateValues {
     enum CodingKeys: String, CodingKey {
         case watchProgress, isWatched, lastWatchedDate, isFavorite
-        case addedToWatchlistDate, favoriteOrder, recommendationVoteRaw
+        case addedToWatchlistDate, favoriteOrder, isHidden, recommendationVoteRaw
     }
 
     /// Hand-rolled decode so a shadow baseline persisted before votes existed
@@ -267,6 +274,7 @@ extension ContentStateValues {
         isFavorite = try container.decode(Bool.self, forKey: .isFavorite)
         addedToWatchlistDate = try container.decodeIfPresent(Date.self, forKey: .addedToWatchlistDate)
         favoriteOrder = try container.decodeIfPresent(Int.self, forKey: .favoriteOrder)
+        isHidden = try container.decodeIfPresent(Bool.self, forKey: .isHidden) ?? false
         recommendationVoteRaw = try container.decodeIfPresent(Int.self, forKey: .recommendationVoteRaw) ?? 0
     }
 }

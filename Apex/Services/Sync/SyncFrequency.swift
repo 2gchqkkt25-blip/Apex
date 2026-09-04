@@ -26,8 +26,9 @@ enum SyncFrequency: String, CaseIterable, Identifiable {
     /// `@AppStorage` key holding the selected raw value.
     static let storageKey = "lume.syncFrequency"
 
-    /// Default per issue #22: every 3 days.
-    static let defaultValue: SyncFrequency = .everyThreeDays
+    /// Default per issue #22: daily — new catalog titles otherwise sit unseen
+    /// for days. Users who prefer less frequent syncs can still pick 3/7 days.
+    static let defaultValue: SyncFrequency = .daily
 
     /// Resolves a stored raw value to a case, falling back to the default for an
     /// empty / unknown string.
@@ -117,17 +118,25 @@ enum AutoSync {
     ///   - alreadyStarted: whether this session has already kicked off a sync for
     ///     it that hasn't finished yet (avoids double-triggering from rapid view
     ///     updates before `status` flips to `.syncing`).
+    ///   - playbackActive: skip auto-sync while this device is playing, so a
+    ///     catalog pull cannot hitch the player or steal a provider connection.
+    ///   - remoteLeaseActive: another device is mid-sync (or just finished);
+    ///     skip so the blocking cover does not appear on every signed-in device.
     static func shouldSync(
         syncEnabled: Bool,
         status: SyncStatus,
         lastSyncDate: Date?,
         frequency: SyncFrequency,
         alreadyStarted: Bool,
+        playbackActive: Bool = false,
+        remoteLeaseActive: Bool = false,
         now: Date = Date()
     ) -> Bool {
         syncEnabled
             && status != .syncing
             && !alreadyStarted
+            && !playbackActive
+            && !remoteLeaseActive
             && frequency.isDue(lastSyncDate: lastSyncDate, now: now)
     }
 }

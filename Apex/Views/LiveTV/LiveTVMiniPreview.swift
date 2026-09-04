@@ -35,6 +35,7 @@ struct LiveTVMiniPreview: View {
     /// True once we've begun closing or promoting — ignores late failure
     /// callbacks so they don't re-enter expand.
     @State private var isHandingOff = false
+    @State private var playbackSessionToken = 0
     @ObservedObject private var network = NetworkMonitor.shared
 
     private var previewWidth: CGFloat {
@@ -140,6 +141,10 @@ struct LiveTVMiniPreview: View {
             requestExpand()
         }
         vlcCoordinator.configureLivePreview(media: media)
+        playbackSessionToken = PlaybackSession.becomeActive { [vlcCoordinator] in
+            vlcCoordinator.onPlaybackFailure = nil
+            vlcCoordinator.tearDown()
+        }
     }
 
     @MainActor
@@ -164,6 +169,7 @@ struct LiveTVMiniPreview: View {
     }
 
     private func stopPreviewEngine() {
+        PlaybackSession.resign(playbackSessionToken)
         vlcCoordinator.onPlaybackFailure = nil
         vlcCoordinator.tearDown()
     }

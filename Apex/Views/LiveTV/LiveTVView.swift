@@ -37,6 +37,13 @@ enum LiveTVPreviewSettings {
     static let enabledDefault = true
 }
 
+/// Controls whether the "All Channels" virtual section appears in the Live TV
+/// rail. Off hides it so Favorites (or Recents / Categories) leads instead.
+enum LiveTVSectionSettings {
+    static let showAllChannelsKey = "apex.liveTV.showAllChannels"
+    static let showAllChannelsDefault = true
+}
+
 struct LiveTVView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.contentRestriction) private var restriction
@@ -85,6 +92,7 @@ struct LiveTVView: View {
     @AppStorage(SortStorageKey.liveContent) private var contentSortRaw: String = ContentSortOption.playlist.rawValue
     @AppStorage(LiveTVLayoutMode.storageKey) private var layoutModeRaw: String = LiveTVLayoutMode.list.rawValue
     @AppStorage(LiveTVPreviewSettings.enabledKey) private var previewEnabled = LiveTVPreviewSettings.enabledDefault
+    @AppStorage(LiveTVSectionSettings.showAllChannelsKey) private var showAllChannels = LiveTVSectionSettings.showAllChannelsDefault
 
     private var categorySort: CategorySortOption {
         CategorySortOption(rawValue: categorySortRaw) ?? .playlist
@@ -450,7 +458,7 @@ struct LiveTVView: View {
     /// the synced categories.
     private var sortedSections: [LiveTVSection] {
         var sections: [LiveTVSection] = []
-        sections.append(.all)
+        if showAllChannels { sections.append(.all) }
         if hasFavorites { sections.append(.favorites) }
         if hasRecents { sections.append(.recentlyWatched) }
         sections.append(contentsOf: sortedCategories.map(LiveTVSection.category))

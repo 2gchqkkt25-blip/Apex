@@ -22,10 +22,19 @@ import SwiftUI
 final class CloudSyncCoordinator {
     let status = CloudSyncStatus()
 
-    private let engine: CloudSyncEngine
+    let engine: CloudSyncEngine
     private let cloudKitContainerIdentifier: String
     /// False under previews / automated tests / sideload builds.
     let isCloudKitEnabled: Bool
+
+    /// Sibling-device catalog-sync claims, refreshed after reconcile / lease writes.
+    var catalogSyncLeases: [UUID: CatalogSyncLease] = [:]
+    /// Playlists created from iCloud this process. Auto-sync covers skip these
+    /// after the first launch enqueue so Sync Now on one device does not pop
+    /// the progress UI on the others.
+    var importedPlaylistIDs: Set<UUID> = []
+    /// Bumped when leases or imported IDs change so `MainTabView` re-checks.
+    var catalogSyncEpoch = 0
 
     /// Coalescing guard: a reconcile requested while one is running sets
     /// `pendingReconcile` instead of overlapping, then runs once afterwards.
@@ -53,20 +62,20 @@ final class CloudSyncCoordinator {
     /// the catalog scan and the `@Query` refresh that froze the UI on tvOS.
     private var cloudImportPending = false
 
-    /// Covers pre-suspension flush / in-flight reconcile saves so SQLite isn't
-    /// left locked when RunningBoard suspends the process (`0xdead10cc`).
-    /// `nonisolated(unsafe)`: the expiration handler may run off the main actor
-    /// and must end the task synchronously before it returns.
+    // Covers pre-suspension flush / in-flight reconcile saves so SQLite isn't
+    // left locked when RunningBoard suspends the process (`0xdead10cc`).
+    // `nonisolated(unsafe)`: the expiration handler may run off the main actor
+    // and must end the task synchronously before it returns.
     #if os(iOS) || os(tvOS) || os(visionOS)
         private nonisolated(unsafe) var backgroundFlushTaskID = UIBackgroundTaskIdentifier.invalid
     #endif
 
-    private var observers: [NSObjectProtocol] = []
+    var observers: [NSObjectProtocol] = []
 
     init(catalogContainer: ModelContainer, cloudContainer: ModelContainer, cloudKitContainerIdentifier: String, cloudKitEnabled: Bool) {
         engine = CloudSyncEngine(catalogContainer: catalogContainer, cloudContainer: cloudContainer)
         self.cloudKitContainerIdentifier = cloudKitContainerIdentifier
-        self.isCloudKitEnabled = cloudKitEnabled
+        isCloudKitEnabled = cloudKitEnabled
         // Nothing to sync under previews / tests: open the launch gate now so an
         // empty store shows the add-playlist form immediately, as before.
         status.hasCompletedInitialSync = !cloudKitEnabled
@@ -78,6 +87,7 @@ final class CloudSyncCoordinator {
         observeRemoteChanges()
         observeContentSyncCompletion()
         observeMediaSyncCompletion()
+        observePlaylistCatalogSync()
     }
 
     // No `deinit`: this coordinator is created once in `LumeApp` and lives for
@@ -112,9 +122,9 @@ final class CloudSyncCoordinator {
         // reconcile's save triggers main-context merges that freeze all @Query
         // views — deferring means that freeze doesn't overlap with first paint.
         #if os(tvOS)
-        let launchDelay: Duration = DeviceMemoryTier.current.isConstrained ? .seconds(30) : .seconds(2)
+            let launchDelay: Duration = DeviceMemoryTier.current.isConstrained ? .seconds(30) : .seconds(2)
         #else
-        let launchDelay: Duration = .seconds(2)
+            let launchDelay: Duration = .seconds(2)
         #endif
         try? await Task.sleep(for: launchDelay)
         reconcile(reason: .launch)
@@ -249,6 +259,8 @@ final class CloudSyncCoordinator {
             // Back on the main actor (this closure is main-actor isolated).
             status.lastReconcile = Date()
             status.lastResult = result
+            importedPlaylistIDs.formUnion(result.importedPlaylistIDs)
+            await refreshCatalogSyncLeases()
 
             isReconciling = false
             if pendingReconcile {
@@ -291,6 +303,15 @@ final class CloudSyncCoordinator {
         } catch {
             Logger.sync.error("Profile switch failed: \(error.localizedDescription)")
         }
+    }
+
+    /// Removes a playlist locally and from its CloudKit mirror.
+    /// The engine keeps a deletion baseline until the immediate reconcile has
+    /// observed the tombstone, preventing an un-baselined mirror from restoring
+    /// the playlist the user just removed.
+    func deletePlaylist(id: UUID) async throws {
+        try await engine.deletePlaylist(id: id)
+        reconcile(reason: .queued, debounced: false)
     }
 
     /// Removes a home-media connection locally and from its CloudKit mirror.
@@ -354,7 +375,8 @@ final class CloudSyncCoordinator {
         if let accountStatus {
             status.account = Self.map(accountStatus)
         } else {
-            Logger.sync.error("iCloud account status timed out for \(self.cloudKitContainerIdentifier, privacy: .public)")
+            let identifier = cloudKitContainerIdentifier
+            Logger.sync.error("iCloud account status timed out for \(identifier, privacy: .public)")
             status.account = .couldNotDetermine
         }
     }
@@ -525,9 +547,13 @@ final class CloudSyncCoordinator {
             forName: .lumeContentSyncDidComplete,
             object: nil,
             queue: .main
-        ) { [weak self] _ in
+        ) { [weak self] note in
+            let playlistID = note.object as? UUID
             Task { @MainActor [weak self] in
                 self?.reconcile(reason: .contentSync)
+                if let playlistID {
+                    self?.claimCatalogSyncLease(playlistID)
+                }
             }
         }
         observers.append(observer)
@@ -540,11 +566,10 @@ final class CloudSyncCoordinator {
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
-                guard let self else { return }
-                if pendingReconcile {
-                    pendingReconcile = false
-                    reconcile(reason: .queued)
-                }
+                // Same as playlist catalog completion: a finished library import
+                // (and any `MediaServer` saved just before it) must publish to
+                // iCloud even when nothing was queued while `MediaSyncGate` was up.
+                self?.reconcile(reason: .contentSync)
             }
         }
         observers.append(observer)
@@ -573,9 +598,13 @@ enum ReconcileReason {
     case queued
 }
 
-extension Notification.Name {
+nonisolated extension Notification.Name {
     /// Posted by `ContentSyncManager` after a playlist's catalog sync succeeds.
     static let lumeContentSyncDidComplete = Notification.Name("ApexContentSyncDidComplete")
     /// Posted when a home media library import finishes so deferred iCloud work can resume.
     static let apexMediaSyncDidFinish = Notification.Name("ApexMediaSyncDidFinish")
+    /// Posted when a playlist catalog fetch begins so iCloud can carry a quiet-period lease.
+    static let apexPlaylistCatalogSyncWillStart = Notification.Name("ApexPlaylistCatalogSyncWillStart")
+    /// Posted when a playlist catalog fetch is cancelled or fails, releasing the lease.
+    static let apexPlaylistCatalogSyncDidAbort = Notification.Name("ApexPlaylistCatalogSyncDidAbort")
 }

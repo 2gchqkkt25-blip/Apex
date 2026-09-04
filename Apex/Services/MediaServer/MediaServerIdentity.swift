@@ -24,11 +24,25 @@ enum MediaServerIdentity {
         "\(serverUUID.uuidString)-library-\(sanitize(libraryID))"
     }
 
+    /// True when `categoryId` is a media-server library id (`{serverUUID}-library-…`).
+    ///
+    /// IPTV / M3U / Stremio rows use `{playlistUUID}-vod-…` / `-series-…` and must
+    /// not match. A group title that happens to contain "library" is still safe:
+    /// the UUID has to sit immediately before `-library-`.
+    static func isMediaServerCategoryID(_ categoryId: String?) -> Bool {
+        guard let categoryId, let range = categoryId.range(of: "-library-") else { return false }
+        return UUID(uuidString: String(categoryId[..<range.lowerBound])) != nil
+    }
+
     static func belongsToServer(catalogID: String, serverUUID: UUID) -> Bool {
         catalogID.hasPrefix("\(serverUUID.uuidString)-")
     }
 
-    /// Parses `{serverUUID}-movie-{remoteId}` (and series/episode variants).
+    /// Parses `{uuid}-movie-{remoteId}` (and series/episode variants).
+    ///
+    /// IPTV playlist rows use this same shape (`{playlistUUID}-movie-{streamId}`),
+    /// so a successful parse is **not** proof the item came from Jellyfin/Emby/Plex.
+    /// Use `belongsToKnownMediaServer` or `isMediaServerCategoryID` for that.
     static func parseCatalogID(_ catalogID: String) -> (serverUUID: UUID, remoteID: String)? {
         for marker in ["-movie-", "-series-", "-episode-"] {
             guard let range = catalogID.range(of: marker) else { continue }
@@ -52,14 +66,18 @@ enum MediaServerIdentity {
 }
 
 extension Movie {
+    /// True when this row was imported from Jellyfin / Emby / Plex.
+    /// Catalog ids share `{UUID}-movie-…` with IPTV, so the library category
+    /// (or a `mediaserver://` stream URL) is what distinguishes them.
     var isMediaServerCatalogItem: Bool {
-        MediaServerIdentity.parseCatalogID(id) != nil
+        MediaServerIdentity.isMediaServerCategoryID(categoryId)
+            || (directURL?.hasPrefix("mediaserver://") == true)
     }
 }
 
 extension Series {
     var isMediaServerCatalogItem: Bool {
-        MediaServerIdentity.parseCatalogID(id) != nil
+        MediaServerIdentity.isMediaServerCategoryID(categoryId)
     }
 }
 
@@ -67,10 +85,14 @@ extension Series {
 /// memory bounded on every platform (tvOS has ~1.5 GB; iOS/macOS can still
 /// spike during a full-library import without paging).
 enum MediaServerCatalogLimits {
+    /// Set true while `MediaServerSyncService` is actively syncing; relaxes tvOS
+    /// limits since the player isn't consuming memory during a dedicated sync screen.
+    nonisolated(unsafe) static var syncActive = false
+
     /// Items fetched from Jellyfin/Emby/Plex per API request during sync.
     static var syncPageSize: Int {
         #if os(tvOS)
-        10
+        syncActive ? 100 : 10
         #else
         150
         #endif
@@ -79,7 +101,7 @@ enum MediaServerCatalogLimits {
     /// Rows loaded or deleted per SwiftData batch during sync purge / server delete.
     static var catalogBatchSize: Int {
         #if os(tvOS)
-        20
+        syncActive ? 100 : 20
         #else
         200
         #endif
@@ -88,16 +110,18 @@ enum MediaServerCatalogLimits {
     /// Existing catalog rows looked up per predicate chunk during upsert.
     static var lookupChunkSize: Int {
         #if os(tvOS)
-        15
+        syncActive ? 50 : 15
         #else
         50
         #endif
     }
 
     /// Apple TV syncs in small passes so peak memory stays under the ~1.5 GB limit.
+    /// During an active sync the player isn't loaded, so we can import far more
+    /// per pass and avoid forcing the user to tap Sync repeatedly.
     static var maxItemsPerSyncPass: Int? {
         #if os(tvOS)
-        250
+        syncActive ? 2000 : 250
         #else
         nil
         #endif
@@ -106,16 +130,17 @@ enum MediaServerCatalogLimits {
     /// Fewer SwiftData saves → fewer main-context merges while Home stays mounted on tvOS.
     static var syncPagesPerSave: Int {
         #if os(tvOS)
-        5
+        syncActive ? 3 : 5
         #else
         1
         #endif
     }
 
     /// Pause between save batches on Apple TV so merges can settle.
+    /// Reduced during active sync since the player isn't competing for resources.
     static var syncBatchPause: Duration {
         #if os(tvOS)
-        .milliseconds(350)
+        syncActive ? .milliseconds(50) : .milliseconds(350)
         #else
         .milliseconds(0)
         #endif

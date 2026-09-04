@@ -20,7 +20,7 @@ final class StalkerPortalFlowTests: XCTestCase {
         let app = XCUIApplication()
         launchAndOpenAddForm(app)
         addStalkerPortal(app)
-        dismissSettingsToTabBar(app)
+        navigateToLiveTV(app)
         activatePortalPlaylist(app)
         runManualSync(app)
         assertLiveTVShowsContent(app)
@@ -38,7 +38,10 @@ final class StalkerPortalFlowTests: XCTestCase {
 
         // Fresh install shows the login form as root; otherwise add via Settings.
         if app.tabBars.firstMatch.waitForExistence(timeout: 5) {
-            app.buttons["gear"].tap()
+            // Settings is a tab (not a sheet) — tap the gear tab bar item.
+            let settingsTab = app.tabBars.buttons.element(boundBy: app.tabBars.buttons.count - 1)
+            XCTAssertTrue(settingsTab.waitForExistence(timeout: 3))
+            settingsTab.tap()
             let addButton = app.buttons["Add Playlist"]
             XCTAssertTrue(addButton.waitForExistence(timeout: 3))
             addButton.tap()
@@ -72,18 +75,13 @@ final class StalkerPortalFlowTests: XCTestCase {
         XCTAssertTrue(urlField.waitForNonExistence(timeout: 30), "Portal was not accepted")
     }
 
-    /// Dismisses the Settings sheet and waits for the tab bar.
-    private func dismissSettingsToTabBar(_ app: XCUIApplication) {
-        // iOS Settings is a sheet with no Done button (Done is macOS-only), so
-        // dismiss it by dragging its navigation bar down to the bottom edge.
-        let settingsNav = app.navigationBars["Settings"]
-        if settingsNav.waitForExistence(timeout: 10) {
-            let from = settingsNav.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-            let target = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 1.0))
-            from.press(forDuration: 0.1, thenDragTo: target)
-            XCTAssertTrue(settingsNav.waitForNonExistence(timeout: 10), "Settings sheet did not dismiss")
-        }
-        XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: 30), "Tab bar not visible")
+    /// Navigates from Settings (a tab) back to the Live TV tab.
+    private func navigateToLiveTV(_ app: XCUIApplication) {
+        // Settings is now a tab, not a sheet — there is nothing to dismiss.
+        // Just switch to the Live TV tab directly.
+        let liveTVTab = app.tabBars.buttons["Live TV"]
+        XCTAssertTrue(liveTVTab.waitForExistence(timeout: 10), "Live TV tab not found")
+        liveTVTab.tap()
     }
 
     /// Switches the active playlist to the portal just added.
@@ -92,7 +90,6 @@ final class StalkerPortalFlowTests: XCTestCase {
         // stays active, so switch the active playlist to the portal we just added
         // via the library toolbar's playlist switcher (a menu labelled with the
         // active playlist's name).
-        app.tabBars.buttons["Live TV"].tap()
         let switcher = app.buttons["Test Playlist"].firstMatch
         XCTAssertTrue(switcher.waitForExistence(timeout: 15), "Playlist switcher not found")
         switcher.tap()

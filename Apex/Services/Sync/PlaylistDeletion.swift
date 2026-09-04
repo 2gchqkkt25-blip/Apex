@@ -20,9 +20,10 @@ import OSLog
 import SwiftData
 
 /// `nonisolated` so it can run both on the main actor (the Settings deletion
-/// buttons) and on a background `ModelContext` (legacy iCloud path). Cloud
-/// reconcile no longer calls this for a still-present local playlist — a missing
-/// mirror is re-published instead of treated as a remote delete.
+/// buttons) and on a background `ModelContext` (iCloud reconcile / explicit
+/// `CloudSyncEngine.deletePlaylist`). Remote deletes arrive as a tombstone on
+/// `SyncedPlaylist`; a missing mirror without a tombstone is still treated as
+/// a slow CloudKit import and re-published, not as a user delete.
 nonisolated enum PlaylistDeletion {
     /// Deletes `playlist` and every catalog item it brought in. Categories,
     /// episodes and cast members cascade from their parents; movies, series and
@@ -54,7 +55,7 @@ nonisolated enum PlaylistDeletion {
         // just the one column being read.
         var survivingChannelIDs = Set<String>()
         if !removedChannelIDs.isEmpty {
-            let candidates: [String?] = removedChannelIDs.map { $0 }
+            let candidates: [String?] = removedChannelIDs.map(\.self)
             var survivingDescriptor = FetchDescriptor<LiveStream>(
                 predicate: #Predicate { stream in
                     !stream.id.starts(with: prefix) && candidates.contains(stream.epgChannelId)

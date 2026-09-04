@@ -16,7 +16,14 @@ struct MoviesView: View {
     @Environment(ThemeManager.self) private var themeManager
     // Optional so previews (which don't inject it) fall back to a local path.
     @Environment(DeepLinkRouter.self) private var router: DeepLinkRouter?
-    @State private var fallbackPath = NavigationPath()
+    #if os(tvOS)
+        /// tvOS `NavigationLink(value:)` only pushes when the stack owns a local
+        /// `@State` path (Home / Media). Binding the stack to `DeepLinkRouter`
+        /// does not participate in the focus engine, so posters never opened.
+        @State private var path = NavigationPath()
+    #else
+        @State private var fallbackPath = NavigationPath()
+    #endif
     @Query private var playlists: [Playlist]
     @Query(filter: #Predicate<Category> { $0.typeRaw == "vod" && $0.isHidden == false })
     private var categories: [Category]
@@ -45,7 +52,33 @@ struct MoviesView: View {
         // playlist's categories, so reading it twice (emptiness + ForEach)
         // would duplicate that work.
         let sorted = sortedCategories
-        NavigationStack(path: navigationPath) {
+        #if os(tvOS)
+            moviesStack(sorted: sorted, path: $path)
+                .onAppear { consumeDeepLinkPath() }
+        #else
+            Group {
+                if let router {
+                    DeepLinkNavigationStack(router: router, stack: .movies) { path in
+                        moviesStack(sorted: sorted, path: path)
+                    }
+                } else {
+                    moviesStack(sorted: sorted, path: $fallbackPath)
+                }
+            }
+        #endif
+    }
+
+    #if os(tvOS)
+        private func consumeDeepLinkPath() {
+            guard let router, !router.moviesPath.isEmpty else { return }
+            path = router.moviesPath
+            router.moviesPath = NavigationPath()
+        }
+    #endif
+
+    @ViewBuilder
+    private func moviesStack(sorted: [Category], path: Binding<NavigationPath>) -> some View {
+        NavigationStack(path: path) {
             Group {
                 if playlists.isEmpty {
                     ContentUnavailableView(
@@ -113,13 +146,6 @@ struct MoviesView: View {
                 #endif
             }
         }
-    }
-
-    /// Drives the stack from the shared `DeepLinkRouter` so an `onOpenURL` push
-    /// lands here; falls back to a local path in previews where no router exists.
-    private var navigationPath: Binding<NavigationPath> {
-        guard let router else { return $fallbackPath }
-        return Binding(get: { router.moviesPath }, set: { router.moviesPath = $0 })
     }
 
     /// The playlist whose content is currently shown, resolved from the global

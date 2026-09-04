@@ -7,7 +7,7 @@ SwiftData syncs four lightweight user-data models (not the catalog):
 | Model | What syncs |
 |-------|------------|
 | `SyncedPlaylist` | Playlist credentials + config (catalog re-fetched per device) |
-| `UserContentState` | Watch progress, favorites, watchlist, recommendation votes |
+| `UserContentState` | Watch progress, favorites, watchlist, recommendation votes, hidden channels/categories |
 | `UserProfile` | Profile roster (names, avatars, child flag) |
 | `SyncedEPGSource` | Manual EPG sources only |
 
@@ -79,6 +79,15 @@ TestFlight and App Store builds use the **Production** CloudKit environment.
 
 Do **not** skip this step — Production builds without a deployed schema fail sync with opaque `CKError` / partial-failure logs.
 
+**Build 53 schema fields** (must already be in Production before uploading Build 54):
+
+| Record | New fields |
+|--------|------------|
+| `CD_SyncedPlaylist` | `deletedAt` (tombstone), `catalogSyncDeviceID`, `catalogSyncHeartbeatAt` (quiet-period lease) |
+| `CD_SyncedMediaServer` | `deletedAt` (tombstone; may already be in Production from Build 52) |
+
+**Hide-sync (Build 55, additive):** `CD_UserContentState.isHidden` plus `kindRaw` value `category`. Deploy Development → Production before uploading Build 55, or sibling devices will drop the new field.
+
 ---
 
 ## 4. Verify before TestFlight
@@ -116,7 +125,7 @@ CloudKit is disabled only for **SwiftUI previews** and **automated tests**. Unsi
 | **Production sync verified** (playlist + user data) | ✅ TestFlight |
 | Age rating **17+** + Privacy URL in App Information | ✅ Documented — confirm in Connect |
 | App Privacy questionnaire | ⏳ Complete in Connect (align with `PRIVACY.md`) |
-| External TestFlight Beta App Review | 🔄 Per build (build **17**) |
+| External TestFlight Beta App Review | 🔄 Per build (build **55**) |
 
 ---
 

@@ -92,7 +92,10 @@
         }
 
         func skip(by seconds: Double) {
-            coordinator?.skip(interval: Int(seconds))
+            guard let coordinator, let player = coordinator.playerLayer?.player else { return }
+            let current = player.currentPlaybackTime
+            let duration = player.duration
+            coordinator.seek(time: PlaybackSeek.target(current: current, duration: duration, delta: seconds))
         }
 
         func seek(to seconds: TimeInterval) {

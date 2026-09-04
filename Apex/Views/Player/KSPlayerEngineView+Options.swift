@@ -57,6 +57,7 @@ extension KSPlayerEngineView {
         if !media.isLive, media.startTime > 1 {
             options.startPlayTime = media.startTime
         }
+        options.autoSelectEmbedSubtitle = true
         if DeviceMemoryTier.current.isConstrained, media.isHeavyDirectRemux {
             // MKV with many PGS tracks: KSPlayer allocates a subtitle decoder per
             // stream during probe — skip auto-select and cap FFmpeg analysis.

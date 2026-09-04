@@ -41,6 +41,11 @@ final class MediaServerSyncService {
         progressDetail = "Connecting…"
         progressFraction = 0
 
+        // Relax tvOS catalog limits during dedicated sync — the player isn't
+        // loaded so memory headroom exists for larger pages and bigger batches.
+        MediaServerCatalogLimits.syncActive = true
+        defer { MediaServerCatalogLimits.syncActive = false }
+
         let outcome = try await Task.detached(priority: .utility) {
             try await MediaServerSyncRunner.run(
                 snapshot: snapshot,
@@ -733,7 +738,7 @@ private enum MediaServerSyncRunner {
         series.lastModified = syncStamp
         series.indexedAt = Date()
         if let ud = item.userData, ud.played {
-            series.lastWatchedDate = ud.lastPlayedDate ?? Date()
+            series.lastWatchedDate = ud.lastPlayedDate
         }
     }
 

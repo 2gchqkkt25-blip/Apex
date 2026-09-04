@@ -67,6 +67,9 @@ struct VLCPlayerEngineView: View {
     /// While an overlay panel (episodes / info) is open the controls must not
     /// auto-hide out from under the viewer.
     @State private var isPanelOpen = false
+    /// Token for `PlaybackSession` so a second player can stop this engine's
+    /// audio before `onDisappear` runs.
+    @State private var playbackSessionToken = 0
     /// Bumped to ask the overlay to close its open panel (Menu/back press).
     @State private var panelCloseToken = 0
     #if os(tvOS)
@@ -108,7 +111,7 @@ struct VLCPlayerEngineView: View {
                 .ignoresSafeArea()
 
             VLCVideoContainer(coordinator: coordinator)
-                .ignoresSafeArea()
+                .playerVideoPinnedToTopWhileGuideOpen(guideOpen: isPanelOpen)
 
             // Always-present transparent layer that reliably catches taps
             // over the VLC render surface. A UIView/NSView representable can
@@ -162,12 +165,14 @@ struct VLCPlayerEngineView: View {
             #if os(tvOS)
                 seekBridge.onAfterSeek = { Task { @MainActor in catcherFocused = true } }
             #endif
+            claimPlaybackSession()
             scheduleHide()
         }
         .onDisappear {
             hideTask?.cancel()
             hoverHideTask?.cancel()
             seekBridge.reset()
+            releasePlaybackSession()
             coordinator.tearDown()
         }
         .onChange(of: coordinator.isPlaying) { _, _ in
@@ -225,8 +230,8 @@ struct VLCPlayerEngineView: View {
                     }
                 }
             }
-            .onKeyPress(.leftArrow) { coordinator.skip(by: -15); resetHideTimer(); return .handled }
-            .onKeyPress(.rightArrow) { coordinator.skip(by: 15); resetHideTimer(); return .handled }
+            .onKeyPress(.leftArrow) { skipWhileWatching(-15); resetHideTimer(); return .handled }
+            .onKeyPress(.rightArrow) { skipWhileWatching(15); resetHideTimer(); return .handled }
             .onKeyPress(.space) { togglePlay(); return .handled }
             .onKeyPress(.escape) { closePlayer(); return .handled }
         #endif
@@ -254,11 +259,15 @@ struct VLCPlayerEngineView: View {
                 // While watching live TV with the controls hidden, left opens
                 // the channel browser, up/down surf adjacent channels — the
                 // classic channel rocker — and right recalls the last channel
-                // watched. Any other move just summons the controls.
+                // watched. On VOD, left/right skip without summoning the overlay.
                 if media.isLive, direction == .left {
                     openChannelBrowser()
                 } else if media.isLive, direction == .up || direction == .down || direction == .right {
                     switchLiveChannel(direction)
+                } else if !media.isLive, direction == .left {
+                    skipWhileWatching(-10)
+                } else if !media.isLive, direction == .right {
+                    skipWhileWatching(10)
                 } else {
                     showControls()
                 }
@@ -310,6 +319,12 @@ struct VLCPlayerEngineView: View {
 
     private func togglePlay() {
         coordinator.togglePlay()
+        resetHideTimer()
+    }
+
+    private func skipWhileWatching(_ delta: TimeInterval) {
+        coordinator.skip(by: delta)
+        clock.current = PlaybackSeek.target(current: clock.current, duration: clock.duration, delta: delta)
         resetHideTimer()
     }
 
@@ -436,6 +451,7 @@ struct VLCPlayerEngineView: View {
     }
 
     private func closePlayer() {
+        PlaybackSession.stopActive()
         #if os(macOS)
             if let window = NSApp.keyWindow, window.styleMask.contains(.fullScreen) {
                 window.toggleFullScreen(nil)
@@ -444,6 +460,16 @@ struct VLCPlayerEngineView: View {
         #else
             dismiss()
         #endif
+    }
+
+    private func claimPlaybackSession() {
+        playbackSessionToken = PlaybackSession.becomeActive { [coordinator] in
+            coordinator.tearDown()
+        }
+    }
+
+    private func releasePlaybackSession() {
+        PlaybackSession.resign(playbackSessionToken)
     }
 
     /// The coordinator reported it can't start the stream. On an initial-load

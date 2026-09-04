@@ -85,4 +85,31 @@ struct ContentSyncManagerLogicTests {
         playlist.syncStatus = .error
         #expect(playlist.syncStatusRaw == "error")
     }
+
+    // MARK: - EpisodeRefreshPlanner
+
+    @Test func `episode refresh prefers last_modified then watched without duplicates`() {
+        let ids = EpisodeRefreshPlanner.orderedIds(
+            lastModifiedChanged: ["changed-a", "changed-b", "watched-1"],
+            recentlyWatched: ["watched-1", "watched-2"]
+        )
+        #expect(ids == ["changed-a", "changed-b", "watched-1", "watched-2"])
+    }
+
+    @Test func `episode refresh caps last_modified without dropping watched`() {
+        let changed = (1 ... 80).map { "changed-\($0)" }
+        let watched = (1 ... 25).map { "watched-\($0)" }
+        let ids = EpisodeRefreshPlanner.orderedIds(
+            lastModifiedChanged: changed,
+            recentlyWatched: watched
+        )
+        #expect(ids.count == EpisodeRefreshPlanner.totalCap)
+        #expect(ids.prefix(EpisodeRefreshPlanner.lastModifiedLimit).allSatisfy { $0.hasPrefix("changed-") })
+        #expect(ids.suffix(EpisodeRefreshPlanner.recentlyWatchedLimit).allSatisfy { $0.hasPrefix("watched-") })
+        #expect(!ids.contains("watched-21"))
+    }
+
+    @Test func `episode refresh is empty when nothing changed or watched`() {
+        #expect(EpisodeRefreshPlanner.orderedIds(lastModifiedChanged: [], recentlyWatched: []).isEmpty)
+    }
 }

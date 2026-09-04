@@ -97,13 +97,13 @@
                     if direction == .left || direction == .right { moveScrub(direction) }
                     return
                 }
-                // Live TV: Up from transport opens the Guide panel directly so
-                // the viewer doesn't have to hunt for the tab pill. Channel
-                // surfing stays on the host tap-catcher when controls are hidden.
-                if media.isLive, openTab == nil, direction == .up,
-                   focus == .transport || focus == .scrubber || focus == nil
-                {
-                    toggle(tab: .guide)
+                // Live TV: Up/Down surf channels when no panel is open,
+                // matching the hidden-controls tap-catcher behavior. When a
+                // panel (Guide, Info, etc.) is visible, vertical navigation
+                // stays inside the panel so the viewer can scroll its list.
+                if media.isLive, openTab == nil, direction == .up || direction == .down {
+                    onSwitchChannel(direction)
+                    return
                 }
             }
             // The host bumps `panelCloseToken` on a Menu/back press. Mid-scrub
@@ -179,6 +179,7 @@
                     },
                     focus: $focus
                 )
+                .frame(height: 480)
                 .transition(.opacity)
             case .info:
                 infoPanel
@@ -296,8 +297,7 @@
                 if !media.isLive {
                     leadingTransportButton
                     circleButton(systemImage: "gobackward.10", focus: .skipBackward) {
-                        coordinator.skip(by: -10)
-                        onResetHideTimer()
+                        skipUsingClock(by: -10)
                     }
                 }
 
@@ -309,8 +309,7 @@
 
                 if !media.isLive {
                     circleButton(systemImage: "goforward.10", focus: .skipForward) {
-                        coordinator.skip(by: 10)
-                        onResetHideTimer()
+                        skipUsingClock(by: 10)
                     }
                     trailingTransportButton
                 }
@@ -327,8 +326,7 @@
                 }
             } else {
                 circleButton(systemImage: "backward.fill", focus: .previousItem) {
-                    coordinator.skip(by: -300)
-                    onResetHideTimer()
+                    skipUsingClock(by: -300)
                 }
             }
         }
@@ -341,8 +339,7 @@
                 }
             } else {
                 circleButton(systemImage: "forward.fill", focus: .nextItem) {
-                    coordinator.skip(by: 300)
-                    onResetHideTimer()
+                    skipUsingClock(by: 300)
                 }
             }
         }

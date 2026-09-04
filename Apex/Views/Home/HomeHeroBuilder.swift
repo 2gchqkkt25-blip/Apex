@@ -11,19 +11,22 @@ import Foundation
 import SwiftData
 
 enum HomeHeroBuilder {
+    /// Matches iOS/macOS Home rails — TMDB returns more, but rows stay at this cap.
+    static let trendingRowLimit = 20
+
     private static var heroCap: Int {
         #if os(tvOS)
-        DeviceMemoryTier.current.isConstrained ? 3 : 8
+            DeviceMemoryTier.current.isConstrained ? 3 : 8
         #else
-        8
+            8
         #endif
     }
 
     private static var minimumHeroCount: Int {
         #if os(tvOS)
-        DeviceMemoryTier.current.isConstrained ? 1 : 3
+            DeviceMemoryTier.current.isConstrained ? 1 : 3
         #else
-        3
+            3
         #endif
     }
 
@@ -31,11 +34,12 @@ enum HomeHeroBuilder {
     /// post-sync Home loads from hydrating a 20k+ catalog on device.
     private static var libraryFetchLimit: Int {
         #if os(tvOS)
-        DeviceMemoryTier.current.isConstrained ? 40 : 80
+            DeviceMemoryTier.current.isConstrained ? 40 : 80
         #else
-        80
+            80
         #endif
     }
+
     private static let titleSearchFetchLimit = 100
 
     /// Interleaves trending movies and series the user owns into hero items.
@@ -91,7 +95,7 @@ enum HomeHeroBuilder {
             sortBy: [SortDescriptor(\.rating, order: .reverse)]
         )
         movieDescriptor.fetchLimit = libraryFetchLimit
-        let movies = ((try? context.fetch(movieDescriptor)) ?? [])
+        let movies = SafeFetch.fetch(movieDescriptor, context: context)
             .filter { !restriction.hides(categoryID: $0.categoryId) }
 
         for movie in movies {
@@ -111,7 +115,7 @@ enum HomeHeroBuilder {
             predicate: #Predicate { $0.id.localizedStandardContains(playlistPrefix) }
         )
         seriesDescriptor.fetchLimit = libraryFetchLimit
-        let seriesList = ((try? context.fetch(seriesDescriptor)) ?? [])
+        let seriesList = SafeFetch.fetch(seriesDescriptor, context: context)
             .filter { !restriction.hides(categoryID: $0.categoryId) }
             .sorted { libraryScore($0) > libraryScore($1) }
 
@@ -196,7 +200,7 @@ enum HomeHeroBuilder {
             predicate: #Predicate { $0.tmdbId == tmdbId }
         )
         descriptor.fetchLimit = 12
-        let candidates = (try? context.fetch(descriptor)) ?? []
+        let candidates = SafeFetch.fetch(descriptor, context: context)
         return candidates.first {
             HomeCatalogScope.includes($0.id, playlistPrefix: playlistPrefix.isEmpty ? nil : playlistPrefix)
         }
@@ -207,7 +211,7 @@ enum HomeHeroBuilder {
             predicate: #Predicate { $0.tmdbId == tmdbId }
         )
         descriptor.fetchLimit = 12
-        let candidates = (try? context.fetch(descriptor)) ?? []
+        let candidates = SafeFetch.fetch(descriptor, context: context)
         return candidates.first {
             HomeCatalogScope.includes($0.id, playlistPrefix: playlistPrefix.isEmpty ? nil : playlistPrefix)
         }
@@ -229,7 +233,7 @@ enum HomeHeroBuilder {
             }
         )
         descriptor.fetchLimit = titleSearchFetchLimit
-        let candidates = (try? context.fetch(descriptor)) ?? []
+        let candidates = SafeFetch.fetch(descriptor, context: context)
         return candidates.first { movie in
             ContentIndexText.searchQuery(for: movie.name).title.lowercased() == normalizedTrending
         }
@@ -251,7 +255,7 @@ enum HomeHeroBuilder {
             }
         )
         descriptor.fetchLimit = titleSearchFetchLimit
-        let candidates = (try? context.fetch(descriptor)) ?? []
+        let candidates = SafeFetch.fetch(descriptor, context: context)
         return candidates.first { series in
             ContentIndexText.searchQuery(for: series.name).title.lowercased() == normalizedTrending
         }
@@ -278,9 +282,9 @@ enum HomeHeroBuilder {
 
 /// Lightweight trending match result — catalog ids only so SwiftData work can
 /// run off the main thread and models are re-fetched on the view context.
-struct TrendingCatalogMatch: Sendable {
-    struct HeroSlot: Sendable {
-        enum Media: Sendable { case movie, series }
+struct TrendingCatalogMatch {
+    struct HeroSlot {
+        enum Media { case movie, series }
         let media: Media
         let catalogID: String
         let backdropPath: String?
@@ -348,7 +352,7 @@ extension HomeHeroBuilder {
                     sortBy: [SortDescriptor(\.rating, order: .reverse)]
                 )
                 movieDescriptor.fetchLimit = rowLimit
-                let movieIDs = ((try? context.fetch(movieDescriptor)) ?? [])
+                let movieIDs = SafeFetch.fetch(movieDescriptor, context: context)
                     .filter { !restriction.hides(categoryID: $0.categoryId) }
                     .map(\.id)
 
@@ -356,7 +360,7 @@ extension HomeHeroBuilder {
                     predicate: #Predicate { $0.id.localizedStandardContains(playlistPrefix) }
                 )
                 seriesDescriptor.fetchLimit = rowLimit * 2
-                let seriesIDs = ((try? context.fetch(seriesDescriptor)) ?? [])
+                let seriesIDs = SafeFetch.fetch(seriesDescriptor, context: context)
                     .filter { !restriction.hides(categoryID: $0.categoryId) }
                     .sorted { libraryScore($0) > libraryScore($1) }
                     .prefix(rowLimit)
@@ -390,7 +394,7 @@ extension HomeHeroBuilder {
                 ]
             )
             movieDescriptor.fetchLimit = libraryFetchLimit
-            let movieIDs = ((try? context.fetch(movieDescriptor)) ?? [])
+            let movieIDs = SafeFetch.fetch(movieDescriptor, context: context)
                 .filter { $0.isMediaServerCatalogItem && !restriction.hides(categoryID: $0.categoryId) }
                 .prefix(limit)
                 .map(\.id)
@@ -402,7 +406,7 @@ extension HomeHeroBuilder {
                 ]
             )
             seriesDescriptor.fetchLimit = libraryFetchLimit
-            let seriesIDs = ((try? context.fetch(seriesDescriptor)) ?? [])
+            let seriesIDs = SafeFetch.fetch(seriesDescriptor, context: context)
                 .filter { $0.isMediaServerCatalogItem && !restriction.hides(categoryID: $0.categoryId) }
                 .sorted { libraryScore($0) > libraryScore($1) }
                 .prefix(limit)
@@ -489,19 +493,11 @@ extension HomeHeroBuilder {
             )
 
             return TrendingCatalogMatch(
-                movieIDs: Array(movieIDs.prefix(trendingRowLimit)),
-                seriesIDs: Array(seriesIDs.prefix(trendingRowLimit)),
+                movieIDs: Array(movieIDs.prefix(Self.trendingRowLimit)),
+                seriesIDs: Array(seriesIDs.prefix(Self.trendingRowLimit)),
                 heroSlots: heroSlots
             )
         }.value
-    }
-
-    private static var trendingRowLimit: Int {
-        #if os(tvOS)
-        DeviceMemoryTier.current.isConstrained ? 6 : 20
-        #else
-        20
-        #endif
     }
 
     nonisolated static func fetchMoviesByTmdbId(
@@ -514,7 +510,7 @@ extension HomeHeroBuilder {
         guard !ids.isEmpty else { return [:] }
         let descriptor = FetchDescriptor<Movie>(predicate: movieTmdbIdPredicate(ids: ids))
         var byId: [Int: Movie] = [:]
-        for movie in (try? context.fetch(descriptor)) ?? [] {
+        for movie in SafeFetch.fetch(descriptor, context: context) {
             guard HomeCatalogScope.includes(movie.id, playlistPrefix: playlistPrefix.isEmpty ? nil : playlistPrefix),
                   !restriction.hides(categoryID: movie.categoryId),
                   let tmdbId = movie.tmdbId, byId[tmdbId] == nil
@@ -534,7 +530,7 @@ extension HomeHeroBuilder {
         guard !ids.isEmpty else { return [:] }
         let descriptor = FetchDescriptor<Series>(predicate: seriesTmdbIdPredicate(ids: ids))
         var byId: [Int: Series] = [:]
-        for series in (try? context.fetch(descriptor)) ?? [] {
+        for series in SafeFetch.fetch(descriptor, context: context) {
             guard HomeCatalogScope.includes(series.id, playlistPrefix: playlistPrefix.isEmpty ? nil : playlistPrefix),
                   !restriction.hides(categoryID: series.categoryId),
                   let tmdbId = series.tmdbId, byId[tmdbId] == nil
@@ -609,7 +605,7 @@ extension HomeHeroBuilder {
                 sortBy: [SortDescriptor(\.rating, order: .reverse)]
             )
             movieDescriptor.fetchLimit = libraryFetchLimit
-            let movies = ((try? context.fetch(movieDescriptor)) ?? [])
+            let movies = SafeFetch.fetch(movieDescriptor, context: context)
                 .filter { !restriction.hides(categoryID: $0.categoryId) }
 
             for movie in movies {
@@ -630,7 +626,7 @@ extension HomeHeroBuilder {
                 predicate: #Predicate { $0.id.localizedStandardContains(playlistPrefix) }
             )
             seriesDescriptor.fetchLimit = libraryFetchLimit
-            let seriesList = ((try? context.fetch(seriesDescriptor)) ?? [])
+            let seriesList = SafeFetch.fetch(seriesDescriptor, context: context)
                 .filter { !restriction.hides(categoryID: $0.categoryId) }
                 .sorted { libraryScore($0) > libraryScore($1) }
 
@@ -678,7 +674,7 @@ extension HomeHeroBuilder {
             ]
         )
         movieDescriptor.fetchLimit = libraryFetchLimit
-        let movies = ((try? context.fetch(movieDescriptor)) ?? [])
+        let movies = SafeFetch.fetch(movieDescriptor, context: context)
             .filter { movie in
                 movie.isMediaServerCatalogItem
                     && !restriction.hides(categoryID: movie.categoryId)
@@ -704,7 +700,7 @@ extension HomeHeroBuilder {
             ]
         )
         seriesDescriptor.fetchLimit = libraryFetchLimit
-        let seriesList = ((try? context.fetch(seriesDescriptor)) ?? [])
+        let seriesList = SafeFetch.fetch(seriesDescriptor, context: context)
             .filter { series in
                 series.isMediaServerCatalogItem
                     && !restriction.hides(categoryID: series.categoryId)

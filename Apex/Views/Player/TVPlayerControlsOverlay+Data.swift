@@ -91,10 +91,17 @@
         /// Commit the seek and leave scrub mode, resuming playback if it had
         /// been playing when scrubbing began.
         func commitScrub() {
-            let target = min(max(scrubTarget, 0), max(clock.duration, 0))
+            let target = PlaybackSeek.target(current: scrubTarget, duration: clock.duration, delta: 0)
             coordinator.seek(to: target)
             clock.current = target
             finishScrub(resume: wasPlayingBeforeScrub)
+        }
+
+        func skipUsingClock(by delta: TimeInterval) {
+            let target = PlaybackSeek.target(current: clock.current, duration: clock.duration, delta: delta)
+            coordinator.seek(to: target)
+            clock.current = target
+            onResetHideTimer()
         }
 
         /// Abort the scrub (Menu press) without seeking, restoring the prior

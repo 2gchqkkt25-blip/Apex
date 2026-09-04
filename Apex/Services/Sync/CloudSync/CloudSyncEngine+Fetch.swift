@@ -127,6 +127,7 @@ extension CloudSyncEngine {
         try seriesEntries().forEach { map[$0] = $1 }
         try episodeEntries().forEach { map[$0] = $1 }
         try liveEntries().forEach { map[$0] = $1 }
+        try categoryEntries().forEach { map[$0] = $1 }
         return map
     }
 
@@ -192,12 +193,12 @@ extension CloudSyncEngine {
         }
     }
 
-    /// Live streams sync favorites and recently watched so both surface on
-    /// every device via iCloud. Only channels with user state (favorite or
-    /// watched) produce a cloud record — untouched channels are skipped.
+    /// Live streams sync favorites, recently watched, and hidden so all three
+    /// surface on every device via iCloud. Only channels with user state
+    /// (favorite, watched, or hidden) produce a cloud record.
     func liveEntries() throws -> [(String, LocalContentEntry)] {
         let streams = try catalogContext.fetch(FetchDescriptor<LiveStream>(
-            predicate: #Predicate { $0.isFavorite || $0.lastWatchedDate != nil }
+            predicate: #Predicate { $0.isFavorite || $0.lastWatchedDate != nil || $0.isHidden }
         ))
         return streams.map { stream in
             (stream.id, LocalContentEntry(
@@ -207,10 +208,33 @@ extension CloudSyncEngine {
                     lastWatchedDate: stream.lastWatchedDate,
                     isFavorite: stream.isFavorite,
                     addedToWatchlistDate: nil,
-                    favoriteOrder: stream.favoriteOrder
+                    favoriteOrder: stream.favoriteOrder,
+                    isHidden: stream.isHidden
                 ),
                 kind: .live,
                 model: stream
+            ))
+        }
+    }
+
+    func categoryEntries() throws -> [(String, LocalContentEntry)] {
+        let categories = try catalogContext.fetch(FetchDescriptor<Category>(
+            predicate: #Predicate { $0.isHidden }
+        ))
+        return categories.compactMap { category in
+            guard let cloudId = ContentIdentity.categoryCloudId(forCategoryId: category.id) else { return nil }
+            return (cloudId, LocalContentEntry(
+                values: ContentStateValues(
+                    watchProgress: 0,
+                    isWatched: false,
+                    lastWatchedDate: nil,
+                    isFavorite: false,
+                    addedToWatchlistDate: nil,
+                    favoriteOrder: nil,
+                    isHidden: true
+                ),
+                kind: .category,
+                model: category
             ))
         }
     }
@@ -235,6 +259,12 @@ extension CloudSyncEngine {
 
     func fetchLiveStream(_ id: String) throws -> LiveStream? {
         var descriptor = FetchDescriptor<LiveStream>(predicate: #Predicate { $0.id == id })
+        descriptor.fetchLimit = 1
+        return try catalogContext.fetch(descriptor).first
+    }
+
+    func fetchCategory(_ id: String) throws -> Category? {
+        var descriptor = FetchDescriptor<Category>(predicate: #Predicate { $0.id == id })
         descriptor.fetchLimit = 1
         return try catalogContext.fetch(descriptor).first
     }

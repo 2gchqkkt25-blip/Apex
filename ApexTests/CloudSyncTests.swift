@@ -7,8 +7,8 @@
 //  against an in-memory two-configuration store (no CloudKit needed).
 //
 
-import Foundation
 @testable import Apex
+import Foundation
 import SwiftData
 import Testing
 
@@ -130,6 +130,39 @@ struct CloudSyncConflictPolicyTests {
         )
         #expect(empty.isEmpty)
     }
+
+    @Test func `hidden content is not treated as empty`() {
+        let hidden = ContentStateValues(
+            watchProgress: 0, isWatched: false, lastWatchedDate: nil,
+            isFavorite: false, addedToWatchlistDate: nil, favoriteOrder: nil,
+            isHidden: true
+        )
+        #expect(!hidden.isEmpty)
+    }
+
+    @Test func `content conflict prefers hidden`() {
+        let local = ContentStateValues(
+            watchProgress: 0, isWatched: false, lastWatchedDate: nil,
+            isFavorite: false, addedToWatchlistDate: nil, favoriteOrder: nil,
+            isHidden: true
+        )
+        let cloud = ContentStateValues(
+            watchProgress: 0, isWatched: false, lastWatchedDate: nil,
+            isFavorite: true, addedToWatchlistDate: nil, favoriteOrder: nil,
+            isHidden: false
+        )
+        let merged = ContentStateValues.mergeConflict(local: local, cloud: cloud)
+        #expect(merged.isHidden)
+        #expect(merged.isFavorite)
+    }
+
+    @Test func `legacy content shadow without isHidden still decodes`() throws {
+        let json = Data(#"{"watchProgress":10,"isWatched":false,"isFavorite":true}"#.utf8)
+        let decoded = try JSONDecoder().decode(ContentStateValues.self, from: json)
+        #expect(!decoded.isHidden)
+        #expect(decoded.isFavorite)
+        #expect(decoded.watchProgress == 10)
+    }
 }
 
 // MARK: - Engine integration (in-memory, no CloudKit)
@@ -203,6 +236,71 @@ struct CloudSyncEngineTests {
         #expect(states.first?.watchProgress == 42)
     }
 
+    @Test func `hidden channel and category export to distinct cloud records`() async throws {
+        let container = try makeContainer()
+        let ctx = container.mainContext
+
+        let playlist = Playlist(name: "My IPTV", serverURL: "http://x", username: "u", password: "p")
+        let pid = playlist.id
+        ctx.insert(playlist)
+
+        // Same numeric tail (`99`) on purpose: category `{uuid}-live-99` would
+        // collide with the channel id in CloudKit without the `category-` marker.
+        let stream = LiveStream(
+            id: "\(pid.uuidString)-live-99",
+            streamId: 99,
+            name: "ESPN"
+        )
+        stream.isHidden = true
+        ctx.insert(stream)
+
+        let category = Apex.Category(apiId: "99", name: "Sports", parentId: 0, type: .live, playlist: playlist)
+        category.isHidden = true
+        ctx.insert(category)
+        try ctx.save()
+
+        let engine = CloudSyncEngine(container: container, shadow: freshShadow())
+        let result = await engine.reconcile()
+
+        #expect(result.contentPushed == 2)
+        let states = try ctx.fetch(FetchDescriptor<UserContentState>())
+        #expect(states.count == 2)
+        let byId = Dictionary(uniqueKeysWithValues: states.map { ($0.contentId, $0) })
+        #expect(byId[stream.id]?.isHidden == true)
+        #expect(byId[stream.id]?.kind == .live)
+        let categoryCloudId = try #require(ContentIdentity.categoryCloudId(forCategoryId: category.id))
+        #expect(categoryCloudId != stream.id)
+        #expect(byId[categoryCloudId]?.isHidden == true)
+        #expect(byId[categoryCloudId]?.kind == .category)
+    }
+
+    @Test func `cloud hidden category applies to the local category`() async throws {
+        let container = try makeContainer()
+        let ctx = container.mainContext
+
+        let playlist = Playlist(name: "My IPTV", serverURL: "http://x", username: "u", password: "p")
+        ctx.insert(playlist)
+        let category = Apex.Category(apiId: "7", name: "Adult", parentId: 0, type: .live, playlist: playlist)
+        ctx.insert(category)
+        let cloudId = try #require(ContentIdentity.categoryCloudId(forCategoryId: category.id))
+        ctx.insert(UserContentState(
+            contentId: cloudId,
+            kind: .category,
+            isHidden: true
+        ))
+        try ctx.save()
+
+        let engine = CloudSyncEngine(container: container, shadow: freshShadow())
+        let result = await engine.reconcile()
+
+        #expect(result.contentPulled == 1)
+        let hidden = try ctx.fetch(FetchDescriptor<Apex.Category>(
+            predicate: #Predicate { $0.isHidden }
+        ))
+        #expect(hidden.count == 1)
+        #expect(hidden.first?.name == "Adult")
+    }
+
     @Test func `cloud playlist creates a local playlist`() async throws {
         let container = try makeContainer()
         let ctx = container.mainContext
@@ -217,11 +315,77 @@ struct CloudSyncEngineTests {
         let result = await engine.reconcile()
 
         #expect(result.playlistsCreatedLocally == 1)
+        #expect(result.importedPlaylistIDs == [pid])
         let locals = try ctx.fetch(FetchDescriptor<Playlist>())
         #expect(locals.count == 1)
         #expect(locals.first?.id == pid)
         #expect(locals.first?.name == "Remote")
         #expect(locals.first?.lastSyncDate == nil) // so auto-sync fetches its catalog
+    }
+
+    @Test func `explicit playlist deletion cannot be restored by an unbaselined cloud mirror`() async throws {
+        let container = try makeContainer()
+        let ctx = container.mainContext
+        let pid = UUID()
+        let local = Playlist(name: "Duplicate Xtream", serverURL: "http://x", username: "u", password: "p")
+        local.id = pid
+        ctx.insert(local)
+        ctx.insert(SyncedPlaylist(
+            id: pid, name: "Duplicate Xtream", serverURL: "http://x", username: "u", password: "p",
+            sourceTypeRaw: "xtream", epgURL: nil, syncEnabled: true
+        ))
+        try ctx.save()
+
+        // The empty shadow reproduces a playlist deleted before its first
+        // successful reconcile — the old local-only delete pulled this mirror
+        // straight back into Settings on the other devices.
+        let engine = CloudSyncEngine(container: container, shadow: freshShadow())
+        try await engine.deletePlaylist(id: pid)
+        _ = await engine.reconcile()
+
+        #expect(try ctx.fetch(FetchDescriptor<Playlist>()).isEmpty)
+        let mirrors = try ctx.fetch(FetchDescriptor<SyncedPlaylist>())
+        #expect(mirrors.count == 1)
+        #expect(mirrors.first?.id == pid)
+        #expect(mirrors.first?.deletedAt != nil)
+        #expect(mirrors.first?.password == "")
+    }
+
+    @Test func `remote playlist tombstone removes the local playlist`() async throws {
+        let container = try makeContainer()
+        let ctx = container.mainContext
+        let shadow = freshShadow()
+        let pid = UUID()
+        let local = Playlist(name: "Office Xtream", serverURL: "http://office", username: "u", password: "p")
+        local.id = pid
+        ctx.insert(local)
+        let movie = Movie(id: "\(pid.uuidString)-movie-1", streamId: 1, name: "Film")
+        ctx.insert(movie)
+        shadow.setPlaylistShadow(
+            pid.uuidString,
+            PlaylistConfigValues(
+                name: "Office Xtream",
+                serverURL: "http://office",
+                username: "u",
+                password: "p",
+                sourceTypeRaw: "xtream",
+                epgURL: nil,
+                syncEnabled: true
+            )
+        )
+        ctx.insert(SyncedPlaylist(
+            id: pid, name: "Office Xtream", serverURL: "http://office", username: "", password: "",
+            sourceTypeRaw: "xtream", epgURL: nil, syncEnabled: false,
+            deletedAt: Date()
+        ))
+        try ctx.save()
+
+        let engine = CloudSyncEngine(container: container, shadow: shadow)
+        _ = await engine.reconcile()
+
+        #expect(try ctx.fetch(FetchDescriptor<Playlist>()).isEmpty)
+        #expect(try ctx.fetch(FetchDescriptor<Movie>()).isEmpty)
+        #expect(try ctx.fetch(FetchDescriptor<SyncedPlaylist>()).first?.deletedAt != nil)
     }
 
     @Test func `cloud content state stays pending until its catalog item exists`() async throws {
@@ -288,6 +452,30 @@ struct CloudSyncEngineTests {
         #expect(locals.first?.lastSyncDate == nil)
     }
 
+    @Test func `local media server exports to the iCloud mirror`() async throws {
+        let container = try makeContainer()
+        let ctx = container.mainContext
+        let local = MediaServer(name: "Living Room Plex", baseURL: "http://192.168.1.10:32400", kind: .plex)
+        local.plexToken = "plex-auth"
+        local.userId = "plex"
+        local.plexServerIdentifier = "machine-id"
+        let sid = local.id
+        ctx.insert(local)
+        try ctx.save()
+
+        let engine = CloudSyncEngine(container: container, shadow: freshShadow())
+        let result = await engine.reconcile()
+
+        #expect(result.mediaServersPushed == 1)
+        let mirrors = try ctx.fetch(FetchDescriptor<SyncedMediaServer>())
+        #expect(mirrors.count == 1)
+        #expect(mirrors.first?.id == sid)
+        #expect(mirrors.first?.name == "Living Room Plex")
+        #expect(mirrors.first?.plexToken == "plex-auth")
+        #expect(mirrors.first?.plexServerIdentifier == "machine-id")
+        #expect(mirrors.first?.kindRaw == MediaServerKind.plex.rawValue)
+    }
+
     @Test func `explicit media server deletion cannot be restored by an unbaselined cloud mirror`() async throws {
         let container = try makeContainer()
         let ctx = container.mainContext
@@ -320,7 +508,60 @@ struct CloudSyncEngineTests {
         _ = await engine.reconcile()
 
         #expect(try ctx.fetch(FetchDescriptor<MediaServer>()).isEmpty)
-        #expect(try ctx.fetch(FetchDescriptor<SyncedMediaServer>()).isEmpty)
+        let mirrors = try ctx.fetch(FetchDescriptor<SyncedMediaServer>())
+        #expect(mirrors.count == 1)
+        #expect(mirrors.first?.id == sid)
+        #expect(mirrors.first?.deletedAt != nil)
+        #expect(mirrors.first?.plexToken == nil)
+    }
+
+    @Test func `remote media server tombstone removes the local connection`() async throws {
+        let container = try makeContainer()
+        let ctx = container.mainContext
+        let shadow = freshShadow()
+        let sid = UUID()
+        let local = MediaServer(name: "Office Jellyfin", baseURL: "https://jellyfin.local", kind: .jellyfin)
+        local.id = sid
+        local.accessToken = "token"
+        ctx.insert(local)
+        shadow.setMediaServerShadow(
+            sid.uuidString,
+            MediaServerConfigValues(
+                name: "Office Jellyfin",
+                baseURL: "https://jellyfin.local",
+                kindRaw: MediaServerKind.jellyfin.rawValue,
+                username: "user",
+                password: "pass",
+                accessToken: "token",
+                plexToken: nil,
+                userId: "uid",
+                plexServerIdentifier: nil,
+                syncEnabled: true,
+                sortOrder: 0
+            )
+        )
+        ctx.insert(SyncedMediaServer(
+            id: sid,
+            name: "Office Jellyfin",
+            baseURL: "https://jellyfin.local",
+            kindRaw: MediaServerKind.jellyfin.rawValue,
+            username: "",
+            password: "",
+            accessToken: nil,
+            plexToken: nil,
+            userId: nil,
+            plexServerIdentifier: nil,
+            syncEnabled: false,
+            sortOrder: 0,
+            deletedAt: Date()
+        ))
+        try ctx.save()
+
+        let engine = CloudSyncEngine(container: container, shadow: shadow)
+        _ = await engine.reconcile()
+
+        #expect(try ctx.fetch(FetchDescriptor<MediaServer>()).isEmpty)
+        #expect(try ctx.fetch(FetchDescriptor<SyncedMediaServer>()).first?.deletedAt != nil)
     }
 
     @Test func `empty local catalog with a populated shadow never deletes cloud mirrors`() async throws {
@@ -388,7 +629,9 @@ struct CloudSyncEngineTests {
         #expect(try ctx.fetch(FetchDescriptor<UserContentState>()).count == 1)
 
         let mirrors = try ctx.fetch(FetchDescriptor<SyncedPlaylist>())
-        for mirror in mirrors { ctx.delete(mirror) }
+        for mirror in mirrors {
+            ctx.delete(mirror)
+        }
         try ctx.save()
 
         let result = await engine.reconcile()
@@ -398,6 +641,7 @@ struct CloudSyncEngineTests {
         #expect(try ctx.fetch(FetchDescriptor<Movie>()).count == 1)
         #expect(try ctx.fetch(FetchDescriptor<SyncedPlaylist>()).count == 1)
         #expect(try ctx.fetch(FetchDescriptor<SyncedPlaylist>()).first?.id == pid)
+        #expect(try ctx.fetch(FetchDescriptor<SyncedPlaylist>()).first?.deletedAt == nil)
         #expect(result.playlistsPushed == 1)
     }
 
