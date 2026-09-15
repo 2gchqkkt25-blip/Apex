@@ -428,6 +428,15 @@ actor EPGSyncManager {
                 Logger.database.warning("EPG skipping heavy source (pre-download): \(feedLabel)")
                 continue
             }
+            #if os(tvOS)
+            // US_LOCALS1 (~559MB uncompressed) exceeds Apple TV memory limits
+            // even with the streaming inserter. Always skip it on tvOS regardless
+            // of sync mode — the remaining feeds provide sufficient coverage.
+            if url.contains("US_LOCALS1") {
+                Logger.database.warning("EPG skipping US_LOCALS1 on tvOS (pre-download): \(feedLabel)")
+                continue
+            }
+            #endif
             feedsToDownload.append((feedIndex, url, feedLabel))
         }
 
@@ -702,25 +711,20 @@ actor EPGSyncManager {
         bundled: Bool
     ) -> Bool {
         #if os(tvOS)
-        // Apple TV has far less headroom. The two largest feeds — the ~500MB
-        // locals dump and the ~73MB US2 national feed — are the biggest
-        // memory/IO spikes and repeatedly drove memory warnings (worst when the
-        // guide parse overlaps the user browsing Live TV: logos + on-demand
-        // EPG). Never parse them on tvOS; the on-demand per-channel API fills
-        // the visible channels and the remaining US feeds still populate the
-        // store.
-        if url.contains("US_LOCALS1") || url.contains("epg_ripper_US2.") {
+        // Apple TV has less headroom than iOS/macOS. The ~500MB locals dump
+        // remains too large even with the streaming inserter (disk I/O +
+        // decompression alone can spike memory). All other feeds including
+        // US2 (~73MB) now use the streaming two-pass inserter which keeps
+        // peak memory constant regardless of feed size, so they use the
+        // same coverage-ratio logic as iOS.
+        if url.contains("US_LOCALS1") {
             return true
         }
         #endif
         guard ExternalEPGSources.isHeavyLowYieldSource(url: url) else { return false }
-        #if os(tvOS)
-        return true
-        #else
         guard totalCount > 0 else { return false }
         let ratio = bundled ? Self.bundledCoverageSkipRatio : Self.externalCoverageSkipRatio
         return Double(matchedCount) / Double(totalCount) >= ratio
-        #endif
     }
 
     private func shouldStopBundledSync(matchedCount: Int, totalCount: Int) -> Bool {

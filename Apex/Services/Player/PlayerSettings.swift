@@ -259,7 +259,7 @@ enum PlayerSettings {
         static let codecLowDelayDefault = false
         static let autoPipDefault = true
         /// Minimum forward buffer for live streams, in seconds.
-        static let liveBufferDefault = 4
+        static let liveBufferDefault = 2
         /// Minimum forward buffer for on-demand streams, in seconds.
         static let vodBufferDefault = 8
         /// Maximum buffer, in seconds.

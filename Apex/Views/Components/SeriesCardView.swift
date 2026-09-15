@@ -5,10 +5,12 @@
 //  Card view for displaying a series cover and title
 //
 
+import SwiftData
 import SwiftUI
 
 struct SeriesCardView: View {
     @Bindable var series: Series
+    @Environment(\.modelContext) private var modelContext
 
     var body: some View {
         VStack(alignment: .leading, spacing: PosterCardMetrics.titleSpacing) {
@@ -54,6 +56,29 @@ struct SeriesCardView: View {
                 .lineLimit(2)
                 .frame(width: PosterCardMetrics.posterWidth, alignment: .leading)
         }
+        .task(id: needsPosterRating ? series.id : nil) {
+            await loadPosterRatingIfNeeded()
+        }
+    }
+
+    private var needsPosterRating: Bool {
+        (Double(series.rating ?? "") ?? 0) <= 0
+            && (Double(series.rating5Based ?? "") ?? 0) <= 0
+            && series.externalRatings.first(where: { $0.source == .imdb }) == nil
+    }
+
+    private func loadPosterRatingIfNeeded() async {
+        guard needsPosterRating, TMDBClient.shared.isConfigured else { return }
+        guard let match = await PosterRatingResolver.shared.seriesRating(
+            catalogID: series.id,
+            tmdbID: series.tmdbId,
+            title: series.name,
+            releaseDate: series.releaseDate
+        ), !Task.isCancelled, needsPosterRating else { return }
+
+        series.tmdbId = match.tmdbID
+        series.rating = String(format: "%.1f", match.score)
+        PosterRatingSaveCoordinator.shared.schedule(context: modelContext)
     }
 }
 

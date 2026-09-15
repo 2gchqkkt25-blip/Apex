@@ -61,6 +61,7 @@ struct KSPlayerEngineView: View {
     /// playback was paused and needed a press. The controls stay suppressed and
     /// a loading indicator shows until the stream first reaches `.bufferFinished`.
     @State var hasStartedPlayback = false
+    @State var startupStartedAt = ProcessInfo.processInfo.systemUptime
     /// True while the engine is preparing or (re)buffering, so the spinner shows
     /// both on first open and on a mid-stream stall.
     @State var isBuffering = true
@@ -182,12 +183,14 @@ struct KSPlayerEngineView: View {
                     .ignoresSafeArea()
 
                 KSVideoPlayer(coordinator: coordinator, url: media.url, options: options)
-                    .onStateChanged { _, state in
+                    .onStateChanged { layer, state in
+                        guard layer.url == media.url else { return }
                         // Defer all state mutations so they never run inside a
                         // SwiftUI view-update pass, which would trigger the
                         // "Modifying state during view update" / "Publishing
                         // changes from within view updates" runtime warnings.
                         DispatchQueue.main.async {
+                            guard layer.url == media.url else { return }
                             isPlaying = (state == .bufferFinished)
                             updateLoadingState(state)
                             engine.syncState(state)
@@ -296,10 +299,10 @@ struct KSPlayerEngineView: View {
                 if phase != .active { coordinator.playerLayer?.pause() }
             }
             .onChange(of: media) { _, _ in
-                // The host swapped the stream (KSPlayer reloads its URL
-                // automatically). Mute the outgoing item immediately so a
-                // series → movie/episode switch cannot overlap soundtracks.
-                coordinator.playerLayer?.pause()
+                // KSPlayer's URL replacement shuts down the outgoing stream.
+                // Calling pause here disables its autoplay flag and can pause
+                // the incoming stream, leaving it until the 15s fallback.
+                startupStartedAt = ProcessInfo.processInfo.systemUptime
                 isSeeking = false
                 seekPosition = 0
                 isPanelOpen = false
@@ -397,8 +400,10 @@ struct KSPlayerEngineView: View {
             let options = makeOptions()
             return ZStack {
                 KSVideoPlayer(coordinator: coordinator, url: media.url, options: options)
-                    .onStateChanged { _, state in
+                    .onStateChanged { layer, state in
+                        guard layer.url == media.url else { return }
                         DispatchQueue.main.async {
+                            guard layer.url == media.url else { return }
                             isPlaying = (state == .bufferFinished)
                             updateLoadingState(state)
                             handleState(state)
@@ -486,7 +491,9 @@ struct KSPlayerEngineView: View {
                 onControlsVisibilityChanged?(visible && hasStartedPlayback)
             }
             .onChange(of: media) { _, _ in
-                coordinator.playerLayer?.pause()
+                // URL replacement already stops the previous stream. Preserve
+                // autoplay so the replacement starts without a fallback delay.
+                startupStartedAt = ProcessInfo.processInfo.systemUptime
                 isSeeking = false
                 seekPosition = 0
                 isPanelOpen = false

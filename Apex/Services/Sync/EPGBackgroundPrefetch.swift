@@ -14,7 +14,7 @@ actor EPGBackgroundPrefetch {
     static let shared = EPGBackgroundPrefetch()
 
     private var task: Task<Void, Never>?
-    private var browseActive = false
+    private var activeBrowsers = 0
     private static let batchSize = 150
     private static let pauseBetweenBatches: TimeInterval = 1.5
 
@@ -25,19 +25,21 @@ actor EPGBackgroundPrefetch {
 
     /// Pause background prefetch while on-demand browse is fetching visible channels.
     func setBrowseActive(_ active: Bool) {
-        browseActive = active
+        activeBrowsers = max(0, activeBrowsers + (active ? 1 : -1))
     }
 
     private func waitWhileBrowseActive() async {
-        while browseActive, !Task.isCancelled {
+        while !Task.isCancelled {
+            let playbackActive = await MainActor.run { ContentIndexingService.shared.isPlaybackActive }
+            if activeBrowsers == 0, !playbackActive { return }
             try? await Task.sleep(for: .milliseconds(250))
         }
     }
 
     /// Prefetch remaining channels after the blocking prime slice finishes.
-    func schedule<C: EPGChannelIdentity>(
+    func schedule(
         credentials: EPGPlaylistCredentials,
-        identities: [C],
+        identities: [some EPGChannelIdentity],
         startIndex: Int,
         container: ModelContainer
     ) {
@@ -64,7 +66,8 @@ actor EPGBackgroundPrefetch {
                     identities: batch,
                     container: container,
                     client: client,
-                    concurrencyLimit: 3
+                    concurrencyLimit: 3,
+                    beforeRequest: { await self.waitWhileBrowseActive() }
                 )
                 offset = end
                 await MainActor.run {

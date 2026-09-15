@@ -5,10 +5,12 @@
 //  Card view for displaying a movie poster and title
 //
 
+import SwiftData
 import SwiftUI
 
 struct MovieCardView: View {
     @Bindable var movie: Movie
+    @Environment(\.modelContext) private var modelContext
 
     var body: some View {
         VStack(alignment: .leading, spacing: PosterCardMetrics.titleSpacing) {
@@ -54,6 +56,29 @@ struct MovieCardView: View {
                 .lineLimit(2)
                 .frame(width: PosterCardMetrics.posterWidth, alignment: .leading)
         }
+        .task(id: needsPosterRating ? movie.id : nil) {
+            await loadPosterRatingIfNeeded()
+        }
+    }
+
+    private var needsPosterRating: Bool {
+        movie.rating <= 0
+            && movie.rating5Based <= 0
+            && movie.externalRatings.first(where: { $0.source == .imdb }) == nil
+    }
+
+    private func loadPosterRatingIfNeeded() async {
+        guard needsPosterRating, TMDBClient.shared.isConfigured else { return }
+        guard let match = await PosterRatingResolver.shared.movieRating(
+            catalogID: movie.id,
+            tmdbID: movie.tmdbId,
+            title: movie.name,
+            releaseDate: movie.releaseDate
+        ), !Task.isCancelled, needsPosterRating else { return }
+
+        movie.tmdbId = match.tmdbID
+        movie.rating = match.score
+        PosterRatingSaveCoordinator.shared.schedule(context: modelContext)
     }
 }
 

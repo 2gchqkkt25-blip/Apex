@@ -19,8 +19,9 @@ nonisolated struct EPGSlot: Equatable {
     let end: Date
 }
 
-/// The now/next programme pair shown on a single channel card.
+/// The previous/current/next programme trio shown on a single channel card.
 nonisolated struct ChannelEPG: Equatable {
+    let previous: EPGSlot?
     let current: EPGSlot?
     let next: EPGSlot?
 }
@@ -33,8 +34,12 @@ enum EPGRetention {
     /// window; storing two days ahead keeps memory and SwiftData churn bounded on
     /// large playlists without affecting now/next or the grid.
     static let futureHorizon: TimeInterval = 48 * 3600
-    /// Caps rows written per channel during XMLTV import.
-    static let maxListingsPerChannel = 16
+    /// Caps rows written per channel during XMLTV import. Raised from 16 to
+    /// 64 so the store retains enough future programmes to fill the guide
+    /// timeline on iOS/macOS — the previous cap discarded most upcoming slots
+    /// when the 48h futureHorizon was active, leaving non-tvOS guides empty
+    /// for anything beyond the current programme.
+    static let maxListingsPerChannel = 64
 
     nonisolated static func importWindow(now: Date = Date()) -> (start: Date, end: Date) {
         (now.addingTimeInterval(-pastGrace), now.addingTimeInterval(futureHorizon))

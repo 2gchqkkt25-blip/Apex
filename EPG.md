@@ -1,7 +1,24 @@
 # EPG (TV Guide) — Architecture Notes
 
-> Last updated: **July 15, 2026 (Build 41)**  
-> Status: **Generic providers** — offset-honest `xmltv.php` bulk sync works. **StreamInfinity test panel** — 14 external epgshare01 feeds + structural West/Pacific `+3h` insert + **single-pass parse** + **playlist-bundled fast sync**. Browse persist + warm live cache (Build 41) so the guide no longer needs a manual Sync Now after gap-fill. See § "StreamInfinity panel — status" below.
+> Last updated: **September 15, 2026 (Build 58)**
+> Status: **Generic providers** — offset-honest `xmltv.php` bulk sync works. Playlist refresh includes EPG, valid listings persist across relaunch, live results publish incrementally, and the Guide remains stable for channels with no programme data. iOS scrolling and tvOS focus/navigation are optimized for the shared grid.
+
+## Build 58 — persistence, refresh, and smooth Guide scrolling
+
+- **One refresh:** Playlist refresh runs catalog sync and the bundled EPG refresh in the same user-visible flow.
+- **Persistence:** Valid `EPGListing` rows remain in the local catalog store across app termination. Launch reads the store first and refreshes stale data in the background.
+- **Incremental loading:** Live API results can refresh visible Guide rows before the slowest channel request or disk write finishes. Duplicate in-flight fetches are suppressed and the memory cache is capped.
+- **Playback-aware background work:** Background EPG prefetch pauses while Guide browsing or playback is active, keeping navigation and channel startup responsive.
+- **Stable empty rows:** A channel without listings receives fixed-duration gap cells across the timeline. It remains playable and occupies the same row geometry as a populated channel.
+- **iOS scrolling:** The Guide separates horizontal and vertical observation, locks a gesture to its dominant axis, avoids SwiftUI position re-anchoring during data changes, and realizes each visible row's programme cells before the horizontal swipe.
+- **tvOS navigation:** Programme/channel content returns to the category rail on the first Back press and the top navigation on the second.
+
+### Build 58 regression rules
+
+1. Never delete valid EPG rows merely because the app launches or the user leaves Live TV.
+2. Never collapse or remove the timeline surface for an empty channel; use stable gap cells.
+3. Do not bind the iOS Guide's user-driven scroll position to changing programme identities.
+4. Keep background EPG and metadata work subordinate to active browsing and playback.
 
 ## StreamInfinity panel — status (July 7, 2026 — evening update)
 

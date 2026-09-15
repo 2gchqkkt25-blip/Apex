@@ -58,39 +58,18 @@ final class EPGSyncService {
     /// refresh on top of a large content sync is what pushed the app over the
     /// memory limit (~18% in, on both iOS and tvOS). Set by `SyncProgressView`
     /// for the entire sync flow.
-    nonisolated(unsafe) private var exclusiveSyncOwners = 0
+    private nonisolated(unsafe) var exclusiveSyncOwners = 0
 
-    static let syncTimeout: TimeInterval = 3_600
+    static let syncTimeout: TimeInterval = 3600
     /// A guide refresh bundled into a playlist sync must not hold the sync sheet
     /// open indefinitely — cap it and let any remaining feeds finish in the
     /// background low-priority pass.
     static let bundledSyncTimeout: TimeInterval = 240
 
-    private static let poisonedStoreResetKey = "epg.store.reset.noAlignV1"
-
     private init() {}
 
     func configure(container: ModelContainer) {
         self.container = container
-        resetPoisonedStoreIfNeeded(container: container)
-    }
-
-    /// One-time wipe of the EPGListing store on upgrade from the old alignment
-    /// era. Those rows have fabricated timestamps that will never match real
-    /// airings. After this runs once, the key stays set and it's a no-op.
-    private func resetPoisonedStoreIfNeeded(container: ModelContainer) {
-        let key = Self.poisonedStoreResetKey
-        guard !UserDefaults.standard.bool(forKey: key) else { return }
-        let context = ModelContext(container)
-        context.autosaveEnabled = false
-        do {
-            try context.delete(model: EPGListing.self)
-            try context.save()
-            Logger.database.warning("EPG poisoned store reset complete (one-time wipe)")
-        } catch {
-            Logger.database.error("EPG poisoned store reset failed: \(error.localizedDescription)")
-        }
-        UserDefaults.standard.set(true, forKey: key)
     }
 
     /// Bumps `refreshGeneration` so views reload guide data, throttled to at
@@ -98,6 +77,11 @@ final class EPGSyncService {
     /// prefetch.
     @MainActor func signalGuideRefresh() {
         signalGuideRefresh(minInterval: Self.minGuideRefreshInterval)
+    }
+
+    /// Paint browse results progressively without refreshing for every channel.
+    @MainActor func signalBrowseRefresh() {
+        signalGuideRefresh(minInterval: 0.5)
     }
 
     /// Throttled guide reload while a sync is in flight — lets the grid and
@@ -188,11 +172,10 @@ final class EPGSyncService {
         defer { ContentIndexingService.shared.epgSyncFinished() }
 
         let manager = EPGSyncManager(modelContainer: container)
-        let timeout: TimeInterval
-        switch mode {
-        case .tvOSQuick: timeout = 120  // Only 3 small feeds — 2 min cap
-        case .withPlaylist: timeout = Self.bundledSyncTimeout
-        case .full: timeout = Self.syncTimeout
+        let timeout: TimeInterval = switch mode {
+        case .tvOSQuick: 120 // Only 3 small feeds — 2 min cap
+        case .withPlaylist: Self.bundledSyncTimeout
+        case .full: Self.syncTimeout
         }
         do {
             let succeeded = try await Self.runWithTimeout(seconds: timeout) {
@@ -321,11 +304,10 @@ final class EPGSyncService {
             defer { ContentIndexingService.shared.epgSyncFinished() }
 
             let manager = EPGSyncManager(modelContainer: syncContainer)
-            let timeout: TimeInterval
-            switch syncMode {
-            case .tvOSQuick: timeout = 120
-            case .withPlaylist: timeout = Self.bundledSyncTimeout
-            case .full: timeout = Self.syncTimeout
+            let timeout: TimeInterval = switch syncMode {
+            case .tvOSQuick: 120
+            case .withPlaylist: Self.bundledSyncTimeout
+            case .full: Self.syncTimeout
             }
             let succeeded: Bool
             do {
@@ -334,12 +316,12 @@ final class EPGSyncService {
                         Task { @MainActor [weak self] in
                             guard let self else { return }
                             let progress = total > 0 ? Double(completed) / Double(total) : nil
-                            self.syncProgress = progress
+                            syncProgress = progress
                             let formatter = NumberFormatter()
                             formatter.numberStyle = .decimal
                             let completedStr = formatter.string(from: NSNumber(value: completed)) ?? "\(completed)"
                             let totalStr = formatter.string(from: NSNumber(value: total)) ?? "\(total)"
-                            self.syncProgressLabel = "\(completedStr) / \(totalStr) channels"
+                            syncProgressLabel = "\(completedStr) / \(totalStr) channels"
                         }
                     }
                 }
@@ -401,7 +383,9 @@ final class NetworkMonitor: ObservableObject {
 
     /// Defaults to `true` so the app doesn't block itself before the first
     /// path update arrives (which is async and may take a moment).
-    var isDisconnected: Bool { !isConnected }
+    var isDisconnected: Bool {
+        !isConnected
+    }
 
     private init() {
         monitor.pathUpdateHandler = { [weak self] path in
@@ -410,11 +394,11 @@ final class NetworkMonitor: ObservableObject {
             let constrained = path.isConstrained
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                let wasConnected = self.isConnected
-                let wasExpensive = self.isExpensive
-                self.isConnected = connected
-                self.isExpensive = expensive
-                self.isConstrained = constrained
+                let wasConnected = isConnected
+                let wasExpensive = isExpensive
+                isConnected = connected
+                isExpensive = expensive
+                isConstrained = constrained
                 if wasConnected && !connected {
                     Logger.network.warning("[NetworkMonitor] Connectivity lost — pausing background network work")
                 } else if !wasConnected && connected {

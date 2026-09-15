@@ -182,6 +182,13 @@ struct ApexApp: App {
                 .environment(ThemeManager.shared)
                 .tint(ThemeManager.shared.colors.accent)
                 .task {
+                    // Configure disk-backed services before any awaited launch
+                    // work. A user can start a playlist refresh immediately;
+                    // leaving EPG configuration until after profile/Trakt setup
+                    // made that refresh silently skip its persistent guide pass.
+                    ContentIndexingService.shared.configure(container: catalogContainer)
+                    EPGSyncService.shared.configure(container: catalogContainer)
+
                     // Apple TV HD jetsams while browsing too, not just during
                     // playback — keep a footprint trace for the whole session.
                     MemoryFootprint.startMonitoringIfConstrained()
@@ -232,7 +239,6 @@ struct ApexApp: App {
                     // Resume background content indexing for anything still
                     // unindexed (the pass waits on its own while a playlist
                     // sync is running).
-                    ContentIndexingService.shared.configure(container: catalogContainer)
                     #if os(tvOS)
                     Task {
                         let topShelfDelay: Duration = DeviceMemoryTier.current.isConstrained
@@ -253,7 +259,6 @@ struct ApexApp: App {
                     // Refresh the TV guide on its own schedule, independent of
                     // the content sync. Deferred on launch — 14 external EPG
                     // feeds are heavy and must not compete with Home's first paint.
-                    EPGSyncService.shared.configure(container: catalogContainer)
                     #if os(tvOS)
                     Task {
                         let delay: Duration = DeviceMemoryTier.current.isConstrained

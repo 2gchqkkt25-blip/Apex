@@ -31,40 +31,56 @@ actor EPGListingWriter {
         programsByChannel: [String: [EPGProgram]],
         container: ModelContainer,
         now: Date
-    ) -> Int {
+    ) async -> Int {
         guard !programsByChannel.isEmpty else { return 0 }
-        let context = ModelContext(container)
-        context.autosaveEnabled = false
 
-        // Never insert an id that already exists — that is the exact case that
-        // triggers SwiftData's crashing unique-upsert remap.
-        let channelIds = Set(programsByChannel.keys)
-        let existing = (try? context.fetch(FetchDescriptor<EPGListing>(
-            predicate: #Predicate<EPGListing> { channelIds.contains($0.channelId) }
-        ))) ?? []
-        var knownIds = Set(existing.map(\.id))
+        // A bulk XMLTV context can commit between our de-dup fetch and save.
+        // Retry once with a fresh context so a transient unique-id conflict
+        // cannot leave data visible only in EPGLiveLoader's memory cache.
+        for attempt in 0 ..< 2 {
+            let context = ModelContext(container)
+            context.autosaveEnabled = false
 
-        var inserted = 0
-        for (channelId, programs) in programsByChannel {
-            for program in programs {
-                guard program.end > now.addingTimeInterval(-EPGRetention.pastGrace) else { continue }
-                guard program.start < now.addingTimeInterval(EPGRetention.futureHorizon) else { continue }
-                let listingId = "\(channelId)-\(Int(program.start.timeIntervalSince1970))-\(Int(program.end.timeIntervalSince1970))"
-                guard knownIds.insert(listingId).inserted else { continue }
-                context.insert(EPGListing(
-                    id: listingId,
-                    channelId: channelId,
-                    title: program.title,
-                    listingDescription: program.description,
-                    start: program.start,
-                    end: program.end
-                ))
-                inserted += 1
+            // Never insert an id that already exists — that is the exact case
+            // that triggers SwiftData's crashing unique-upsert remap.
+            let channelIds = Set(programsByChannel.keys)
+            let existing = (try? context.fetch(FetchDescriptor<EPGListing>(
+                predicate: #Predicate<EPGListing> { channelIds.contains($0.channelId) }
+            ))) ?? []
+            var knownIds = Set(existing.map(\.id))
+
+            var inserted = 0
+            for (channelId, programs) in programsByChannel {
+                for program in programs {
+                    guard program.end > now.addingTimeInterval(-EPGRetention.pastGrace) else { continue }
+                    guard program.start < now.addingTimeInterval(EPGRetention.futureHorizon) else { continue }
+                    let listingId = "\(channelId)-\(Int(program.start.timeIntervalSince1970))-\(Int(program.end.timeIntervalSince1970))"
+                    guard knownIds.insert(listingId).inserted else { continue }
+                    context.insert(EPGListing(
+                        id: listingId,
+                        channelId: channelId,
+                        title: program.title,
+                        listingDescription: program.description,
+                        start: program.start,
+                        end: program.end
+                    ))
+                    inserted += 1
+                }
+            }
+            guard inserted > 0 else { return 0 }
+            do {
+                try context.save()
+                return inserted
+            } catch {
+                Logger.database.error(
+                    "EPG persistent save failed (attempt \(attempt + 1)): \(error.localizedDescription)"
+                )
+                if attempt == 0 {
+                    try? await Task.sleep(for: .milliseconds(150))
+                }
             }
         }
-        guard inserted > 0 else { return 0 }
-        try? context.save()
-        return inserted
+        return 0
     }
 }
 
@@ -97,13 +113,14 @@ enum EPGAPISync {
     ///   of channels processed so far in this call, for a "Sync Now" progress
     ///   indicator. Not called on every single channel to avoid excessive
     ///   actor hops across ~1.6K channels.
-    static func sync<C: EPGChannelIdentity>(
+    static func sync(
         credentials: EPGPlaylistCredentials,
-        identities: [C],
+        identities: [some EPGChannelIdentity],
         container: ModelContainer,
         client: XtreamClient,
         now: Date = Date(),
         concurrencyLimit: Int? = nil,
+        beforeRequest: (@Sendable () async -> Void)? = nil,
         onProgress: (@Sendable (Int) -> Void)? = nil
     ) async -> Result {
         guard credentials.sourceType == .xtream, !identities.isEmpty else {
@@ -121,15 +138,15 @@ enum EPGAPISync {
         var rawTotal = 0
         var parsedTotal = 0
         var errorTotal = 0
-        /// One-shot ground-truth probe. We can't hit the panel directly, so this
-        /// is how we tell whether a provider's feed is actually current: it logs
-        /// the first real programme's timestamps vs `now`. `deltaMinutes` near 0
-        /// means the data is live; a large positive value means the provider's
-        /// EPG genuinely lags (no client fix — an external EPG source is needed).
+        // One-shot ground-truth probe. We can't hit the panel directly, so this
+        // is how we tell whether a provider's feed is actually current: it logs
+        // the first real programme's timestamps vs `now`. `deltaMinutes` near 0
+        // means the data is live; a large positive value means the provider's
+        // EPG genuinely lags (no client fix — an external EPG source is needed).
         var loggedRawSample = false
-        /// Collect all (channelId, programs) from the network phase first, then
-        /// insert + save once at the end. One save = one notification = one
-        /// main-context merge, instead of dozens of merges that each stall the UI.
+        // Collect all (channelId, programs) from the network phase first, then
+        // insert + save once at the end. One save = one notification = one
+        // main-context merge, instead of dozens of merges that each stall the UI.
         var collected: [(channelId: String, programs: [EPGProgram])] = []
         collected.reserveCapacity(identities.count)
         let timezone = credentials.serverTimezone
@@ -139,13 +156,15 @@ enum EPGAPISync {
             var inFlight = 0
 
             func schedule() {
-                while inFlight < concurrency, let ref = iterator.next() {
+                while !Task.isCancelled, inFlight < concurrency, let ref = iterator.next() {
                     inFlight += 1
                     let streamId = ref.streamId
                     let channelId = ref.primaryEPGChannelId
                     group.addTask {
                         let fetchStart = Date()
                         do {
+                            await beforeRequest?()
+                            try Task.checkCancellation()
                             let listings = try await client.fetchChannelEPG(
                                 serverURL: credentials.serverURL,
                                 username: credentials.username,
@@ -250,11 +269,12 @@ enum EPGAPISync {
     /// Only an explicit Settings → Sync Now full pass still hard-replaces the
     /// store; the serial writer + unique listing ids keep concurrent browse
     /// upserts safe during that window too.
+    @discardableResult
     static func persist(
         programsByChannel: [String: [EPGProgram]],
         container: ModelContainer,
         now: Date = Date()
-    ) async {
+    ) async -> Int {
         await EPGListingWriter.shared.write(
             programsByChannel: programsByChannel,
             container: container,

@@ -67,7 +67,7 @@ struct EPGProgramDetailView: View {
                         if stream.tvArchive > 0 {
                             Label("Catch-up available for \(stream.tvArchiveDuration) days", systemImage: "clock.arrow.circlepath")
                                 .font(.subheadline)
-                                .foregroundStyle(.blue)
+                                .foregroundStyle(themeManager.colors.accent)
                         }
 
                         watchButton
@@ -127,7 +127,7 @@ struct EPGProgramDetailView: View {
                         if stream.tvArchive > 0 {
                             Label("Catch-up available for \(stream.tvArchiveDuration) days", systemImage: "clock.arrow.circlepath")
                                 .font(.system(size: 26))
-                                .foregroundStyle(.blue)
+                                .foregroundStyle(themeManager.colors.accent)
                         }
 
                         // Keep the action above the synopsis. The button is the only

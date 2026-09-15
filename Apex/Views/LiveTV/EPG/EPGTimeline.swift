@@ -127,6 +127,14 @@ struct EPGChannelRow: Identifiable {
 
 enum EPGGridBuilder {
     static func cells(for programs: [EPGProgram], timeline: EPGTimeline) -> [EPGProgramCell] {
+        cells(for: programs, timeline: timeline, identityNamespace: nil)
+    }
+
+    private static func cells(
+        for programs: [EPGProgram],
+        timeline: EPGTimeline,
+        identityNamespace: String?
+    ) -> [EPGProgramCell] {
         var cells: [EPGProgramCell] = []
         var cursor = timeline.start
 
@@ -136,11 +144,17 @@ enum EPGGridBuilder {
             guard clampedEnd > clampedStart else { continue }
 
             if clampedStart > cursor {
-                cells.append(gap(from: cursor, to: clampedStart, timeline: timeline))
+                appendGaps(
+                    from: cursor,
+                    to: clampedStart,
+                    timeline: timeline,
+                    identityNamespace: identityNamespace,
+                    into: &cells
+                )
             }
 
             cells.append(EPGProgramCell(
-                id: program.id,
+                id: cellID(program.id, identityNamespace: identityNamespace),
                 title: program.title,
                 detail: program.description,
                 start: clampedStart,
@@ -153,7 +167,13 @@ enum EPGGridBuilder {
         }
 
         if cursor < timeline.end {
-            cells.append(gap(from: cursor, to: timeline.end, timeline: timeline))
+            appendGaps(
+                from: cursor,
+                to: timeline.end,
+                timeline: timeline,
+                identityNamespace: identityNamespace,
+                into: &cells
+            )
         }
 
         return cells
@@ -171,7 +191,7 @@ enum EPGGridBuilder {
             return EPGChannelRow(
                 id: stream.id,
                 stream: stream,
-                cells: cells(for: programs, timeline: timeline)
+                cells: cells(for: programs, timeline: timeline, identityNamespace: stream.id)
             )
         }
     }
@@ -198,6 +218,14 @@ enum EPGGridBuilder {
     /// Turns a channel's sorted listings into contiguous cells spanning the
     /// whole window, inserting gap fillers wherever data is missing.
     static func cells(for listings: [EPGListing], timeline: EPGTimeline) -> [EPGProgramCell] {
+        cells(for: listings, timeline: timeline, identityNamespace: nil)
+    }
+
+    private static func cells(
+        for listings: [EPGListing],
+        timeline: EPGTimeline,
+        identityNamespace: String?
+    ) -> [EPGProgramCell] {
         var cells: [EPGProgramCell] = []
         var cursor = timeline.start
 
@@ -207,11 +235,17 @@ enum EPGGridBuilder {
             guard clampedEnd > clampedStart else { continue }
 
             if clampedStart > cursor {
-                cells.append(gap(from: cursor, to: clampedStart, timeline: timeline))
+                appendGaps(
+                    from: cursor,
+                    to: clampedStart,
+                    timeline: timeline,
+                    identityNamespace: identityNamespace,
+                    into: &cells
+                )
             }
 
             cells.append(EPGProgramCell(
-                id: listing.id,
+                id: cellID(listing.id, identityNamespace: identityNamespace),
                 title: listing.title,
                 detail: listing.listingDescription,
                 start: clampedStart,
@@ -224,15 +258,54 @@ enum EPGGridBuilder {
         }
 
         if cursor < timeline.end {
-            cells.append(gap(from: cursor, to: timeline.end, timeline: timeline))
+            appendGaps(
+                from: cursor,
+                to: timeline.end,
+                timeline: timeline,
+                identityNamespace: identityNamespace,
+                into: &cells
+            )
         }
 
         return cells
     }
 
-    private static func gap(from start: Date, to end: Date, timeline: EPGTimeline) -> EPGProgramCell {
-        EPGProgramCell(
-            id: "gap-\(start.timeIntervalSince1970)-\(end.timeIntervalSince1970)",
+    /// Break missing guide coverage into ruler-sized focus targets. A single
+    /// 12-18 hour button makes tvOS recenter the bidirectional scroll view when
+    /// focus moves vertically onto an empty channel, which looks like the guide
+    /// jumped to a different row or time. Half-hour placeholders keep the focus
+    /// geometry aligned with the ruler and neighbouring programme cells.
+    private static func appendGaps(
+        from start: Date,
+        to end: Date,
+        timeline: EPGTimeline,
+        identityNamespace: String?,
+        into cells: inout [EPGProgramCell]
+    ) {
+        let maximumSlotDuration: TimeInterval = 30 * 60
+        var slotStart = start
+
+        while slotStart < end {
+            let slotEnd = min(slotStart.addingTimeInterval(maximumSlotDuration), end)
+            cells.append(gap(
+                from: slotStart,
+                to: slotEnd,
+                timeline: timeline,
+                identityNamespace: identityNamespace
+            ))
+            slotStart = slotEnd
+        }
+    }
+
+    private static func gap(
+        from start: Date,
+        to end: Date,
+        timeline: EPGTimeline,
+        identityNamespace: String?
+    ) -> EPGProgramCell {
+        let rawID = "gap-\(start.timeIntervalSince1970)-\(end.timeIntervalSince1970)"
+        return EPGProgramCell(
+            id: cellID(rawID, identityNamespace: identityNamespace),
             title: "",
             detail: "",
             start: start,
@@ -241,5 +314,10 @@ enum EPGGridBuilder {
             isGap: true,
             width: timeline.width(from: start, to: end)
         )
+    }
+
+    private static func cellID(_ rawID: String, identityNamespace: String?) -> String {
+        guard let identityNamespace else { return rawID }
+        return "\(identityNamespace)|\(rawID)"
     }
 }

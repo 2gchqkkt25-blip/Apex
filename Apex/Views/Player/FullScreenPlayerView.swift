@@ -285,9 +285,7 @@ struct FullScreenPlayerView: View {
             // a disabled feature makes no network call. The lookup may fetch the
             // series' IMDb ID from TMDB on first encounter, so it is now async.
             skipSegments = nil
-            #if os(tvOS)
-            if DeviceMemoryTier.current.isConstrained { return }
-            #endif
+            Logger.player.info("[SkipIntro] Resolving for \(String(describing: activeMedia.contentRef), privacy: .public)")
             guard PlayerSettings.Playback.canUseSkipIntro else {
                 Logger.player.info("[SkipIntro] Skipped — setting disabled in Settings → Playback")
                 return
@@ -335,10 +333,6 @@ struct FullScreenPlayerView: View {
                 return
             }
 
-            #if os(tvOS)
-            // Apple TV HD: skip OpenSubtitles fetch to leave headroom for the decoder.
-            if DeviceMemoryTier.current.isConstrained { return }
-            #endif
             guard WyzieSubsClient.shared.isConfigured else { return }
             guard SubtitleSettings.isEnabled() else { return }
 
@@ -349,15 +343,20 @@ struct FullScreenPlayerView: View {
 
             let playbackURL = displayMedia?.url ?? activeMedia.url
 
-            // Skip external subtitles when the stream has embedded legible tracks.
-            // This prevents duplicate subtitles on tvOS where KSPlayer renders its
-            // own selected track AND the external overlay would render on top.
+            // Skip external subtitles when the stream has *real* embedded legible
+            // tracks. HLS manifests sometimes advertise subtitle metadata without
+            // any actually selectable/renderable options; filter those out so we
+            // still fetch external subs when the embedded list is effectively empty.
             let asset = AVURLAsset(url: playbackURL)
-            if let legible = try? await asset.loadMediaSelectionGroup(for: .legible),
-               !(legible.options.isEmpty)
-            {
-                Logger.player.info("[Subtitles] Stream has \(legible.options.count) embedded tracks — skipping external fetch")
-                return
+            if let legible = try? await asset.loadMediaSelectionGroup(for: .legible) {
+                let realTracks = legible.options.filter { option in
+                    option.locale != nil || !option.displayName.isEmpty
+                }
+                if !realTracks.isEmpty {
+                    Logger.player.info("[Subtitles] Stream has \(realTracks.count) real embedded tracks — skipping external fetch")
+                    return
+                }
+                Logger.player.info("[Subtitles] Stream advertised \(legible.options.count) legible options but none are real — proceeding with external fetch")
             }
 
             // Resolve IMDB ID from the content reference

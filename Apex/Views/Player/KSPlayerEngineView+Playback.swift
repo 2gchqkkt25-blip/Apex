@@ -85,6 +85,8 @@ extension KSPlayerEngineView {
     func markPlaybackStarted() {
         guard !hasStartedPlayback, hasSeenReadyToPlay else { return }
         hasStartedPlayback = true
+        let elapsed = ProcessInfo.processInfo.systemUptime - startupStartedAt
+        Logger.player.info("KSPlayer playback started: live=\(media.isLive, privacy: .public) elapsed=\(elapsed, format: .fixed(precision: 2), privacy: .public)s")
         cancelStartupWatchdog()
     }
 

@@ -133,7 +133,11 @@ extension CloudSyncEngine {
 
     func movieEntries() throws -> [(String, LocalContentEntry)] {
         let movies = try catalogContext.fetch(FetchDescriptor<Movie>(
-            predicate: #Predicate { $0.isFavorite || $0.watchProgress > 0 || $0.isWatched || $0.addedToWatchlistDate != nil || $0.recommendationVoteRaw != 0 }
+            predicate: #Predicate {
+                $0.isFavorite || $0.watchProgress > 0 || $0.isWatched
+                    || $0.lastWatchedDate != nil || $0.addedToWatchlistDate != nil
+                    || $0.recommendationVoteRaw != 0
+            }
         ))
         return movies.map { movie in
             (movie.id, LocalContentEntry(

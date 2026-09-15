@@ -55,8 +55,15 @@ struct PlayerSkipIntroOverlay: View {
             pollTick &+= 1
         }
         #if os(tvOS)
-        .onChange(of: activeSegment?.segment.end) { _, _ in
-            if activeSegment != nil { Task { @MainActor in buttonFocused = true } }
+        .onChange(of: activeSegment?.segment.end) { _, newEnd in
+            guard newEnd != nil else { return }
+            // Delay focus assignment so the current focus transaction (e.g.
+            // player controls overlay settling) completes first. An immediate
+            // or async-hopped assignment races the controls' own focus reclaim
+            // and leaves the skip button visible but unfocusable.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                buttonFocused = true
+            }
         }
         #endif
         .onChange(of: segments) { _, _ in

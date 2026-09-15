@@ -4,6 +4,38 @@ All notable changes to Apex Stream Player.
 
 ---
 
+## Build 58 (1.2.0) — September 15, 2026
+
+### Bug Fixes
+
+- **TV Guide loads faster and stays available after relaunch** — EPG reads from the local SwiftData store immediately, publishes live results incrementally, bounds its memory cache, and avoids duplicate or competing background requests. Closing and reopening Apex no longer clears valid guide data.
+- **Playlist refresh now refreshes the TV Guide too** — A manual playlist refresh runs the catalog and EPG pipeline together, so customers do not need to perform two separate refreshes.
+- **Guide scrolling is smooth across empty and populated channels** — Channels without programme data reserve normal timeline slots and stable row heights instead of collapsing the grid. iOS uses directional locking, independent horizontal/vertical offsets, stable eager programme rows, and native horizontal positioning to prevent diagonal drift, re-anchoring, and left/right jumps.
+- **Live channel switching is fast again** — Replacing a KSPlayer live stream no longer pauses the incoming replacement or waits for the 15-second recovery path. Stale callbacks from the outgoing URL are ignored, and repeated channel selections from the Guide reliably present playback.
+- **TMDB scores appear after playlist sync** — Movies and series receive a lightweight rating backfill after sync, including titles already indexed before rating capture was added. Missing or imperfect series names use progressively safer matching, and visible tvOS cards can finish unresolved scores on demand.
+- **tvOS Live TV navigation is predictable** — Menu/Back moves from the Guide or channel list to the category rail first; pressing it again returns to the top navigation. Only the active List or Guide is mounted, reducing focus-engine work.
+- **Theme colours are consistent** — Loading indicators, progress rings, focused controls, catch-up badges, and other previously hard-coded accents now use the selected theme across iOS, macOS, and tvOS.
+- **Long-session responsiveness improved** — EPG caches are bounded and background EPG/rating work yields while browsing or playback is active, reducing the gradual lag that previously cleared only after force-quitting.
+- **SwiftData build error fixed** — Files using `modelContext` import the defining SwiftData module explicitly.
+
+### Improvements
+
+- The Guide keeps six hours of recent programming and twelve hours ahead while retaining a manageable layout size.
+- Apple TV channel rows reserve their full EPG area before data arrives, preventing focus and scroll anchors from moving during incremental updates.
+- Main app and Top Shelf extension build metadata are aligned at **58**.
+
+### Verification
+
+- iOS Simulator build (iPhone 17 Pro): passed.
+- tvOS Simulator build: passed.
+- Manual TestFlight coverage is listed in `TESTFLIGHT_CHECKLIST.md`.
+
+### Release
+
+- Build number **58** (1.2.0).
+
+---
+
 ## Build 55 (1.2.0) — September 4, 2026
 
 ### Bug Fixes

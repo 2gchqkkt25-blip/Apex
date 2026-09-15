@@ -171,13 +171,22 @@ extension PlayableMedia {
             guard let resolved = episode.directSource.flatMap(URL.init(string:)) else { return nil }
             url = resolved
         case .xtream:
-            if let direct = episode.directSource,
-               !direct.isEmpty,
-               let directURL = URL(string: direct)
-            {
-                url = directURL
-            } else if let built = client.buildEpisodeURL(for: episode, playlist: playlist) {
+            // Always prefer m3u8 for Xtream series. Panels report
+            // container_extension as mkv/mp4 (the source format) but only
+            // serve via HLS. Direct .mp4/.mkv URLs return HTTP 503, causing
+            // immediate playback failure and auto-advance skip loops.
+            if let built = client.buildSeriesHLSURL(for: episode, playlist: playlist) {
                 url = built
+            } else if let direct = episode.directSource,
+                      !direct.isEmpty,
+                      var directURL = URL(string: direct)
+            {
+                // Fallback: rewrite the stored directSource extension to m3u8
+                let ext = directURL.pathExtension.lowercased()
+                if ext != "m3u8" && ext != "ts" {
+                    directURL = directURL.deletingPathExtension().appendingPathExtension("m3u8")
+                }
+                url = directURL
             } else {
                 return nil
             }

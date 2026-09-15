@@ -31,7 +31,7 @@
     extension View {
         /// The flat dark fill shared by every tvOS settings surface.
         func tvSettingsBackground() -> some View {
-            background(TVSettingsMetrics.background.ignoresSafeArea())
+            themeBackground()
         }
     }
 

@@ -5,12 +5,74 @@
 //  EPG import: single-pass XMLTV, channel-id/name matching, and per-channel caps.
 //
 
-import Foundation
 @testable import Apex
+import Foundation
 import SwiftData
 import Testing
 
 struct EPGSyncTests {
+    @Test func `on-demand guide survives reopening its disk store`() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("Apex-EPG-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let storeURL = directory.appendingPathComponent("catalog.store")
+        let schema = Schema([EPGListing.self])
+        let configuration = ModelConfiguration(
+            "EPGPersistence",
+            schema: schema,
+            url: storeURL,
+            cloudKitDatabase: .none
+        )
+        let start = Date().addingTimeInterval(-60)
+        let end = Date().addingTimeInterval(3_600)
+
+        do {
+            let container = try ModelContainer(for: schema, configurations: configuration)
+            let inserted = await EPGAPISync.persist(
+                programsByChannel: [
+                    "news.1": [EPGProgram(title: "News", description: "", start: start, end: end)]
+                ],
+                container: container
+            )
+            #expect(inserted == 1)
+        }
+
+        let reopened = try ModelContainer(for: schema, configurations: configuration)
+        let listings = try ModelContext(reopened).fetch(FetchDescriptor<EPGListing>())
+        #expect(listings.count == 1)
+        #expect(listings.first?.title == "News")
+    }
+
+    @Test @MainActor func `section cache evicts old sections but keeps recent data`() {
+        let cache = LiveTVSectionEPGCache()
+        let now = Date()
+        let program = EPGProgram(title: "News", description: "", start: now, end: now.addingTimeInterval(3600))
+        for index in 0 ..< 20 {
+            let token = "section-\(index)"
+            cache.activate(section: token)
+            cache.merge(section: token, loaded: ([:], ["channel": [program]]))
+        }
+        cache.activate(section: "section-18")
+        #expect(cache.programsByChannel["channel"] == [program])
+        cache.activate(section: "section-0")
+        #expect(cache.programsByChannel.isEmpty)
+    }
+
+    @Test @MainActor func `expired section data needs loading again`() {
+        let cache = LiveTVSectionEPGCache()
+        let stream = LiveStream(id: "test-live-1", streamId: 1, name: "News")
+        let now = Date()
+        let expired = EPGProgram(title: "Old", description: "", start: now.addingTimeInterval(-7200), end: now.addingTimeInterval(-3600))
+        cache.activate(section: "news")
+        cache.merge(section: "news", loaded: ([:], [stream.primaryEPGChannelId: [expired]]))
+        #expect(cache.channelsNeedingLoad([stream]).count == 1)
+        let current = EPGProgram(title: "Current", description: "", start: now.addingTimeInterval(-60), end: now.addingTimeInterval(3600))
+        cache.merge(section: "news", loaded: ([:], [stream.primaryEPGChannelId: [current]]))
+        #expect(cache.channelsNeedingLoad([stream]).isEmpty)
+    }
+
     private func writeTempFile(_ content: String, ext: String) throws -> URL {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString + "." + ext)
@@ -278,7 +340,7 @@ struct EPGSyncTests {
         #expect(EPGStaleXMLTVCache.shouldSkipXMLTVDownload(playlistID: playlistID) == false)
     }
 
-    @Test func `stale xmltv cache is set only when matched programmes are uniformly expired`() async throws {
+    @Test func `stale xmltv cache is set only when matched programmes are uniformly expired`() {
         let playlistID = UUID()
         EPGStaleXMLTVCache.clearXMLTVBulkStale(playlistID: playlistID)
         EPGStaleXMLTVCache.markXMLTVBulkStale(playlistID: playlistID)
@@ -315,7 +377,7 @@ struct EPGSyncTests {
         }
 
         let identities = [
-            TestIdentity(streamId: 7, name: "HBO HD", epgChannelId: "hbo.us", customSid: nil),
+            TestIdentity(streamId: 7, name: "HBO HD", epgChannelId: "hbo.us", customSid: nil)
         ]
 
         var batches: [[ParsedProgramme]] = []

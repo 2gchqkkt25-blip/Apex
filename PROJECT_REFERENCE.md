@@ -170,6 +170,47 @@ Without these keys, the app works but metadata is limited to what the IPTV provi
 | 101 | **Build 53 — tvOS Home keep-mounted + trending + nav + iCloud catalog** | ✅ **Done (Sep 1)** — Home stays resident on tvOS; trending 20 titles; Movies/Series local path; Settings Media Servers in-pane; IPTV vs media-server ids; playlist CloudKit tombstone; catalog-sync lease; full Sync Now fetch. See § Build 53. |
 | 102 | **Build 54 — episodes, Recently Added/Watched, subtitles, skip** | ✅ **Done (Sep 3)** — Sync Now refreshes Xtream `last_modified` series; Recently Added is playlist-scoped; Recently Watched requires real playback; skip works with unknown duration; subtitles on by default. See § Build 54. |
 | 103 | **Build 55 — in-player Guide, exclusive playback, hidden iCloud** | ✅ **Done (Sep 4)** — Compact tvOS mini-Guide scrolls the full list; iPhone portrait Guide; leftover audio; second-playlist spinner; hidden channels/categories sync. See § Build 55. |
+| 104 | **Build 58 — EPG, channel switching, poster scores, navigation, themes** | ✅ **Done (Sep 15)** — Unified playlist/EPG refresh; persistent and faster guide data; stable empty rows and smooth iOS scrolling; faster repeated channel changes; TMDB scores after sync; tvOS Back flow; complete theme tinting. See § Build 58. |
+
+---
+
+## Build 58 — EPG, Channel Switching, Ratings, and Polish (Sep 15, 2026)
+
+> **Context:** Testers reported slow EPG loading, guide data disappearing after relaunch, jumping on empty channels and during iOS scrolling, slow repeated channel changes, missing poster scores after sync, awkward tvOS Back navigation, and theme colours that did not reach every loading/focus control.
+
+### ✅ EPG refresh and persistence
+
+- Playlist refresh includes the TV Guide phase. Stored listings paint immediately on launch and remain across force-quit/relaunch.
+- Live results publish incrementally; duplicate work is suppressed; caches and per-channel retention are bounded.
+- Background prefetch yields to active Guide browsing and playback.
+
+### ✅ Stable Guide scrolling
+
+- Empty channels use stable gap cells instead of changing the row/timeline geometry.
+- iOS separates horizontal and vertical scroll observation, uses directional locking, removes the identity-bound position feedback loop, and realizes visible programme rows ahead of horizontal motion.
+- tvOS rows reserve their final height before EPG arrives, preventing focus-anchor jumps.
+
+### ✅ Channel switching
+
+- KSPlayer replacement preserves autoplay and ignores stale outgoing-stream state callbacks, avoiding the fallback delay on repeated Guide selections.
+- Guide-to-fullscreen presentation is sequenced after detail dismissal so every selection opens reliably.
+
+### ✅ TMDB poster scores
+
+- Playlist completion queues a lightweight score pass for movies and series on every platform.
+- Existing TMDB IDs use rating-only endpoints; missing IDs use normalized title/year matching with series-specific fallbacks.
+- tvOS limits the initial background batch and resolves remaining visible cards on demand to protect focus performance.
+
+### ✅ tvOS navigation and themes
+
+- Back unwinds Guide/list → category rail → top navigation.
+- Inactive Live TV layouts are unmounted instead of hidden behind the active layout.
+- Theme tint reaches loading indicators, progress UI, badges, and focus/control accents across Apple platforms.
+
+### Release
+
+- Version **1.2.0**, Build **58**. Apex and Top Shelf extension build numbers match.
+- See `CHANGELOG.md`, `EPG.md`, and `TESTFLIGHT_CHECKLIST.md`.
 
 ---
 
@@ -914,6 +955,7 @@ Full rules: `EPG.md` § **Stability rules (do not regress)**. Highlights:
 | 52→53 | tvOS Home reloads on every tab switch; trending capped at 6 and waits on catalog sync | `lazyTab` unmounted Home on tvOS (HD memory pass); `trendingRowLimit` 6 on constrained devices; 4K waited on `waitUntilPlaylistSyncIdle()` before TMDB — see § Build 53 |
 | 53→54 | New episodes frozen after Sync Now; Recently Watched listed unplayed titles; skip no-op on duration 0 | Lazy episode fetch only when empty; `lastWatchedDate` alone; skip clamped to reported duration — see § Build 54 |
 | 54→55 | tvOS mini-Guide ~5 rows, white focus box, jumpy scroll; leftover audio; second playlist spinner; hides not in iCloud | Eager overlay stacks; no exclusive playback session; MainActor playlist save; `isHidden` not in `UserContentState` — see § Build 55 |
+| 55→58 | EPG slow/vanished after relaunch; Guide jumped on empty rows and iOS pans; repeated channel switches delayed; poster scores absent after sync | Competing/unbounded EPG work, unstable row geometry and SwiftUI re-anchoring, replacement stream paused, ratings only loaded from detail enrichment — see § Build 58 |
 | Pre-41 | Xtream skipped after tvOS reinstall with Stremio | Empty selection used unsorted `.first`; tvOS deferred all sync covers on Home — see § Build 41 |
 
 **Rule:** Performance passes must not edit Live TV EPG UI without running the EPG UI checklist. EPG fixes must not edit sync layer without running EPG sync checklist.
@@ -940,7 +982,7 @@ Full rules: `EPG.md` § **Stability rules (do not regress)**. Highlights:
 2. ~~**Website / support email**~~ — ✅ support@streaminfinitytv.com, GitHub as homepage
 3. ~~**Apple Developer setup**~~ — ✅ Team `VS7D6GB238`, bundle ID registered, IAP products created, iOS TestFlight builds uploaded (July 2, 2026)
 4. ~~**CloudKit Development schema**~~ — ✅ Bootstrapped; **Production deployed** — playlist + user data sync verified on TestFlight (July 2, 2026)
-5. **TestFlight build 55** — 🔄 Ready to archive (Sep 4). Deploy `CD_UserContentState.isHidden` Development → Production before upload. See § Build 55, `CHANGELOG.md`, `TESTFLIGHT_CHECKLIST.md`.
+5. **TestFlight build 58** — 🔄 Ready to archive (Sep 15). EPG, repeated channel switching, post-sync TMDB scores, tvOS Back navigation, and theme coverage are ready for device testing. See § Build 58, `CHANGELOG.md`, `EPG.md`, and `TESTFLIGHT_CHECKLIST.md`.
 6. **External TestFlight** — Age rating + privacy URL + App Privacy + What to Test → Beta App Review (~1–2 days)
 7. ~~**tvOS large-library hardening**~~ — ✅ Lazy tab mount, deferred indexing/EPG (tvOS-only); in build 17
 8. ~~**EPG guide**~~ — ✅ Working (`xmltv.php` bulk download, offset-honest parse; slow-sync + mismatch fixed); notes in `EPG.md`
@@ -1546,11 +1588,11 @@ Quick reference for [App Store Connect](https://appstoreconnect.apple.com) → *
 | Field | Value |
 |-------|-------|
 | Marketing version | **1.2.0** |
-| Build | **55** (`CURRENT_PROJECT_VERSION`) |
+| Build | **58** (`CURRENT_PROJECT_VERSION`) |
 | Bundle ID | `com.streaminfinity.apex` |
 | Team ID | `VS7D6GB238` |
 
-**Bump build before each upload:** General → Apex target → **Build** → increment (e.g. 55 → 56). Archive with **Release**; `.env` keys inject at build time.
+**Bump build before each upload:** General → Apex target → **Build** → increment (e.g. 58 → 59). Archive with **Release**; `.env` keys inject at build time.
 
 ### URLs (App Information — shared iOS + tvOS)
 
@@ -1613,19 +1655,17 @@ Internal TestFlight (team only): upload build, no Beta App Review.
 **What to Test** (paste in TestFlight → External Testing):
 
 ```
-Build 55 (1.2.0)
+Build 58 (1.2.0)
 
 Apex is an IPTV player—users add their own Xtream or M3U playlist. No content is bundled.
 
-Apple TV: In-player Guide stays a compact overlay. Scroll the full channel list with the Siri Remote. The focus highlight should sit on the programme, not a giant white box, and scrolling should be smooth (not jumpy). OpenSubtitles chips should use a tight highlight. After Stop, posters should not keep spinning.
+Refresh one playlist and confirm Movies, Series, Live TV, TV Guide data, and TMDB scores populate together. Force-close and reopen Apex; the Guide and scores should remain.
 
-iPhone: Open the in-player Guide in portrait — picture stays on top, Guide fills below (no black band above the video).
+On iPhone/iPad, scroll the Guide in every direction and across channels with no programme data. It should stay smooth and never jump. Switch between several channels from the Guide; each should start promptly.
 
-Playback: Start a movie right after a series (or the reverse) — only one soundtrack. Skip/rewind still works on VOD. Adding a second playlist while the first is syncing should not spin forever; Cancel still works.
+On Apple TV, Back should move from Guide/list to categories, then to the top navigation. Confirm movie and series poster scores appear without opening details and that focus remains responsive.
 
-iCloud: Hide a Live TV category or channel on one device, leave the app for a few seconds, then check the other device (same profile). Favorites, progress, and playlists still sync. Sync Now should not hang on the TV Guide download.
-
-Add a playlist, wait for sync, browse Live TV / Movies / Series, and play a stream. Test Media (Plex/Jellyfin/Emby) if you use it.
+Try several themes and confirm spinners, progress rings, focus states, badges, and controls use the selected colours.
 
 Contact: support@streaminfinitytv.com
 ```
@@ -1736,7 +1776,7 @@ See **What's Been Built → iOS Device — Large Library Fix** above for full de
 2. ~~**Deploy CloudKit schema** Development → Production~~ — ✅ Done; sync verified
 3. ~~**Archive + upload build 19**~~ — ✅ Done.
 4. ~~**EPG on device**~~ — ✅ **Working (Jul 8)** on both iOS and tvOS.
-5. **TestFlight build 55** — 🔄 **Ready to archive** — compact tvOS in-player Guide (full-list scroll), iPhone portrait Guide, exclusive playback, second-playlist add, hidden channels/categories over iCloud. Deploy `isHidden` to Production first. See § Build 55 and `TESTFLIGHT_CHECKLIST.md`.
+5. **TestFlight build 58** — 🔄 **Ready to archive** — unified/persistent EPG, smooth Guide scrolling, faster repeated channel switching, post-sync TMDB scores, tvOS Back flow, and complete theme tinting. See § Build 58 and `TESTFLIGHT_CHECKLIST.md`.
 6. **External TestFlight** — Age rating 17+, privacy URL, App Privacy, What to Test → Beta App Review
 7. **Smoke-test** — sync (branded UI + TV Guide **%**), hero, subtitles, Discord, tvOS home, **EPG** (cards populate immediately after sync, grid + in-player browser, persistence after force-quit)
 8. **Screenshots + store copy** — when ready for **public** App Store
@@ -1836,4 +1876,4 @@ See **What's Been Built → iOS Device — Large Library Fix** above for full de
 
 ---
 
-*Last updated: September 4, 2026 (Build 55 — in-player Guide, exclusive playback, hidden iCloud, playlist add).*
+*Last updated: September 15, 2026 (Build 58 — EPG, channel switching, poster scores, tvOS navigation, themes).*

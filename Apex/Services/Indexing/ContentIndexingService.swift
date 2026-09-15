@@ -66,11 +66,36 @@ final class ContentIndexingService {
 
     private var container: ModelContainer?
     private var task: Task<Void, Never>?
+    private var ratingTask: Task<Void, Never>?
+    private var pendingRatingPlaylistIDs: Set<UUID> = []
 
     private init() {}
 
     func configure(container: ModelContainer) {
         self.container = container
+    }
+
+    /// Starts the lightweight poster-score pass after catalog sync on every
+    /// platform, including tvOS where full semantic indexing is opt-in.
+    func enqueueRatingBackfill(playlistID: UUID) {
+        pendingRatingPlaylistIDs.insert(playlistID)
+        guard ratingTask == nil, let container else { return }
+        ratingTask = Task { [weak self] in
+            defer { self?.ratingTask = nil }
+            try? await Task.sleep(for: .milliseconds(500))
+            while !Task.isCancelled, let playlistID = self?.pendingRatingPlaylistIDs.first {
+                self?.pendingRatingPlaylistIDs.remove(playlistID)
+                let indexer = ContentIndexer(modelContainer: container)
+                #if os(tvOS)
+                    // Visible cards finish enrichment on demand. Keep this
+                    // initial pass small so a large sync cannot monopolize
+                    // networking and SwiftData while the focus engine is live.
+                    await indexer.backfillMissingRatings(playlistID: playlistID, maxCandidates: 50)
+                #else
+                    await indexer.backfillMissingRatings(playlistID: playlistID)
+                #endif
+            }
+        }
     }
 
     /// Starts a background indexing pass unless one is already running.
@@ -88,7 +113,7 @@ final class ContentIndexingService {
     func kick(after delay: Duration = .zero, allowOnTV: Bool = false) {
         guard let container, task == nil else { return }
         #if os(tvOS)
-        guard allowOnTV else { return }
+            guard allowOnTV else { return }
         #endif
         guard !EPGSyncGate.isActive, !MediaSyncGate.isActive, !MediaConnectGate.isActive else { return }
         // Skip on offline, cellular, or Low Data Mode — TMDB indexing is
@@ -162,6 +187,15 @@ final class ContentIndexingService {
     func epgSyncFinished() {
         EPGSyncGate.isActive = false
         kick(after: .seconds(45))
+    }
+
+    /// Standalone rating backfill that runs independently of indexing guards.
+    /// Finds movies/series with a tmdbId but no rating, searches TMDB for their
+    /// vote average, and persists it so poster cards show ratings immediately.
+    func backfillRatings(playlistID: UUID? = nil) async {
+        guard let container else { return }
+        let indexer = ContentIndexer(modelContainer: container)
+        await indexer.backfillMissingRatings(playlistID: playlistID)
     }
 
     #if DEBUG

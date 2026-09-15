@@ -15,7 +15,10 @@ import SwiftData
 
 /// A single programme slot — grid + cards share this instead of SwiftData models.
 nonisolated struct EPGProgram: Sendable, Equatable, Identifiable {
-    var id: String { "\(Int(start.timeIntervalSince1970))-\(Int(end.timeIntervalSince1970))" }
+    var id: String {
+        "\(Int(start.timeIntervalSince1970))-\(Int(end.timeIntervalSince1970))"
+    }
+
     let title: String
     let description: String
     let start: Date
@@ -65,6 +68,7 @@ actor EPGLiveLoader {
     private var cache: [String: CachedEntry] = [:]
     private var inFlight: Set<String> = []
     private var didLogSample = false
+    private static let cacheLimit = 1000
 
     private static let ttl: TimeInterval = 10 * 60
     /// Short TTL for empty/failed fetches — long enough to stop a channel with
@@ -149,10 +153,12 @@ actor EPGLiveLoader {
     func programs(
         for snapshots: [EPGStreamSnapshot],
         credentials: EPGPlaylistCredentials,
-        now: Date = Date()
+        now: Date = Date(),
+        onUpdate: (@Sendable () async -> Void)? = nil
     ) async -> [String: [EPGProgram]] {
         guard credentials.sourceType == .xtream else { return [:] }
         guard !snapshots.isEmpty else { return [:] }
+        cache = cache.filter { now.timeIntervalSince($0.value.fetchedAt) < entryTTL($0.value) }
 
         var result: [String: [EPGProgram]] = [:]
         var toFetch: [EPGStreamSnapshot] = []
@@ -191,9 +197,11 @@ actor EPGLiveLoader {
             var startedCount = 0
 
             func schedule() {
-                while inFlightCount < Self.maxConcurrent, let snapshot = iterator.next() {
+                while !Task.isCancelled, inFlightCount < Self.maxConcurrent, let snapshot = iterator.next() {
                     let key = cacheKey(playlistID: credentials.id, streamId: snapshot.streamId)
-                    inFlight.insert(key)
+                    // Another browse call can enter this actor while a request
+                    // is suspended. Recheck at scheduling time, not just above.
+                    guard cache[key] == nil, inFlight.insert(key).inserted else { continue }
                     inFlightCount += 1
                     let streamId = snapshot.streamId
                     let channelId = snapshot.primaryEPGChannelId
@@ -250,6 +258,11 @@ actor EPGLiveLoader {
                 // or reload trigger, flooding the panel with requests.
                 // Skip caching transient failures (timeouts) so the next load retries.
                 if item.cacheResult {
+                    if cache.count >= Self.cacheLimit,
+                       let oldest = cache.min(by: { $0.value.fetchedAt < $1.value.fetchedAt })?.key
+                    {
+                        cache.removeValue(forKey: oldest)
+                    }
                     cache[item.key] = CachedEntry(
                         programs: item.programs,
                         fetchedAt: Date(),
@@ -258,6 +271,9 @@ actor EPGLiveLoader {
                 }
                 if !item.programs.isEmpty {
                     result[item.channelId] = item.programs
+                    // Publish warm results before the slowest request and disk
+                    // write finish. The UI coalesces these refresh signals.
+                    await onUpdate?()
                 } else if item.rawCount > 0, !didLogSample {
                     didLogSample = true
                     Logger.database.warning(
@@ -267,9 +283,9 @@ actor EPGLiveLoader {
                 schedule()
             }
 
-            let alignedCount = result.values.filter { programs in
+            let alignedCount = result.values.count(where: { programs in
                 programs.contains { $0.start <= now && now < $0.end } || programs.contains { $0.start > now }
-            }.count
+            })
             if parsedTotal > 0, alignedCount == 0, let sample = result.values.first(where: { !$0.isEmpty })?.first {
                 let deltaMin = Int(sample.start.timeIntervalSince(now) / 60)
                 Logger.database.warning(
@@ -312,18 +328,6 @@ actor EPGLiveLoader {
             // Log diagnostic: why is the store empty for these channels?
             let sampleIds = Array(epgIds.prefix(5))
             Logger.database.warning("EPG store query returned 0 listings for \(snapshots.count) channels (epgIds sample: \(sampleIds.joined(separator: ", "), privacy: .public), window: \(startBound) to \(endBound))")
-            // Check total EPGListing count to see if the store is populated at all
-            let countDescriptor = FetchDescriptor<EPGListing>()
-            let totalCount = (try? context.fetchCount(countDescriptor)) ?? 0
-            Logger.database.warning("EPG store total listing count: \(totalCount)")
-            if totalCount > 0 {
-                // Sample what channelIds ARE in the store
-                var sampleDescriptor = FetchDescriptor<EPGListing>()
-                sampleDescriptor.fetchLimit = 5
-                let sampleListings = (try? context.fetch(sampleDescriptor)) ?? []
-                let storeChannelIds = sampleListings.map(\.channelId)
-                Logger.database.warning("EPG store sample channelIds: \(storeChannelIds.joined(separator: ", "), privacy: .public)")
-            }
         }
         let grouped = Dictionary(grouping: listings, by: \.channelId)
         var result: [String: [EPGProgram]] = [:]
@@ -333,21 +337,34 @@ actor EPGLiveLoader {
             let programs = rows.map {
                 EPGProgram(title: $0.title, description: $0.listingDescription, start: $0.start, end: $0.end)
             }
-            let usable = programs.contains { $0.end > now.addingTimeInterval(-EPGRetention.pastGrace) }
+            // A channel is usable if it has any programme ending after the
+            // past-grace cutoff OR starting before the future horizon. The
+            // previous check only tested the past bound, which discarded
+            // channels whose next programme hadn't started yet — leaving
+            // iOS/macOS guides blank for upcoming slots that tvOS showed
+            // via the live API path.
+            let futureCutoff = now.addingTimeInterval(EPGRetention.futureHorizon)
+            let usable = programs.contains {
+                $0.end > now.addingTimeInterval(-EPGRetention.pastGrace)
+                    || ($0.start > now && $0.start < futureCutoff)
+            }
             guard usable else { continue }
             result[snapshot.primaryEPGChannelId] = programs
         }
         return result
     }
 
-    nonisolated private static func parse(
+    private nonisolated static func parse(
         _ listings: [XtreamShortEPG],
         timezoneIdentifier: String?,
         now: Date
     ) -> [EPGProgram] {
-        if let nowPlaying = parseNowPlaying(listings, timezoneIdentifier: timezoneIdentifier, now: now) {
-            return preferGuideWindow(nowPlaying, now: now)
-        }
+        // Parse ALL listings on every platform. The now_playing shortcut
+        // returns only the single flagged entry, discarding all other
+        // programmes from the expanded fetch. The per-channel API may be
+        // the only source of future guide data when SwiftData hasn't yet
+        // synced or the provider's XMLTV feed is incomplete — we need
+        // every listing so the guide shows upcoming programmes reliably.
 
         var programs: [EPGProgram] = []
         programs.reserveCapacity(listings.count)
@@ -379,7 +396,7 @@ actor EPGLiveLoader {
     }
 
     /// Panels mark the real on-air row with `now_playing` even when timestamps lag.
-    nonisolated private static func parseNowPlaying(
+    private nonisolated static func parseNowPlaying(
         _ listings: [XtreamShortEPG],
         timezoneIdentifier: String?,
         now: Date
@@ -409,11 +426,18 @@ actor EPGLiveLoader {
 
     /// Keeps slots that are relevant to the live guide. When all data is expired
     /// (stale provider), shifts each programme to TODAY at the same time-of-day.
-    nonisolated private static func preferGuideWindow(_ programs: [EPGProgram], now: Date) -> [EPGProgram] {
+    private nonisolated static func preferGuideWindow(_ programs: [EPGProgram], now: Date) -> [EPGProgram] {
         guard !programs.isEmpty else { return [] }
-        let liveAndUpcoming = programs.filter { $0.end > now }
-        if !liveAndUpcoming.isEmpty {
-            return Array(liveAndUpcoming.prefix(16))
+
+        // All platforms: include recent past programmes (up to 6 hours) so
+        // the guide shows "what was on before", and keep up to 32 future
+        // slots so upcoming programmes are always visible. The previous
+        // iOS/macOS path capped at 16 programmes with no past window,
+        // which left the guide mostly empty when SwiftData hadn't synced.
+        let pastCutoff = now.addingTimeInterval(-6 * 3600)
+        let relevant = programs.filter { $0.end > pastCutoff }
+        if !relevant.isEmpty {
+            return Array(relevant.sorted { $0.start < $1.start }.prefix(32))
         }
 
         // All expired — shift each programme to today keeping time-of-day.
@@ -431,9 +455,9 @@ actor EPGLiveLoader {
             )
         }
 
-        let relevant = shifted.filter { $0.end > now.addingTimeInterval(-3600) && $0.start < now.addingTimeInterval(6 * 3600) }
-        if !relevant.isEmpty {
-            return Array(relevant.sorted { $0.start < $1.start }.prefix(16))
+        let staleRelevant = shifted.filter { $0.end > now.addingTimeInterval(-3600) && $0.start < now.addingTimeInterval(6 * 3600) }
+        if !staleRelevant.isEmpty {
+            return Array(staleRelevant.sorted { $0.start < $1.start }.prefix(16))
         }
         return Array(shifted.sorted { $0.start < $1.start }.prefix(8))
     }
@@ -495,14 +519,22 @@ actor EPGLiveLoader {
 
     nonisolated static func makeChannelEPG(from programs: [EPGProgram], now: Date) -> ChannelEPG {
         guard !programs.isEmpty else {
-            return ChannelEPG(current: nil, next: nil)
+            return ChannelEPG(previous: nil, current: nil, next: nil)
         }
+
+        // Find the most recently ended programme for the "previous" slot.
+        // This shows "what was just on" in the guide card.
+        let previous = programs
+            .filter { $0.end <= now }
+            .max(by: { $0.end < $1.end })
+            .map { EPGSlot(title: $0.title, start: $0.start, end: $0.end) }
 
         // Exact overlap: start <= now < end
         if let current = programs.first(where: { $0.start <= now && now < $0.end }) {
             let next = programs.first(where: { $0.start >= current.end })
                 ?? programs.first(where: { $0.start > now && $0.id != current.id })
             return ChannelEPG(
+                previous: previous,
                 current: EPGSlot(title: current.title, start: current.start, end: current.end),
                 next: next.map { EPGSlot(title: $0.title, start: $0.start, end: $0.end) }
             )
@@ -516,6 +548,7 @@ actor EPGLiveLoader {
         if let next = upcoming.first {
             let after = upcoming.count > 1 ? upcoming[1] : nil
             return ChannelEPG(
+                previous: previous,
                 current: EPGSlot(title: next.title, start: next.start, end: next.end),
                 next: after.map { EPGSlot(title: $0.title, start: $0.start, end: $0.end) }
             )
@@ -527,6 +560,7 @@ actor EPGLiveLoader {
         let next = sorted.count > 1 ? sorted[1] : nil
 
         return ChannelEPG(
+            previous: previous,
             current: EPGSlot(title: nearest.title, start: nearest.start, end: nearest.end),
             next: next.map { EPGSlot(title: $0.title, start: $0.start, end: $0.end) }
         )
@@ -550,9 +584,8 @@ actor EPGLiveLoader {
     /// EPG first. If that doesn't cover now, try `limit=8`.
     /// Unlike earlier versions, this NEVER discards valid parsed data — other
     /// Apple IPTV apps (Chilli, SwipTV) show whatever the provider returns.
-    /// On tvOS, skips the expanded second fetch to halve response time — the
-    /// store (populated by external feeds) covers most channels; the live API is
-    /// only for gap-fill where any data is better than a 2x delay.
+    /// Every platform returns a usable primary result immediately; expanded
+    /// requests are only needed when the primary has no live/upcoming coverage.
     private static func fetchLiveChannelEPG(
         client: XtreamClient,
         serverURL: String,
@@ -570,21 +603,12 @@ actor EPGLiveLoader {
             streamId: streamId,
             limit: Self.liveFetchLimit
         )
-        var programs = parse(primary, timezoneIdentifier: timezoneIdentifier, now: now)
-        if hasLiveOrUpcoming(programs, now: now) || primary.contains(where: { $0.nowPlaying == true }) {
-            return LiveChannelEPGFetchResult(programs: programs, rawCount: primary.count)
+        let primaryPrograms = parse(primary, timezoneIdentifier: timezoneIdentifier, now: now)
+
+        if hasLiveOrUpcoming(primaryPrograms, now: now) || primary.contains(where: { $0.nowPlaying == true }) {
+            return LiveChannelEPGFetchResult(programs: primaryPrograms, rawCount: primary.count)
         }
 
-        #if os(tvOS)
-        // On tvOS, return whatever the first call got — even if not live/upcoming.
-        // The store covers most channels; this path is only for gap-fill where
-        // showing the nearest programme is better than doubling the wait time.
-        if !programs.isEmpty {
-            return LiveChannelEPGFetchResult(programs: programs, rawCount: primary.count)
-        }
-        #endif
-
-        // Try expanded fetch — provider may return oldest first with small limits.
         let expanded = try await fetchChannelEPGWithRetry(
             client: client,
             serverURL: serverURL,
@@ -598,12 +622,7 @@ actor EPGLiveLoader {
             return LiveChannelEPGFetchResult(programs: expandedPrograms, rawCount: expanded.count)
         }
 
-        // Even if nothing overlaps "now" exactly, return whatever we parsed.
-        // Other apps (Chilli, SwipTV) surface the nearest programme rather than
-        // showing a blank guide. The earlier "return empty" approach made the
-        // guide look broken for providers whose schedules have small gaps or
-        // slight timing drift relative to the device clock.
-        let bestPrograms = expandedPrograms.isEmpty ? programs : expandedPrograms
+        let bestPrograms = expandedPrograms.isEmpty ? primaryPrograms : expandedPrograms
         let totalRaw = primary.count + expanded.count
 
         if !bestPrograms.isEmpty {
@@ -644,13 +663,18 @@ enum EPGBrowseLoader {
         windowStart: Date? = nil,
         windowEnd: Date? = nil,
         now: Date = Date(),
-        /// When false, return store/warm-cache only. Used by mid-sync
-        /// `refreshGeneration` reloads so each bump doesn't spawn another
-        /// live-API gap-fill → `forceGuideRefresh` storm (tvOS guide scroll thrash).
+        // When false, return store/warm-cache only. Used by mid-sync
+        // `refreshGeneration` reloads so each bump doesn't spawn another
+        // live-API gap-fill → `forceGuideRefresh` storm (tvOS guide scroll thrash).
         allowGapFill: Bool = true
     ) async -> (channelEPG: [String: ChannelEPG], programs: [String: [EPGProgram]]) {
         let snapshots = channels.map(EPGStreamSnapshot.init(stream:))
-        let start = windowStart ?? now.addingTimeInterval(-3600)
+        // Query 24 hours into the past so historical data is fetched from
+        // SwiftData and reaches makeChannelEPG's "previous" slot extraction
+        // on every platform — not just tvOS. The provider's xmltv.php retains
+        // past programmes via a 24h pastGrace in EPGInserter, and narrowing
+        // this window to 1 hour on iOS/macOS left the guide mostly empty.
+        let start = windowStart ?? now.addingTimeInterval(-24 * 3600)
         let end = windowEnd ?? now.addingTimeInterval(48 * 3600)
 
         var programs: [String: [EPGProgram]] = [:]
@@ -676,7 +700,14 @@ enum EPGBrowseLoader {
             // memory while persist / store re-read is still catching up. Without
             // this, forceGuideRefresh after a successful live fetch could still
             // paint blank rows (EPG.md rule 531: UI already has data in memory).
-            let missingAfterStore = snapshots.filter { programs[$0.primaryEPGChannelId]?.isEmpty ?? true }
+            // Also check warm cache for channels that have current data but lack
+            // enough future programmes to fill the guide timeline — same logic
+            // as the live API gap-fill below.
+            let missingAfterStore = snapshots.filter {
+                let channelPrograms = programs[$0.primaryEPGChannelId]
+                return !hasAiringOrUpcoming(channelPrograms, now: now)
+                    || !hasSufficientFutureCoverage(channelPrograms, now: now)
+            }
             if !missingAfterStore.isEmpty {
                 let warm = await EPGLiveLoader.shared.cachedPrograms(
                     for: missingAfterStore,
@@ -684,7 +715,12 @@ enum EPGBrowseLoader {
                     now: now
                 )
                 for (channelId, slots) in warm {
-                    programs[channelId] = slots
+                    // Keep stored history when live data fills future coverage.
+                    var merged = Dictionary((programs[channelId] ?? []).map { ($0.id, $0) }, uniquingKeysWith: { _, last in last })
+                    for slot in slots {
+                        merged[slot.id] = slot
+                    }
+                    programs[channelId] = merged.values.sorted { $0.start < $1.start }
                 }
             }
 
@@ -692,8 +728,17 @@ enum EPGBrowseLoader {
             // not in the store or warm cache. The view updates when refreshGeneration bumps.
             // Skip on store-only refreshes (mid-sync / generation bumps) — otherwise
             // every signal re-spawns gap-fill and forceGuideRefresh, thrashing the guide.
-            let needsLive = snapshots.filter { programs[$0.primaryEPGChannelId]?.isEmpty ?? true }
-            if allowGapFill, !needsLive.isEmpty, !MemoryPressureGate.isActive {
+            // Trigger live API gap-fill not only when a channel has no data at
+            // all, but also when it has current/past programmes yet lacks enough
+            // future slots to fill the guide timeline. Without this, iOS/macOS
+            // guides show only "now" while tvOS (which had more historical sync
+            // data) displays the full upcoming schedule.
+            let needsLive = snapshots.filter {
+                let channelPrograms = programs[$0.primaryEPGChannelId]
+                return !hasAiringOrUpcoming(channelPrograms, now: now)
+                    || !hasSufficientFutureCoverage(channelPrograms, now: now)
+            }
+            if allowGapFill, !Task.isCancelled, !needsLive.isEmpty, !MemoryPressureGate.isActive {
                 Logger.database.warning("EPG browse — store had data for \(programs.count)/\(snapshots.count) channels; \(needsLive.count) need live API")
                 if let sample = needsLive.first {
                     Logger.database.warning("EPG browse — sample needing live: name=\(sample.name, privacy: .public) epgId=\(sample.epgChannelId ?? "nil", privacy: .public) primaryId=\(sample.primaryEPGChannelId, privacy: .public)")
@@ -705,14 +750,22 @@ enum EPGBrowseLoader {
                     let fetched = await EPGLiveLoader.shared.programs(
                         for: needsLive,
                         credentials: bgCredentials,
-                        now: bgNow
+                        now: bgNow,
+                        onUpdate: {
+                            await EPGSyncService.shared.signalBrowseRefresh()
+                        }
                     )
                     if !fetched.isEmpty {
-                        await EPGAPISync.persist(programsByChannel: fetched, container: bgContainer, now: bgNow)
-                        // Force immediate UI update — no throttle. Browse gap-fill
-                        // only fires once per category, not repeatedly like sync.
-                        // Reload also pulls warm cache above, so rows appear even
-                        // if the persist round-trip is still settling.
+                        // Commit before announcing the refresh. Previously the
+                        // warm memory cache painted first and a failed/unfinished
+                        // save went unnoticed until relaunch made the guide blank.
+                        await EPGAPISync.persist(
+                            programsByChannel: fetched,
+                            container: bgContainer,
+                            now: bgNow
+                        )
+                        // Force immediate UI update — no throttle. Browse
+                        // gap-fill fires once per category, not per programme.
                         await MainActor.run {
                             EPGSyncService.shared.forceGuideRefresh()
                         }
@@ -745,5 +798,20 @@ enum EPGBrowseLoader {
     private static func hasAiringOrUpcoming(_ programs: [EPGProgram]?, now: Date) -> Bool {
         guard let programs, !programs.isEmpty else { return false }
         return EPGLiveLoader.hasLiveOrUpcoming(programs, now: now)
+    }
+
+    /// True when the store already has enough future programmes to fill the
+    /// guide timeline. When false the live API gap-fill should fire even if
+    /// the channel has current/past data — otherwise iOS/macOS guides show
+    /// only "now" while tvOS (which had more historical sync data) shows
+    /// the full upcoming schedule.
+    nonisolated static func hasSufficientFutureCoverage(_ programs: [EPGProgram]?, now: Date) -> Bool {
+        guard let programs, !programs.isEmpty else { return false }
+        // Require at least 4 future programmes within the retention horizon.
+        // The live API returns up to 8 slots; fewer than 4 means the store
+        // is sparse and the guide will have visible gaps beyond "now".
+        let futureCutoff = now.addingTimeInterval(EPGRetention.futureHorizon)
+        let futureCount = programs.filter { $0.start > now && $0.start < futureCutoff }.count
+        return futureCount >= 4
     }
 }

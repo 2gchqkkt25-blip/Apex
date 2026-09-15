@@ -470,7 +470,16 @@ extension ContentSyncManager {
             let episodeNumbers = item.seriesNumbers.isEmpty ? [index + 1] : item.seriesNumbers
             for episodeNum in episodeNumbers {
                 let episodeKey = "\(streamId):\(episodeNum)"
-                let episodeCmd = buildStalkerEpisodeCmd(streamId: episodeKey)
+                // Prefer the portal's actual cmd when available. Only fall back to
+                // the fabricated base64 JSON when the portal omits it — many
+                // portals use plain-text cmds (e.g. "ffmpeg http://...") that
+                // create_link cannot interpret if replaced with guessed JSON.
+                let episodeCmd: String
+                if let portalCmd = item.cmd, !portalCmd.trimmingCharacters(in: .whitespaces).isEmpty {
+                    episodeCmd = portalCmd
+                } else {
+                    episodeCmd = buildStalkerEpisodeCmd(streamId: episodeKey)
+                }
                 result.append(ParsedEpisode(
                     id: "\(seriesElementId)-episode-\(episodeKey)",
                     episodeId: episodeKey,
@@ -492,6 +501,7 @@ extension ContentSyncManager {
     }
 
     /// Builds a base64-encoded JSON `cmd` for a series episode `create_link`.
+    /// Used only as a fallback when the portal does not supply a per-item `cmd`.
     /// Portals that encode their VOD commands as `{"type":"movie","stream_id":"..."}`
     /// resolve series episodes through the same VOD path — the season-level `cmd`
     /// has no episode number and produces an empty stream parameter.

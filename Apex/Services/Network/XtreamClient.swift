@@ -55,11 +55,11 @@ enum XtreamError: LocalizedError {
         case .networkError:
             // Timeouts, connection reset (RST), lost connection — transient.
             // Cancellations are not worth retrying in the same task.
-            return !isCancellation
+            !isCancellation
         case let .serverError(code):
-            return code >= 500
+            code >= 500
         case .invalidURL, .authenticationFailed, .decodingError, .invalidResponse:
-            return false
+            false
         }
     }
 
@@ -113,7 +113,7 @@ class XtreamClient: APIClient {
     /// server may RST after a heavy transfer) avoids tripping that limit. Also
     /// applies the configured timeout, which was previously ignored.
     private nonisolated static func makeSession(timeout: TimeInterval) -> URLSession {
-        return ProviderURLSession.make(
+        ProviderURLSession.make(
             timeout: timeout,
             resourceTimeout: 120,
             maxConnectionsPerHost: 1,
@@ -136,7 +136,9 @@ class XtreamClient: APIClient {
         base.port = components.port
         guard let url = base.url else { return trimmed }
         var absolute = url.absoluteString
-        while absolute.hasSuffix("/") { absolute.removeLast() }
+        while absolute.hasSuffix("/") {
+            absolute.removeLast()
+        }
         return absolute
     }
 
@@ -410,6 +412,32 @@ class XtreamClient: APIClient {
         return try await fetchEPGListings(url: url, diagnosticLabel: diagnosticLabel)
     }
 
+    /// Full EPG using `action=get_epg` — returns complete programme listings
+    /// including past programmes. Unlike `get_short_epg` which only returns
+    /// current/future slots truncated by the panel, this endpoint provides
+    /// the full schedule history. Used on tvOS where external XMLTV feeds
+    /// cannot be parsed and this is the primary source of historical data.
+    func getFullEPG(
+        serverURL: String,
+        username: String,
+        password: String,
+        streamId: Int,
+        diagnosticLabel: String? = nil
+    ) async throws -> [XtreamShortEPG] {
+        let queryItems = [
+            URLQueryItem(name: "username", value: username),
+            URLQueryItem(name: "password", value: password),
+            URLQueryItem(name: "action", value: "get_epg"),
+            URLQueryItem(name: "stream_id", value: String(streamId))
+        ]
+
+        guard let url = buildURL(serverURL: serverURL, path: "player_api.php", queryItems: queryItems) else {
+            throw XtreamError.invalidURL
+        }
+
+        return try await fetchEPGListings(url: url, diagnosticLabel: diagnosticLabel)
+    }
+
     /// Decodes the many shapes Xtream panels use for `epg_listings`.
     private func fetchEPGListings(url: URL, diagnosticLabel: String? = nil) async throws -> [XtreamShortEPG] {
         let data: Data
@@ -441,7 +469,7 @@ class XtreamClient: APIClient {
         if data.isEmpty { return [] }
         if let text = String(data: data, encoding: .utf8)?
             .trimmingCharacters(in: .whitespacesAndNewlines),
-           text.isEmpty || text == "[]" || text == "null" || text == "false" || text == "{}"
+            text.isEmpty || text == "[]" || text == "null" || text == "false" || text == "{}"
         {
             return []
         }
@@ -456,7 +484,7 @@ class XtreamClient: APIClient {
     }
 
     /// Tolerant decode for short/simple EPG payloads.
-    nonisolated private static func decodeEPGListings(from data: Data) -> [XtreamShortEPG] {
+    private nonisolated static func decodeEPGListings(from data: Data) -> [XtreamShortEPG] {
         let decoder = JSONDecoder()
 
         // Bare array.
@@ -577,6 +605,20 @@ class XtreamClient: APIClient {
             limit: limit,
             diagnosticLabel: diagnosticLabel.map { "\($0)/short" }
         )
+        #if os(tvOS)
+            // A usable short guide should not wait for another provider request.
+            // Keep the full endpoint as a fallback for panels with no short guide.
+            if short.isEmpty, thorough {
+                let full = try await getFullEPG(
+                    serverURL: serverURL,
+                    username: username,
+                    password: password,
+                    streamId: streamId,
+                    diagnosticLabel: diagnosticLabel.map { "\($0)/full" }
+                )
+                if full.count > short.count { return full }
+            }
+        #endif
         if !short.isEmpty || !thorough { return short }
 
         // Retry short EPG without limit — some panels ignore/break with limit=.
@@ -685,7 +727,8 @@ class XtreamClient: APIClient {
             let (bytes, response) = try await session.bytes(for: request)
 
             if let httpResponse = response as? HTTPURLResponse,
-               !(200...299).contains(httpResponse.statusCode) {
+               !(200 ... 299).contains(httpResponse.statusCode)
+            {
                 Logger.network.info("EPG M3U discovery — HTTP \(httpResponse.statusCode)")
                 return nil
             }
@@ -701,7 +744,8 @@ class XtreamClient: APIClient {
             }
 
             guard let firstLine = String(bytes: headerBytes, encoding: .utf8),
-                  firstLine.hasPrefix("#EXTM3U") else {
+                  firstLine.hasPrefix("#EXTM3U")
+            else {
                 Logger.network.info("EPG M3U discovery — response is not an M3U playlist")
                 return nil
             }
@@ -763,6 +807,16 @@ class XtreamClient: APIClient {
     func buildMovieURL(for movie: Movie, playlist: Playlist) -> URL? {
         let ext = movie.containerExtension ?? "mp4"
         return URL(string: "\(playlist.serverURL)/movie/\(playlist.username)/\(playlist.password)/\(movie.streamId).\(ext)")
+    }
+
+    /// Builds an HLS (.m3u8) playback URL for a series episode. Xtream panels
+    /// report container_extension as mkv/mp4 (the source file format) but only
+    /// serve episodes via HLS. Raw .mp4/.mkv URLs return HTTP 503 on most
+    /// panels. This method always uses .m3u8 to match what competing apps
+    /// (TiviMate, IPTV Smarters, Nowseen) do for reliable series playback.
+    func buildSeriesHLSURL(for episode: Episode, playlist: Playlist) -> URL? {
+        let base = playlist.serverURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        return URL(string: "\(base)/series/\(playlist.username)/\(playlist.password)/\(episode.episodeId).m3u8")
     }
 
     /// Builds a playback URL for an episode. Tries the stated container extension
@@ -854,10 +908,10 @@ final nonisolated class XMLTVParser: NSObject, XMLParserDelegate {
     /// One SAX pass over the XMLTV file: collects the channel table, enriches
     /// the catalog on the first programme, and streams matched programmes in
     /// batches so the file is never parsed twice.
-    static func importGuide<C: EPGChannelIdentity>(
+    static func importGuide(
         fileURL: URL,
         baseCatalog: EPGChannelCatalog,
-        identities: [C],
+        identities: [some EPGChannelIdentity],
         timezone: TimeZone? = nil,
         treatExplicitZeroOffsetAsLocal: Bool = false,
         interpretZeroOffsetIn zeroOffsetZone: TimeZone? = nil,
@@ -998,9 +1052,9 @@ final nonisolated class XMLTVParser: NSObject, XMLParserDelegate {
     /// One SAX pass for external EPG: filters the channel table by playlist
     /// display names, builds the display-name catalog on the first programme,
     /// and streams matched programmes in batches (avoids parsing each file twice).
-    static func importExternalEPG<C: EPGChannelIdentity>(
+    static func importExternalEPG(
         fileURL: URL,
-        identities: [C],
+        identities: [some EPGChannelIdentity],
         batchSize: Int = 2000,
         onBatch: @escaping (EPGChannelCatalog, [String: [String]], [ParsedProgramme]) -> Void
     ) -> ExternalEPGImportStats {
@@ -1048,7 +1102,7 @@ nonisolated func makeStreamingXMLParser(fileURL: URL) -> XMLParser? {
 /// Combined XMLTV delegate — channel table + programme batches in one pass.
 private let xmltvMaxTextLength = 512
 /// Cap retained channel rows when a provider ships a worldwide guide (50MB+).
-private let xmltvMaxChannelTableEntries = 2_500
+private let xmltvMaxChannelTableEntries = 2500
 
 private final nonisolated class XMLTVGuideImporter<C: EPGChannelIdentity>: NSObject, XMLParserDelegate {
     private let baseCatalog: EPGChannelCatalog
@@ -1073,7 +1127,9 @@ private final nonisolated class XMLTVGuideImporter<C: EPGChannelIdentity>: NSObj
     private var loggedCurrentUnmatched = false
     private var loggedCurrentMatched = false
 
-    var channelTableSize: Int { channelTable.count }
+    var channelTableSize: Int {
+        channelTable.count
+    }
 
     private var currentChannelID: String?
     private var currentChannelNames: [String] = []
@@ -1101,7 +1157,7 @@ private final nonisolated class XMLTVGuideImporter<C: EPGChannelIdentity>: NSObj
         self.exactNameIndex = exactNameIndex
         self.timezone = timezone
         self.treatExplicitZeroOffsetAsLocal = treatExplicitZeroOffsetAsLocal
-        self.interpretZeroOffsetIn = zeroOffsetZone
+        interpretZeroOffsetIn = zeroOffsetZone
         self.batchSize = batchSize
         self.shouldAbort = shouldAbort
         self.onBatch = onBatch
@@ -1182,7 +1238,7 @@ private final nonisolated class XMLTVGuideImporter<C: EPGChannelIdentity>: NSObj
                   let title = currentTitle, !title.isEmpty
             else { return }
             totalProgrammes += 1
-            if totalProgrammes.isMultiple(of: 25_000) {
+            if totalProgrammes.isMultiple(of: 25000) {
                 Logger.database.info(
                     "EPG XMLTV parse progress: \(self.totalProgrammes) programmes, \(self.matchedProgrammes) matched"
                 )
@@ -1198,8 +1254,8 @@ private final nonisolated class XMLTVGuideImporter<C: EPGChannelIdentity>: NSObj
                 }
             }
             guard let catalog, catalog.matches(channel) else {
-                if totalProgrammes <= 5 || (totalProgrammes.isMultiple(of: 50_000) && unmatchedSamples.count < 10) {
-                    if !unmatchedSamples.contains(channel) && unmatchedSamples.count < 10 {
+                if totalProgrammes <= 5 || (totalProgrammes.isMultiple(of: 50000) && unmatchedSamples.count < 10) {
+                    if !unmatchedSamples.contains(channel), unmatchedSamples.count < 10 {
                         unmatchedSamples.insert(channel)
                         Logger.database.warning(
                             "EPG XMLTV unmatched channel: \(channel, privacy: .public) title: \(title, privacy: .public) start: \(self.currentStart ?? "nil", privacy: .public)"
@@ -1304,7 +1360,7 @@ private final nonisolated class XMLTVProgrammeParser: NSObject, XMLParserDelegat
         self.catalog = catalog
         self.timezone = timezone
         self.treatExplicitZeroOffsetAsLocal = treatExplicitZeroOffsetAsLocal
-        self.interpretZeroOffsetIn = zeroOffsetZone
+        interpretZeroOffsetIn = zeroOffsetZone
         self.batchSize = batchSize
         self.onBatch = onBatch
     }
@@ -1345,7 +1401,7 @@ private final nonisolated class XMLTVProgrammeParser: NSObject, XMLParserDelegat
                   let title = currentTitle, !title.isEmpty
             else { return }
             totalProgrammes += 1
-            if totalProgrammes.isMultiple(of: 25_000) {
+            if totalProgrammes.isMultiple(of: 25000) {
                 Logger.database.info(
                     "EPG XMLTV parse progress: \(self.totalProgrammes) programmes, \(self.matchedProgrammes) matched"
                 )
@@ -1430,12 +1486,17 @@ private final nonisolated class XMLTVExternalEPGImporter<C: EPGChannelIdentity>:
     private(set) var totalProgrammes = 0
     private(set) var matchedProgrammes = 0
 
-    var channelTableSize: Int { channelTable.count }
+    var channelTableSize: Int {
+        channelTable.count
+    }
+
     var resolvedCatalog: EPGChannelCatalog {
         catalog ?? EPGChannelCatalog(identities: identities)
     }
 
-    var resolvedWestMappings: [String: [String]] { westMappings }
+    var resolvedWestMappings: [String: [String]] {
+        westMappings
+    }
 
     private var currentChannelID: String?
     private var currentChannelNames: [String] = []
@@ -1568,4 +1629,3 @@ enum StreamFormat: String {
     case m3u8
     case tsStream = "ts"
 }
-

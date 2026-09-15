@@ -173,27 +173,22 @@ struct LiveTVView: View {
     }
 
     /// List + guide ZStack shared by every platform's detail layout.
-    @ViewBuilder
     private func detailBrowseStack(for section: LiveTVSection, sectionToken: String) -> some View {
-        ZStack {
-            channelList(for: section, sectionToken: sectionToken)
-                .opacity(layoutMode == .list ? 1 : 0)
-                .allowsHitTesting(layoutMode == .list)
-                .accessibilityHidden(layoutMode != .list)
-
-            EPGGuideView(
-                scope: section.scope,
-                playlistPrefix: playlistPrefix,
-                playlist: activePlaylist,
-                sort: contentSort,
-                sectionToken: sectionToken,
-                epgCache: epgCache
-            ) { stream in
-                handleChannelSelection(stream)
+        Group {
+            if layoutMode == .list {
+                channelList(for: section, sectionToken: sectionToken)
+            } else {
+                EPGGuideView(
+                    scope: section.scope,
+                    playlistPrefix: playlistPrefix,
+                    playlist: activePlaylist,
+                    sort: contentSort,
+                    sectionToken: sectionToken,
+                    epgCache: epgCache
+                ) { stream in
+                    handleChannelSelection(stream)
+                }
             }
-            .opacity(layoutMode == .guide ? 1 : 0)
-            .allowsHitTesting(layoutMode == .guide)
-            .accessibilityHidden(layoutMode != .guide)
         }
         .id(contentSort.rawValue)
         .onAppear { epgCache.activate(section: sectionToken) }
@@ -529,7 +524,16 @@ struct LiveTVView: View {
             LiveChannelNavigator.activeSurfScope = nil
         }
         previewMedia = nil
-        openFullscreen(media)
+        // When called from the EPG guide's programme detail sheet, the sheet's
+        // dismiss animation races with the fullScreenCover presentation. Without
+        // a brief yield SwiftUI coalesces the state change and skips the cover —
+        // the user sees the first channel load but subsequent picks do nothing.
+        // The same yield already exists in expandPreview() for the mini-preview
+        // path; mirror it here so guide→player transitions are reliable.
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(200))
+            openFullscreen(media)
+        }
     }
 
     /// Open the dedicated player. Preview uses VLCKit; fullscreen uses KSPlayer

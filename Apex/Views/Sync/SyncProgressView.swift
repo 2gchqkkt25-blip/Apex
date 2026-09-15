@@ -238,7 +238,7 @@ struct SyncProgressView: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
-                .tint(ApexBrandColors.blue)
+                .tint(themeManager.colors.accent)
                 .controlSize(.large)
 
                 Button("Cancel") { dismiss() }
@@ -258,7 +258,7 @@ struct SyncProgressView: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
-                .tint(ApexBrandColors.blue)
+                .tint(themeManager.colors.accent)
                 .controlSize(.large)
 
             case .failed:
@@ -274,7 +274,7 @@ struct SyncProgressView: View {
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
-                    .tint(ApexBrandColors.blue)
+                    .tint(themeManager.colors.accent)
                     .controlSize(.large)
 
                     Button("Continue Without Syncing") { dismiss() }

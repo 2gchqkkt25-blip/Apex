@@ -13,6 +13,9 @@
 
 import SwiftData
 import SwiftUI
+#if os(iOS)
+    import UIKit
+#endif
 
 struct EPGGuideView: View {
     let scope: LiveChannelScope
@@ -25,7 +28,7 @@ struct EPGGuideView: View {
     @Environment(\.modelContext) private var modelContext
     @Query private var streams: [LiveStream]
 
-    private let timeline: EPGTimeline
+    @State private var timeline: EPGTimeline
 
     @State private var visibleCount = LiveChannelQuery.pageSize
     @State private var epgSync = EPGSyncService.shared
@@ -46,11 +49,15 @@ struct EPGGuideView: View {
         self.playlistPrefix = playlistPrefix
         self.playlist = playlist
         self.sectionToken = sectionToken
-        self._epgCache = Bindable(epgCache)
+        _epgCache = Bindable(epgCache)
         self.onPlay = onPlay
 
-        let timeline = EPGTimeline.live(now: Date(), pointsPerMinute: EPGMetrics.current.pointsPerMinute, hoursBehind: 1, hoursAhead: 5)
-        self.timeline = timeline
+        // 12h ahead balances showing upcoming programmes with smooth scrolling.
+        // The original 5h hid most future data; 18–48h generated too many cells
+        // on iOS/macOS at 3.0–3.4 pts/min and caused jank. With the store cap
+        // raised to 64 listings/channel, 12h has enough data to render fully.
+        let timeline = EPGTimeline.live(now: Date(), pointsPerMinute: EPGMetrics.current.pointsPerMinute, hoursBehind: 6, hoursAhead: 12)
+        _timeline = State(initialValue: timeline)
 
         _streams = Query(LiveChannelQuery.descriptor(for: scope, sort: sort, playlistPrefix: playlistPrefix))
     }
@@ -165,8 +172,108 @@ private struct EPGSelection: Identifiable {
 @MainActor
 @Observable
 final class EPGScrollSync {
-    var offset = CGPoint.zero
+    /// Split axes are intentional. Observation tracks these properties
+    /// independently, so vertical scrolling doesn't rebuild the ruler and
+    /// horizontal scrolling doesn't rebuild the frozen channel column.
+    var horizontalOffset: CGFloat = 0
+    var verticalOffset: CGFloat = 0
 }
+
+#if os(iOS)
+    /// Reaches the native scroll view backing SwiftUI's two-axis guide and asks
+    /// it to lock a pan to the user's dominant axis. It also owns horizontal
+    /// jump-to-now on iOS, avoiding SwiftUI's `ScrollPosition` binding: that
+    /// binding re-anchors to changing programme identities while EPG data fills
+    /// in, which makes a horizontal drag visibly jump.
+    struct EPGScrollDirectionLock: UIViewRepresentable {
+        var initialHorizontalOffset: CGFloat? = nil
+        var jumpToken = 0
+
+        final class Coordinator {
+            weak var scrollView: UIScrollView?
+            var didApplyInitialOffset = false
+            var appliedJumpToken: Int?
+        }
+
+        func makeCoordinator() -> Coordinator {
+            Coordinator()
+        }
+
+        func makeUIView(context _: Context) -> UIView {
+            ProbeView()
+        }
+
+        func updateUIView(_ view: UIView, context: Context) {
+            (view as? ProbeView)?.configureNearestScrollView(
+                initialHorizontalOffset: initialHorizontalOffset,
+                jumpToken: jumpToken,
+                coordinator: context.coordinator
+            )
+        }
+
+        private final class ProbeView: UIView {
+            func configureNearestScrollView(
+                initialHorizontalOffset: CGFloat?,
+                jumpToken: Int,
+                coordinator: Coordinator
+            ) {
+                Task { @MainActor [weak self] in
+                    // SwiftUI may attach the representable before it attaches
+                    // the surrounding ScrollView. Yield once, then walk up.
+                    await Task.yield()
+                    guard let self else { return }
+                    var candidate = superview
+                    while let view = candidate {
+                        if let scrollView = view as? UIScrollView {
+                            scrollView.isDirectionalLockEnabled = true
+                            coordinator.scrollView = scrollView
+                            self.applyHorizontalPosition(
+                                to: scrollView,
+                                initialHorizontalOffset: initialHorizontalOffset,
+                                jumpToken: jumpToken,
+                                coordinator: coordinator
+                            )
+                            return
+                        }
+                        candidate = view.superview
+                    }
+                }
+            }
+
+            private func applyHorizontalPosition(
+                to scrollView: UIScrollView,
+                initialHorizontalOffset: CGFloat?,
+                jumpToken: Int,
+                coordinator: Coordinator
+            ) {
+                guard let initialHorizontalOffset else { return }
+
+                let shouldAnimate: Bool
+                if !coordinator.didApplyInitialOffset {
+                    coordinator.didApplyInitialOffset = true
+                    coordinator.appliedJumpToken = jumpToken
+                    shouldAnimate = false
+                } else {
+                    guard coordinator.appliedJumpToken != jumpToken else { return }
+                    coordinator.appliedJumpToken = jumpToken
+                    shouldAnimate = true
+                }
+
+                scrollView.layoutIfNeeded()
+                let maximumX = max(
+                    -scrollView.adjustedContentInset.left,
+                    scrollView.contentSize.width - scrollView.bounds.width
+                        + scrollView.adjustedContentInset.right
+                )
+                let targetX = min(max(0, initialHorizontalOffset), maximumX)
+                scrollView.setContentOffset(
+                    CGPoint(x: targetX, y: scrollView.contentOffset.y),
+                    animated: shouldAnimate
+                )
+            }
+        }
+    }
+#endif
 
 // MARK: - Scroller
 
@@ -285,7 +392,7 @@ private struct EPGRulerStrip: View {
                     nowPill.offset(x: timeline.x(for: now))
                 }
                 .frame(width: timeline.totalWidth, alignment: .leading)
-                .offset(x: -sync.offset.x)
+                .offset(x: -sync.horizontalOffset)
             }
             .clipped()
     }
@@ -317,7 +424,7 @@ private struct EPGFrozenColumn: View {
                 .frame(width: metrics.channelColumnWidth)
                 .overlay(alignment: .top) {
                     #if os(tvOS)
-                        SyncedColumnCells(rows: rows, metrics: metrics, scrollY: sync.offset.y)
+                        SyncedColumnCells(rows: rows, metrics: metrics, scrollY: sync.verticalOffset)
                     #else
                         // Window only the rows near the viewport. A `LazyVStack`
                         // shifted by `.offset` never realizes off-screen cells, and
@@ -325,7 +432,7 @@ private struct EPGFrozenColumn: View {
                         WindowedColumnCells(
                             rows: rows,
                             metrics: metrics,
-                            scrollY: sync.offset.y,
+                            scrollY: sync.verticalOffset,
                             viewportHeight: geo.size.height
                         )
                     #endif
@@ -385,12 +492,15 @@ private struct EPGFrozenColumn: View {
 
         private var startIndex: Int {
             guard rowStride > 0 else { return 0 }
-            return max(0, min(rows.count, Int(floor(scrollY / rowStride))))
+            // Retain two rows above the viewport. Replacing the first visible
+            // channel exactly as it crossed the top edge caused a visible pop
+            // and extra image work on every row boundary during a fast swipe.
+            return max(0, min(rows.count, Int(floor(scrollY / rowStride)) - 2))
         }
 
         private var endIndex: Int {
             guard rowStride > 0 else { return rows.count }
-            let visibleCount = Int(ceil(viewportHeight / rowStride)) + 3
+            let visibleCount = Int(ceil(viewportHeight / rowStride)) + 6
             return min(rows.count, startIndex + visibleCount)
         }
 
@@ -426,8 +536,10 @@ private struct EPGGrid: View {
     let onShowDetails: (EPGChannelRow, EPGProgramCell) -> Void
     var onNearEnd: () -> Void = {}
 
-    @State private var position = ScrollPosition()
-    @State private var didInitialScroll = false
+    #if !os(iOS)
+        @State private var position = ScrollPosition()
+        @State private var didInitialScroll = false
+    #endif
     /// A combined horizontal+vertical ScrollView centers content that is shorter
     /// than the viewport. The frozen channel column pins its cells to the top, so
     /// without this the two panes drift apart when a category has only a few
@@ -446,7 +558,15 @@ private struct EPGGrid: View {
                 onShowDetails: onShowDetails,
                 onNearEnd: onNearEnd
             )
-                .frame(minHeight: viewportHeight, alignment: .topLeading)
+            .frame(minHeight: viewportHeight, alignment: .topLeading)
+            #if os(iOS)
+                .background {
+                    EPGScrollDirectionLock(
+                        initialHorizontalOffset: nowTarget,
+                        jumpToken: jumpToken
+                    )
+                }
+            #endif
         }
         .background {
             GeometryReader { geo in
@@ -455,23 +575,34 @@ private struct EPGGrid: View {
                     .onChange(of: geo.size.height) { viewportHeight = $1 }
             }
         }
-        .scrollPosition($position)
+        #if !os(iOS)
+            .scrollPosition($position)
+        #endif
         .onScrollGeometryChange(for: CGPoint.self) { $0.contentOffset } action: { _, new in
-            sync.offset = CGPoint(x: max(0, new.x), y: max(0, new.y))
+            let horizontal = max(0, new.x)
+            let vertical = max(0, new.y)
+            if sync.horizontalOffset != horizontal {
+                sync.horizontalOffset = horizontal
+            }
+            if sync.verticalOffset != vertical {
+                sync.verticalOffset = vertical
+            }
         }
         #if os(tvOS)
         .focusSection()
         #endif
-        .onAppear {
-            guard !didInitialScroll else { return }
-            didInitialScroll = true
-            position.scrollTo(x: nowTarget)
-        }
-        .onChange(of: jumpToken) {
-            withAnimation(.easeInOut(duration: 0.4)) {
+        #if !os(iOS)
+            .onAppear {
+                guard !didInitialScroll else { return }
+                didInitialScroll = true
                 position.scrollTo(x: nowTarget)
             }
-        }
+            .onChange(of: jumpToken) {
+                withAnimation(.easeInOut(duration: 0.4)) {
+                    position.scrollTo(x: nowTarget)
+                }
+            }
+        #endif
     }
 }
 
@@ -537,55 +668,60 @@ private struct EPGProgramStrip: View {
     let onShowDetails: (EPGProgramCell) -> Void
 
     var body: some View {
-        // Lazy so only the handful of on-screen programmes per row are built and
-        // made focusable. An eager HStack tiles the entire ~25-hour window —
-        // hundreds of shadowed, focusable buttons the tvOS focus engine must
-        // track every frame, which is what made focus-scrolling stutter.
-        LazyHStack(spacing: 0) {
-            ForEach(row.cells) { cell in
-                if cell.isGap {
-                    // A channel with no EPG is a single full-width gap. Gaps must
-                    // still be focusable, playable buttons or the tvOS focus
-                    // engine has nothing to land on and the channel can't be
-                    // selected at all (#27). There's no programme to detail, so
-                    // gaps skip the long-press detail sheet.
-                    Button {
-                        onPlay(cell)
-                    } label: {
-                        Color.clear.frame(width: cell.width, height: metrics.rowHeight)
-                    }
-                    .buttonStyle(EPGBlockButtonStyle(cell: cell, metrics: metrics, now: now))
-                    .accessibilityLabel(Text(row.name))
-                    .accessibilityHint(Text("No programme information"))
-                } else {
-                    Button {
-                        onPlay(cell)
-                    } label: {
-                        Color.clear.frame(width: cell.width, height: metrics.rowHeight)
-                    }
-                    .buttonStyle(EPGBlockButtonStyle(cell: cell, metrics: metrics, now: now))
-                    #if os(tvOS)
-                        // Press-and-hold Select opens the detail sheet. The
-                        // gesture takes the press once it recognizes, so a hold
-                        // doesn't also fire the button's play action.
-                        .onLongPressGesture(minimumDuration: 0.4) {
-                            onShowDetails(cell)
-                        }
-                    #else
-                        // Long-press on every programme cell fights UIKit's pan
-                        // recognizer on iOS and makes the guide feel sticky.
-                        // Context menu keeps "Show Details" without delaying scroll.
-                        .contextMenu {
-                            Button("Show Details") { onShowDetails(cell) }
-                        }
-                    #endif
-                    .accessibilityLabel(Text(cell.title))
-                    .accessibilityHint(Text("\(cell.start, format: .dateTime.hour().minute()) to \(cell.end, format: .dateTime.hour().minute()) on \(row.name)"))
-                    .accessibilityAction(named: Text("Show Details")) { onShowDetails(cell) }
+        Group {
+            #if os(tvOS)
+                // Keep tvOS lazy: its focus engine otherwise tracks every cell
+                // across the complete timeline for each realized row.
+                LazyHStack(spacing: 0) {
+                    programmeCells
                 }
-            }
+            #else
+                // iOS/macOS build the modest number of cells in each visible
+                // row up front. LazyHStack realizing and measuring cells during
+                // a horizontal drag was a major source of stutter and jumps.
+                HStack(spacing: 0) {
+                    programmeCells
+                }
+            #endif
         }
         .frame(width: contentWidth, height: metrics.rowHeight, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private var programmeCells: some View {
+        ForEach(row.cells) { cell in
+            if cell.isGap {
+                // Gap slots stay playable so a channel without guide data can
+                // still be selected. They have no programme detail action.
+                Button {
+                    onPlay(cell)
+                } label: {
+                    Color.clear.frame(width: cell.width, height: metrics.rowHeight)
+                }
+                .buttonStyle(EPGBlockButtonStyle(cell: cell, metrics: metrics, now: now))
+                .accessibilityLabel(Text(row.name))
+                .accessibilityHint(Text("No programme information"))
+            } else {
+                Button {
+                    onPlay(cell)
+                } label: {
+                    Color.clear.frame(width: cell.width, height: metrics.rowHeight)
+                }
+                .buttonStyle(EPGBlockButtonStyle(cell: cell, metrics: metrics, now: now))
+                #if os(tvOS)
+                    .onLongPressGesture(minimumDuration: 0.4) {
+                        onShowDetails(cell)
+                    }
+                #else
+                    .contextMenu {
+                        Button("Show Details") { onShowDetails(cell) }
+                    }
+                #endif
+                .accessibilityLabel(Text(cell.title))
+                .accessibilityHint(Text("\(cell.start, format: .dateTime.hour().minute()) to \(cell.end, format: .dateTime.hour().minute()) on \(row.name)"))
+                .accessibilityAction(named: Text("Show Details")) { onShowDetails(cell) }
+            }
+        }
     }
 }
 

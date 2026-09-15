@@ -56,20 +56,11 @@ struct ProfileSelectionView: View {
         }
         .padding()
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(background)
+        .themeBackground()
         .pinPrompt(target: $pendingSwitch) { profile in
             Task { await profileManager?.switchProfile(to: profile.id) }
             onComplete()
         }
-    }
-
-    @ViewBuilder
-    private var background: some View {
-        #if os(tvOS)
-            TVSettingsMetrics.background.ignoresSafeArea()
-        #else
-            Color.clear
-        #endif
     }
 
     private func profileButton(_ profile: UserProfile) -> some View {

@@ -51,6 +51,41 @@ extension CloudSyncEngine {
         shadow.persist()
     }
 
+    /// Pushes every local `MediaServer` into the CloudKit mirror without a full
+    /// reconcile. Safe while a library import holds `MediaSyncGate`: it only
+    /// reads catalog connection rows and writes `SyncedMediaServer`. Sibling
+    /// devices can then see the Plex/Jellyfin/Emby connection before the
+    /// (slow) catalog import finishes.
+    func publishLocalMediaServers() throws {
+        defer { releaseHydratedRows() }
+        let locals = try fetchLocalMediaServers()
+        let mirrors = try fetchMediaServerMirrors()
+        for (id, local) in locals {
+            let values = Self.mediaServerValues(from: local)
+            applyMediaServerToCloud(values, id: id, mirror: mirrors[id])
+            shadow.setMediaServerShadow(id.uuidString, values)
+        }
+        try saveStores()
+        shadow.persist()
+    }
+
+    /// Writes local Recently Watched / favorites / hides into `UserContentState`
+    /// so CloudKit has rows to export. Bumps `updatedAt` so a previously failed
+    /// export (missing Production field) is retried.
+    func publishLocalUserContent() throws {
+        defer { releaseHydratedRows() }
+        activeProfileID = ActiveProfileStore.current ?? UserProfile.defaultProfileID
+        let locals = try fetchLocalContentValues()
+        let mirrors = try fetchContentMirrors()
+        for (id, entry) in locals {
+            guard !entry.values.isEmpty else { continue }
+            applyContentToCloud(entry.values, id: id, kind: entry.kind, mirror: mirrors[id])
+            shadow.setContentShadow(id, entry.values)
+        }
+        try saveStores()
+        shadow.persist()
+    }
+
     /// Returns live media-server UUID strings so content-state reconcile keeps
     /// `{serverUUID}-movie-…` rows while the server exists locally or in cloud.
     func reconcileMediaServers(into result: inout CloudSyncReconcileResult) throws -> Set<String> {

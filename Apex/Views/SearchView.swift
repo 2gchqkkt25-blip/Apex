@@ -117,7 +117,7 @@ struct SearchView: View {
                 .searchToolbarMinimizeIfAvailable()
             #endif
                 .navigationDestination(for: Movie.self) { movie in
-                    if MediaServerIdentity.parseCatalogID(movie.id) != nil {
+                    if movie.isMediaServerCatalogItem {
                         MediaMovieDetailView(movie: movie, server: mediaServer(for: movie.id))
                     } else {
                         MovieDetailView(movie: movie, animationNamespace: animationNamespace)
@@ -127,7 +127,7 @@ struct SearchView: View {
                     }
                 }
                 .navigationDestination(for: Series.self) { series in
-                    if MediaServerIdentity.parseCatalogID(series.id) != nil {
+                    if series.isMediaServerCatalogItem {
                         MediaSeriesDetailView(series: series, server: mediaServer(for: series.id))
                     } else {
                         SeriesDetailView(series: series, animationNamespace: animationNamespace)
@@ -520,13 +520,15 @@ private nonisolated enum SearchFetcher {
         let context = ModelContext(container)
         var hits = SearchHits()
 
+        let playlistPrefix = playlistID.isEmpty ? "" : playlistID + "-"
+
         if request.wantMovies {
             var iptvIDs: [PersistentIdentifier] = []
-            if restrictToPlaylist {
+            if restrictToPlaylist, !playlistPrefix.isEmpty {
                 var descriptor = FetchDescriptor<Movie>(
                     predicate: #Predicate { movie in
                         movie.name.localizedStandardContains(query)
-                            && (movie.categoryId?.localizedStandardContains(playlistID) ?? false)
+                            && movie.id.starts(with: playlistPrefix)
                     },
                     sortBy: [SortDescriptor(\.name)]
                 )
@@ -562,20 +564,16 @@ private nonisolated enum SearchFetcher {
                     .map(\.persistentModelID)
             }
 
-            hits.movies = mergeSortedIDs(
-                iptvIDs + mediaServerIDsList,
-                in: context,
-                limit: limit
-            )
+            hits.movies = mergeBalancedIDs(iptvIDs, mediaServerIDsList, in: context, limit: limit)
         }
 
         if request.wantSeries {
             var iptvIDs: [PersistentIdentifier] = []
-            if restrictToPlaylist {
+            if restrictToPlaylist, !playlistPrefix.isEmpty {
                 var descriptor = FetchDescriptor<Series>(
                     predicate: #Predicate { series in
                         series.name.localizedStandardContains(query)
-                            && (series.categoryId?.localizedStandardContains(playlistID) ?? false)
+                            && series.id.starts(with: playlistPrefix)
                     },
                     sortBy: [SortDescriptor(\.name)]
                 )
@@ -610,26 +608,49 @@ private nonisolated enum SearchFetcher {
                     .map(\.persistentModelID)
             }
 
-            hits.series = mergeSortedIDs(
-                iptvIDs + mediaServerIDsList,
-                in: context,
-                limit: limit
-            )
+            hits.series = mergeBalancedIDs(iptvIDs, mediaServerIDsList, in: context, limit: limit)
         }
 
         if request.wantLive {
-            var descriptor = FetchDescriptor<LiveStream>(
-                predicate: #Predicate { stream in
-                    stream.name.localizedStandardContains(query)
-                        && (!restrictToPlaylist || (stream.categoryId?.localizedStandardContains(playlistID) ?? false))
-                },
-                sortBy: [SortDescriptor(\.name)]
-            )
-            descriptor.fetchLimit = limit
-            hits.streams = ((try? context.fetch(descriptor)) ?? []).map(\.persistentModelID)
+            if restrictToPlaylist, !playlistPrefix.isEmpty {
+                var descriptor = FetchDescriptor<LiveStream>(
+                    predicate: #Predicate { stream in
+                        stream.name.localizedStandardContains(query)
+                            && stream.id.starts(with: playlistPrefix)
+                    },
+                    sortBy: [SortDescriptor(\.name)]
+                )
+                descriptor.fetchLimit = limit
+                hits.streams = ((try? context.fetch(descriptor)) ?? []).map(\.persistentModelID)
+            } else {
+                var descriptor = FetchDescriptor<LiveStream>(
+                    predicate: #Predicate { stream in
+                        stream.name.localizedStandardContains(query)
+                    },
+                    sortBy: [SortDescriptor(\.name)]
+                )
+                descriptor.fetchLimit = limit
+                hits.streams = ((try? context.fetch(descriptor)) ?? []).map(\.persistentModelID)
+            }
         }
 
         return hits
+    }
+
+    /// Keeps playlist and Plex/Jellyfin/Emby hits visible together. A single
+    /// alphabetical `prefix(limit)` was letting one source fill all 50 slots.
+    private static func mergeBalancedIDs(
+        _ iptvIDs: [PersistentIdentifier],
+        _ mediaServerIDs: [PersistentIdentifier],
+        in context: ModelContext,
+        limit: Int
+    ) -> [PersistentIdentifier] {
+        if mediaServerIDs.isEmpty { return mergeSortedIDs(iptvIDs, in: context, limit: limit) }
+        if iptvIDs.isEmpty { return mergeSortedIDs(mediaServerIDs, in: context, limit: limit) }
+        let reserved = max(limit / 2, 1)
+        let iptv = Array(iptvIDs.prefix(reserved))
+        let media = Array(mediaServerIDs.prefix(limit - iptv.count))
+        return mergeSortedIDs(iptv + media, in: context, limit: limit)
     }
 
     private static func mergeSortedIDs(
@@ -718,9 +739,9 @@ enum SearchResult: Identifiable, Hashable {
     var isMediaServerContent: Bool {
         switch self {
         case let .movie(movie):
-            MediaServerIdentity.parseCatalogID(movie.id) != nil
+            movie.isMediaServerCatalogItem
         case let .series(series):
-            MediaServerIdentity.parseCatalogID(series.id) != nil
+            series.isMediaServerCatalogItem
         case .liveStream:
             false
         }
@@ -750,7 +771,7 @@ struct SearchResultRow: View {
                     Text(LocalizedStringKey(categoryName))
                 }
                 .font(.caption2)
-                .foregroundStyle(.blue)
+                .foregroundStyle(.tint)
             }
 
             Spacer()

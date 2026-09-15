@@ -41,7 +41,7 @@
             self.playlistPrefix = playlistPrefix
             self.playlist = playlist
             self.sectionToken = sectionToken
-            self._epgCache = Bindable(epgCache)
+            _epgCache = Bindable(epgCache)
             self.onPlay = onPlay
             _streams = Query(LiveChannelQuery.descriptor(for: scope, sort: sort, playlistPrefix: playlistPrefix))
         }
@@ -152,6 +152,10 @@
 
         @FocusState private var isFocused: Bool
 
+        private var previousEPG: EPGSlot? {
+            epg?.previous
+        }
+
         private var currentEPG: EPGSlot? {
             epg?.current
         }
@@ -172,6 +176,17 @@
                             .lineLimit(1)
 
                         if let current = currentEPG {
+                            // Show "what was just on" above the current programme
+                            if let previous = previousEPG {
+                                HStack(spacing: 6) {
+                                    Text("Was on:")
+                                    Text(previous.title).lineLimit(1)
+                                    Text(previous.start, style: .time)
+                                }
+                                .font(.system(size: 20))
+                                .foregroundStyle(tertiaryColor.opacity(0.7))
+                            }
+
                             Text(current.title)
                                 .font(.system(size: 25))
                                 .foregroundStyle(secondaryColor)
@@ -215,9 +230,13 @@
                         if stream.tvArchive > 0 {
                             Label("Catchup: \(stream.tvArchiveDuration)d", systemImage: "clock.arrow.circlepath")
                                 .font(.system(size: 22))
-                                .foregroundStyle(Color.blue)
+                                .foregroundStyle(.tint)
                         }
                     }
+
+                    // Reserve the complete guide slot before its data arrives.
+                    // Changing row heights moves the lazy stack's scroll anchor.
+                    .frame(height: stream.tvArchive > 0 ? 220 : 190, alignment: .leading)
 
                     Spacer(minLength: 0)
 
@@ -282,6 +301,11 @@
         var onExpandPreview: (() -> Void)?
         var onClosePreview: (() -> Void)?
 
+        /// Incremented when Menu/Back is pressed in the right-hand content
+        /// pane. The rail observes the token and restores focus to the selected
+        /// category without making its per-keypress focus state live up here.
+        @State private var categoryFocusRequest = 0
+
         private var layoutMode: LiveTVLayoutMode {
             LiveTVLayoutMode(rawValue: layoutModeRaw) ?? .list
         }
@@ -295,7 +319,8 @@
                 TVCategoryRail(
                     sections: sections,
                     selectedSection: $selectedSection,
-                    layoutModeRaw: $layoutModeRaw
+                    layoutModeRaw: $layoutModeRaw,
+                    focusRequest: categoryFocusRequest
                 )
 
                 // Preview occupies its own top-trailing row; guide/list fill the
@@ -335,6 +360,13 @@
 
                     content
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        // tvOS navigation should unwind one level at a time:
+                        // guide/list content → categories → top tab bar. This
+                        // handler belongs only to the content sibling, so Back
+                        // on the category rail still bubbles to TabView.
+                        .onExitCommand {
+                            categoryFocusRequest &+= 1
+                        }
                 }
             }
             .animation(.easeOut(duration: 0.15), value: previewMedia?.id)
@@ -344,32 +376,28 @@
         private var content: some View {
             if let section = displayedSection {
                 let token = section.id
-                ZStack {
-                    TVChannelsList(
-                        scope: section.scope,
-                        playlistPrefix: playlistPrefix,
-                        playlist: playlist,
-                        sort: contentSort,
-                        sectionToken: token,
-                        epgCache: epgCache,
-                        onPlay: onPlay
-                    )
-                    .opacity(layoutMode == .list ? 1 : 0)
-                    .allowsHitTesting(layoutMode == .list)
-                    .accessibilityHidden(layoutMode != .list)
-
-                    EPGGuideView(
-                        scope: section.scope,
-                        playlistPrefix: playlistPrefix,
-                        playlist: playlist,
-                        sort: contentSort,
-                        sectionToken: token,
-                        epgCache: epgCache,
-                        onPlay: onPlay
-                    )
-                    .opacity(layoutMode == .guide ? 1 : 0)
-                    .allowsHitTesting(layoutMode == .guide)
-                    .accessibilityHidden(layoutMode != .guide)
+                Group {
+                    if layoutMode == .list {
+                        TVChannelsList(
+                            scope: section.scope,
+                            playlistPrefix: playlistPrefix,
+                            playlist: playlist,
+                            sort: contentSort,
+                            sectionToken: token,
+                            epgCache: epgCache,
+                            onPlay: onPlay
+                        )
+                    } else {
+                        EPGGuideView(
+                            scope: section.scope,
+                            playlistPrefix: playlistPrefix,
+                            playlist: playlist,
+                            sort: contentSort,
+                            sectionToken: token,
+                            epgCache: epgCache,
+                            onPlay: onPlay
+                        )
+                    }
                 }
                 .id(contentSort.rawValue)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -397,6 +425,7 @@
         let sections: [LiveTVSection]
         @Binding var selectedSection: LiveTVSection?
         @Binding var layoutModeRaw: String
+        let focusRequest: Int
 
         /// Which rail control currently holds focus — drives the highlight.
         private enum RailItem: Hashable {
@@ -439,6 +468,18 @@
             }
             .frame(width: railWidth, alignment: .leading)
             .frame(maxHeight: .infinity, alignment: .top)
+            .onChange(of: focusRequest) {
+                // Exit commands run within the focus engine's animated update.
+                // Defer the focus mutation to the next main-actor turn so the
+                // engine can finish unwinding the content-pane command first.
+                Task { @MainActor in
+                    let targetID = selectedSection.flatMap { selected in
+                        sections.first(where: { $0.id == selected.id })?.id
+                    } ?? sections.first?.id
+                    guard let targetID else { return }
+                    focused = .category(targetID)
+                }
+            }
         }
 
         // MARK: View-mode switch
@@ -511,7 +552,7 @@
                     section.titleText
                         .font(.system(
                             size: 22,
-                            weight: isSelected || isItemFocused ? .semibold : .regular
+                            weight: .semibold
                         ))
                         .lineLimit(2)
                         .minimumScaleFactor(0.7)
@@ -519,6 +560,7 @@
                 }
                 .foregroundStyle(textColor(isFocused: isItemFocused, isSelected: isSelected))
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(height: 56, alignment: .leading)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 12)
                 .background(

@@ -188,6 +188,8 @@ private struct HomePosterCard: View {
     var isFavorite = false
     var isLive: Bool = false
 
+    @Environment(ThemeManager.self) private var themeManager
+
     var body: some View {
         VStack(alignment: .leading, spacing: PosterCardMetrics.titleSpacing) {
             ZStack(alignment: .bottomLeading) {
@@ -217,7 +219,7 @@ private struct HomePosterCard: View {
                 if let progress {
                     ProgressView(value: progress)
                         .progressViewStyle(.linear)
-                        .tint(.blue)
+                        .tint(themeManager.colors.accent)
                         .padding(.horizontal, 6)
                         .padding(.bottom, 6)
                 }

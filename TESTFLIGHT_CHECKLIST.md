@@ -1,26 +1,42 @@
-# TestFlight Checklist — Build 55
+# TestFlight Checklist — Build 58
 
 ## What to Test (paste in App Store Connect → TestFlight → What to Test)
 
 ```
-Build 55 (1.2.0)
+Build 58 (1.2.0)
 
 Apex is an IPTV player—users add their own Xtream or M3U playlist. No content is bundled.
 
-Apple TV: In-player Guide stays a compact overlay. Scroll the full channel list with the Siri Remote. The focus highlight should sit on the programme, not a giant white box, and scrolling should be smooth (not jumpy). OpenSubtitles chips should use a tight highlight. After Stop, posters should not keep spinning.
+Please focus on playlist refresh, TV Guide, channel switching, poster scores, navigation, and themes.
 
-iPhone: Open the in-player Guide in portrait — picture stays on top, Guide fills below (no black band above the video).
-
-Playback: Start a movie right after a series (or the reverse) — only one soundtrack. Skip/rewind still works on VOD. Adding a second playlist while the first is syncing should not spin forever; Cancel still works.
-
-iCloud: Hide a Live TV category or channel on one device, leave the app for a few seconds, then check the other device (same profile). Favorites, progress, and playlists still sync. Sync Now should not hang on the TV Guide download.
-
-Add a playlist, wait for sync, browse Live TV / Movies / Series, and play a stream. Test Media (Plex/Jellyfin/Emby) if you use it.
+1. Refresh a playlist. Movies, series, Live TV, TV Guide data, and TMDB scores should populate from that one refresh.
+2. Force-close and reopen Apex. Previously loaded TV Guide data and poster scores should still be present.
+3. On iPhone/iPad, scroll the Guide up/down and left/right, including across channels with no programme data. It should remain smooth and should not jump.
+4. From the Guide, open one channel and then switch to several others. Each replacement should begin promptly without a 10–15 second delay.
+5. On Apple TV, browse the Guide and channel list. Menu/Back should return to categories first, then to the top navigation on the next press.
+6. Confirm TMDB scores appear on both movie and series posters on iOS, macOS, and tvOS without opening each detail page.
+7. Try several themes. Spinners, progress rings, focus states, badges, and tinted controls should follow the selected theme.
+8. Browse and play content for a while; navigation should stay responsive without requiring a force-quit.
 
 Contact: support@streaminfinitytv.com
 ```
 
-**Before archive:** CloudKit Console → container `iCloud.com.streaminfinity.apex` → Schema → **Deploy Schema Changes…** Development → Production (`CD_UserContentState.isHidden`).
+## Build 58 Focused Checklist
+
+- [ ] Playlist refresh completes and includes EPG without a second manual refresh
+- [ ] Movie and series posters show TMDB scores after sync on iOS, macOS, and tvOS
+- [ ] Force-quit and relaunch preserves existing EPG data
+- [ ] iOS/iPadOS Guide scrolls smoothly vertically and horizontally
+- [ ] Empty-EPG channels remain normal-height rows and do not make the Guide jump
+- [ ] Repeated Guide channel changes start promptly and never leave the previous channel playing
+- [ ] tvOS Back: content → categories → top navigation
+- [ ] tvOS focus and navigation remain fast after browsing several categories
+- [ ] Every theme colours spinners, progress, focus states, badges, and controls consistently
+- [ ] App remains responsive after extended browsing, syncing, and playback
+
+**Release metadata:** Apex app and Top Shelf extension are both Build **58** (version 1.2.0).
+
+---
 
 ## September 4 — in-player Guide, playback, hidden iCloud (Build 55)
 

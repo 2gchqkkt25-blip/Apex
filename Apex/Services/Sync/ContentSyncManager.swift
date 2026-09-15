@@ -179,6 +179,12 @@ actor ContentSyncManager {
 
         Logger.database.info("Completed sync for playlist \(playlistId)")
 
+        // Ratings are a lightweight, dedicated post-sync pass. This also runs
+        // on tvOS, where the full content indexer is intentionally opt-in.
+        await MainActor.run {
+            ContentIndexingService.shared.enqueueRatingBackfill(playlistID: playlistId)
+        }
+
         // Nudge iCloud sync: a freshly fetched catalog may now be able to apply
         // cloud user state (favorites / progress) that was waiting for it.
         NotificationCenter.default.post(name: .lumeContentSyncDidComplete, object: playlistId)

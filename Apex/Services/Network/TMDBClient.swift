@@ -79,7 +79,7 @@ nonisolated struct TMDBClient {
         return true
     }
 
-    private static nonisolated(unsafe) var missingTokenLogged = false
+    private nonisolated(unsafe) static var missingTokenLogged = false
 
     private static func logMissingTokenOnce() {
         guard !missingTokenLogged else { return }
@@ -218,6 +218,19 @@ nonisolated struct TMDBClient {
         return response.normalized(isMovie: false, preferredLanguage: languageCode)
     }
 
+    /// Lightweight score lookup for catalog backfill. Unlike `movieDetails`,
+    /// this does not download credits, videos, artwork, or similar titles.
+    func movieRating(_ id: Int) async throws -> Double? {
+        let response: RatingResponse = try await get("/movie/\(id)")
+        return response.voteAverage
+    }
+
+    /// Lightweight TV score lookup for catalog backfill.
+    func tvRating(_ id: Int) async throws -> Double? {
+        let response: RatingResponse = try await get("/tv/\(id)")
+        return response.voteAverage
+    }
+
     /// Widens the appended `images`/`videos` to the user's language, English,
     /// and (for images) language-neutral artwork — otherwise TMDB filters them
     /// to the `language` value alone, which often returns nothing.
@@ -231,25 +244,39 @@ nonisolated struct TMDBClient {
 
     // MARK: - Search
 
-    /// Returns the TMDB id of the best (first) search match for a movie title.
-    /// Used by the content indexer for titles whose provider supplies no id.
-    func searchMovieID(query: String, year: Int? = nil) async throws -> Int? {
+    /// Returns the TMDB id and vote average of the best search match for a movie.
+    /// The vote average is captured from the search response itself — no extra
+    /// API call needed — so the indexer can persist ratings during catalog sync
+    /// and poster cards show them immediately without waiting for detail enrichment.
+    func searchMovie(query: String, year: Int? = nil) async throws -> (id: Int, voteAverage: Double?)? {
         var path = "/search/movie?query=\(Self.encodedQuery(query))&include_adult=false"
         if let year {
             path += "&primary_release_year=\(year)"
         }
         let response: SearchResponse = try await get(path)
-        return response.results.first?.id
+        guard let match = response.results.first else { return nil }
+        return (id: match.id, voteAverage: match.voteAverage)
     }
 
-    /// Returns the TMDB id of the best (first) search match for a TV series.
-    func searchTVID(query: String, year: Int? = nil) async throws -> Int? {
+    /// Returns the TMDB id and vote average of the best search match for a TV series.
+    func searchTV(query: String, year: Int? = nil) async throws -> (id: Int, voteAverage: Double?)? {
         var path = "/search/tv?query=\(Self.encodedQuery(query))&include_adult=false"
         if let year {
             path += "&first_air_date_year=\(year)"
         }
         let response: SearchResponse = try await get(path)
-        return response.results.first?.id
+        guard let match = response.results.first else { return nil }
+        return (id: match.id, voteAverage: match.voteAverage)
+    }
+
+    /// Legacy wrapper — returns only the TMDB id for callers that don't need ratings.
+    func searchMovieID(query: String, year: Int? = nil) async throws -> Int? {
+        try await searchMovie(query: query, year: year)?.id
+    }
+
+    /// Legacy wrapper — returns only the TMDB id for callers that don't need ratings.
+    func searchTVID(query: String, year: Int? = nil) async throws -> Int? {
+        try await searchTV(query: query, year: year)?.id
     }
 
     /// Percent-encodes a search term for use as a query-item value —
@@ -471,8 +498,21 @@ private nonisolated struct SearchResponse: Decodable {
     let results: [SearchMatch]
 }
 
+private nonisolated struct RatingResponse: Decodable {
+    let voteAverage: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case voteAverage = "vote_average"
+    }
+}
+
 private nonisolated struct SearchMatch: Decodable {
     let id: Int
+    let voteAverage: Double?
+    enum CodingKeys: String, CodingKey {
+        case id
+        case voteAverage = "vote_average"
+    }
 }
 
 private nonisolated struct VideoEntry: Decodable {

@@ -260,7 +260,7 @@
                 if channel.tvArchive > 0 {
                     Image(systemName: "clock.arrow.circlepath")
                         .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(.blue)
+                        .foregroundStyle(.tint)
                         .accessibilityLabel("Catch-up available")
                 }
 
@@ -321,7 +321,7 @@
                 if isPast, hasCatchup {
                     Image(systemName: "play.circle")
                         .font(.system(size: 24, weight: .semibold))
-                        .foregroundStyle(.blue)
+                        .foregroundStyle(.tint)
                 } else if isLive {
                     Image(systemName: "dot.radiowaves.left.and.right")
                         .font(.system(size: 20, weight: .semibold))

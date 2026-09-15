@@ -182,7 +182,7 @@ struct ManageProfilesView: View {
             } label: {
                 Label("Edit", systemImage: "pencil")
             }
-            .tint(.indigo)
+            .tint(ThemeManager.shared.colors.accent)
         }
         #endif
     }

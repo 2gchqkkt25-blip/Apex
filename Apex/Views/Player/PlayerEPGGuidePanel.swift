@@ -145,7 +145,7 @@ struct PlayerEPGGuidePanel: View {
                 EPGTimeRuler(timeline: timeline, metrics: metrics)
                     .foregroundStyle(.white)
                     .frame(width: timeline.totalWidth, alignment: .leading)
-                    .offset(x: -scrollSync.offset.x)
+                    .offset(x: -scrollSync.horizontalOffset)
             }
             .clipped()
     }
@@ -169,7 +169,7 @@ struct PlayerEPGGuidePanel: View {
                     }
                     .scrollDisabled(true)
                     .scrollPosition($channelColumnPosition)
-                    .onChange(of: scrollSync.offset.y) { _, newY in
+                    .onChange(of: scrollSync.verticalOffset) { _, newY in
                         channelColumnPosition.scrollTo(y: max(0, newY))
                     }
                 #else
@@ -178,7 +178,7 @@ struct PlayerEPGGuidePanel: View {
                             channelCellButton(row)
                         }
                     }
-                    .offset(y: -scrollSync.offset.y)
+                    .offset(y: -scrollSync.verticalOffset)
                 #endif
             }
             .clipped()
@@ -238,6 +238,9 @@ struct PlayerEPGGuidePanel: View {
                 }
             }
             .frame(width: timeline.totalWidth, alignment: .topLeading)
+            #if os(iOS)
+                .background { EPGScrollDirectionLock() }
+            #endif
             .overlay(alignment: .topLeading) {
                 EPGNowIndicator(
                     height: CGFloat(rows.count) * metrics.rowHeight
@@ -249,7 +252,14 @@ struct PlayerEPGGuidePanel: View {
         }
         .scrollPosition($scrollPosition)
         .onScrollGeometryChange(for: CGPoint.self) { $0.contentOffset } action: { _, new in
-            scrollSync.offset = CGPoint(x: max(0, new.x), y: max(0, new.y))
+            let horizontal = max(0, new.x)
+            let vertical = max(0, new.y)
+            if scrollSync.horizontalOffset != horizontal {
+                scrollSync.horizontalOffset = horizontal
+            }
+            if scrollSync.verticalOffset != vertical {
+                scrollSync.verticalOffset = vertical
+            }
         }
         #if os(tvOS)
             .focusSection()

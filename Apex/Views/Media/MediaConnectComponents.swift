@@ -434,7 +434,7 @@ extension View {
         #if os(tvOS)
         tvSettingsBackground()
         #else
-        background(Color.platformSurface)
+        background(ThemeManager.shared.colors.surface)
         #endif
     }
 

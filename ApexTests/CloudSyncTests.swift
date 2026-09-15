@@ -236,6 +236,29 @@ struct CloudSyncEngineTests {
         #expect(states.first?.watchProgress == 42)
     }
 
+    @Test func `recently watched movie without favorite still exports to cloud`() async throws {
+        let container = try makeContainer()
+        let ctx = container.mainContext
+        let playlist = Playlist(name: "My IPTV", serverURL: "http://x", username: "u", password: "p")
+        let pid = playlist.id
+        ctx.insert(playlist)
+        let movie = Movie(id: "\(pid.uuidString)-movie-3", streamId: 3, name: "Only Watched")
+        movie.lastWatchedDate = Date()
+        movie.watchProgress = 80
+        ctx.insert(movie)
+        try ctx.save()
+
+        let engine = CloudSyncEngine(container: container, shadow: freshShadow())
+        let result = await engine.reconcile()
+
+        #expect(result.contentPushed == 1)
+        let states = try ctx.fetch(FetchDescriptor<UserContentState>())
+        #expect(states.count == 1)
+        #expect(states.first?.lastWatchedDate != nil)
+        #expect(states.first?.watchProgress == 80)
+        #expect(states.first?.isFavorite == false)
+    }
+
     @Test func `hidden channel and category export to distinct cloud records`() async throws {
         let container = try makeContainer()
         let ctx = container.mainContext
@@ -450,6 +473,50 @@ struct CloudSyncEngineTests {
         #expect(locals.first?.id == sid)
         #expect(locals.first?.accessToken == "token")
         #expect(locals.first?.lastSyncDate == nil)
+    }
+
+    @Test func `publishLocalUserContent writes recently watched without a full reconcile`() async throws {
+        let container = try makeContainer()
+        let ctx = container.mainContext
+        let playlist = Playlist(name: "My IPTV", serverURL: "http://x", username: "u", password: "p")
+        let pid = playlist.id
+        ctx.insert(playlist)
+        let movie = Movie(id: "\(pid.uuidString)-movie-9", streamId: 9, name: "Watched")
+        movie.lastWatchedDate = Date()
+        movie.watchProgress = 40
+        ctx.insert(movie)
+        try ctx.save()
+
+        let engine = CloudSyncEngine(container: container, shadow: freshShadow())
+        try await engine.publishLocalUserContent()
+
+        let states = try ctx.fetch(FetchDescriptor<UserContentState>())
+        #expect(states.count == 1)
+        #expect(states.first?.contentId == movie.id)
+        #expect(states.first?.watchProgress == 40)
+        #expect(states.first?.lastWatchedDate != nil)
+    }
+
+    @Test func `publishLocalMediaServers writes a plex mirror without a full reconcile`() async throws {
+        let container = try makeContainer()
+        let ctx = container.mainContext
+        let local = MediaServer(name: "Office Plex", baseURL: "http://192.168.1.20:32400", kind: .plex)
+        local.plexToken = "publish-token"
+        local.userId = "plex"
+        local.plexServerIdentifier = "office-id"
+        let sid = local.id
+        ctx.insert(local)
+        try ctx.save()
+
+        let engine = CloudSyncEngine(container: container, shadow: freshShadow())
+        try await engine.publishLocalMediaServers()
+
+        let mirrors = try ctx.fetch(FetchDescriptor<SyncedMediaServer>())
+        #expect(mirrors.count == 1)
+        #expect(mirrors.first?.id == sid)
+        #expect(mirrors.first?.plexToken == "publish-token")
+        #expect(mirrors.first?.plexServerIdentifier == "office-id")
+        #expect(mirrors.first?.deletedAt == nil)
     }
 
     @Test func `local media server exports to the iCloud mirror`() async throws {

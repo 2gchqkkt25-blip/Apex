@@ -626,6 +626,7 @@
 
     private extension TVSeriesDetailView {
         func playEpisode(_ episode: Episode) {
+            Logger.player.info("[SeriesPlay] User tapped S\(episode.seasonNum) E\(episode.episodeNum) '\(episode.title, privacy: .public)' id=\(episode.id, privacy: .public) episodeId=\(episode.episodeId, privacy: .public)")
             let media: PlayableMedia?
             if series.isMediaServerCatalogItem {
                 media = PlayableMedia.fromMediaServerEpisode(episode)
@@ -634,7 +635,11 @@
             } else {
                 media = nil
             }
-            guard let media else { return }
+            guard let media else {
+                Logger.player.error("[SeriesPlay] Failed to build PlayableMedia for episode \(episode.id, privacy: .public)")
+                return
+            }
+            Logger.player.info("[SeriesPlay] Built media url=\(media.url.absoluteString, privacy: .public) contentRef=\(String(describing: media.contentRef), privacy: .public)")
             if ExternalPlayback.open(media) { return }
             playingMedia = media
         }

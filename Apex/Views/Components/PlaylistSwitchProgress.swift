@@ -42,6 +42,8 @@ final class PlaylistSwitchModel {
 struct PlaylistSwitchOverlay: View {
     let playlistName: String
 
+    @Environment(ThemeManager.self) private var themeManager
+
     var body: some View {
         ZStack {
             // Dim and capture taps so the half-rendered new playlist isn't
@@ -51,9 +53,7 @@ struct PlaylistSwitchOverlay: View {
             VStack(spacing: spacing) {
                 ProgressView()
                     .controlSize(controlSize)
-                    // Explicit white (not accentColor, which resolves to white on
-                    // tvOS but reads as untinted elsewhere) over the dim backdrop.
-                    .tint(.white)
+                    .tint(themeManager.colors.accent)
 
                 Text(
                     "Switching to \(playlistName)",

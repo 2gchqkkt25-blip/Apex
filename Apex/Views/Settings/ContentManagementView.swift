@@ -348,7 +348,7 @@ struct ContentManagementView: View {
             HStack(spacing: 12) {
                 Button(action: onToggleHidden) {
                     Image(systemName: isHidden ? "eye.slash" : "eye")
-                        .foregroundStyle(isHidden ? Color.secondary : Color.accentColor)
+                        .foregroundStyle(isHidden ? AnyShapeStyle(Color.secondary) : AnyShapeStyle(.tint))
                 }
                 .buttonStyle(.borderless)
                 .accessibilityLabel(isHidden ? "Show \(title)" : "Hide \(title)")

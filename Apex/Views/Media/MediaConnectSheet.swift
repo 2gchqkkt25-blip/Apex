@@ -292,6 +292,7 @@ struct MediaConnectSheet: View {
             server.sortOrder = (try? modelContext.fetchCount(FetchDescriptor<MediaServer>())) ?? 0
             modelContext.insert(server)
             try modelContext.save()
+            await cloudSync?.publishLocalMediaServers()
             onConnected(server)
             dismiss()
         } catch {
@@ -369,6 +370,7 @@ struct MediaConnectSheet: View {
             server.sortOrder = (try? modelContext.fetchCount(FetchDescriptor<MediaServer>())) ?? 0
             modelContext.insert(server)
             try modelContext.save()
+            await cloudSync?.publishLocalMediaServers()
             onConnected(server)
             dismiss()
         } catch {

@@ -136,8 +136,14 @@ extension ContentSyncManager {
     func applyMovieFields(from dto: XtreamVODStream, to movie: Movie, playlistPrefix: String, serverURL: String) {
         movie.name = dto.name ?? ""
         movie.streamIcon = absoluteIconURL(from: dto.streamIcon, serverURL: serverURL)
-        movie.rating = dto.rating ?? 0
-        movie.rating5Based = dto.rating5Based ?? 0
+        // A provider's missing/zero score must not erase a TMDB score already
+        // persisted by post-sync enrichment.
+        if let rating = dto.rating, rating > 0 {
+            movie.rating = rating
+        }
+        if let rating = dto.rating5Based, rating > 0 {
+            movie.rating5Based = rating
+        }
         movie.added = dto.added
         movie.containerExtension = dto.containerExtension
         movie.tmdb = dto.tmdb
@@ -152,7 +158,7 @@ extension ContentSyncManager {
         if let catIdStr = dto.categoryId {
             movie.categoryId = playlistPrefix + catIdStr
         }
-        if let tmdbString = dto.tmdb, let tmdbInt = Int(tmdbString) {
+        if let tmdbInt = positiveTMDBID(dto.tmdb) {
             movie.tmdbId = tmdbInt
         }
     }
@@ -171,17 +177,33 @@ extension ContentSyncManager {
         series.genre = GenreParser.providerFallback(current: series.genre, provider: dto.genre)
         series.releaseDate = dto.releaseDate
         series.lastModified = dto.lastModified
-        series.rating = dto.rating
-        series.rating5Based = dto.rating5Based
+        if let rating = dto.rating, (Double(rating) ?? 0) > 0 {
+            series.rating = rating
+        }
+        if let rating = dto.rating5Based, (Double(rating) ?? 0) > 0 {
+            series.rating5Based = rating
+        }
         series.tmdb = dto.tmdb
         series.num = dto.num ?? 0
 
         if let catIdStr = dto.categoryId {
             series.categoryId = playlistPrefix + catIdStr
         }
-        if let tmdbString = dto.tmdb, let tmdbInt = Int(tmdbString) {
+        if let tmdbInt = positiveTMDBID(dto.tmdb) {
             series.tmdbId = tmdbInt
         }
+    }
+
+    /// Xtream panels variously send TMDB ids as `123`, `"123"`, `" 123 "`,
+    /// or a whole-number decimal string such as `"123.0"`.
+    private func positiveTMDBID(_ raw: String?) -> Int? {
+        guard let raw else { return nil }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let value = Int(trimmed), value > 0 { return value }
+        if let decimal = Double(trimmed), decimal > 0, decimal.rounded() == decimal {
+            return Int(decimal)
+        }
+        return nil
     }
 
     /// Resolves an icon path from a provider DTO to an absolute URL.

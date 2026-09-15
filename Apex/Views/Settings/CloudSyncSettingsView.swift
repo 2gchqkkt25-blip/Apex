@@ -87,6 +87,7 @@ enum CloudSyncStatusText {
                 }
                 .task {
                     await coordinator.refreshAccountStatus()
+                    await coordinator.publishLocalCloudExports()
                 }
             }
         }

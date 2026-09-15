@@ -4,6 +4,18 @@
 <dict>
 	<key>CFBundleAllowMixedLocalizations</key>
 	<true/>
+	<key>CFBundleLocalizations</key>
+	<array>
+		<string>en</string>
+		<string>de</string>
+		<string>fr</string>
+		<string>es</string>
+		<string>it</string>
+		<string>pt</string>
+		<string>ja</string>
+		<string>ko</string>
+		<string>zh-Hans</string>
+	</array>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -17,20 +29,6 @@
 			</array>
 		</dict>
 	</array>
-	<key>CFBundleLocalizations</key>
-	<array>
-		<string>en</string>
-		<string>de</string>
-		<string>fr</string>
-		<string>es</string>
-		<string>it</string>
-		<string>pt</string>
-		<string>ja</string>
-		<string>ko</string>
-		<string>zh-Hans</string>
-	</array>
-	<key>ITSAppUsesNonExemptEncryption</key>
-	<false/>
 	<key>IntroDBAPIKey</key>
 	<string></string>
 	<key>LSApplicationQueriesSchemes</key>
@@ -40,12 +38,6 @@
 		<string>infuse</string>
 		<string>vlc-x-callback</string>
 	</array>
-	<key>NSBonjourServices</key>
-	<array>
-		<string>_plexmediaserver._tcp</string>
-	</array>
-	<key>NSLocalNetworkUsageDescription</key>
-	<string>Apex searches your local network to find your Plex, Jellyfin, or Emby server automatically.</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>
@@ -63,6 +55,10 @@
 			</dict>
 		</dict>
 	</dict>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_plexmediaserver._tcp</string>
+	</array>
 	<key>OMDBAPIKey</key>
 	<string></string>
 	<key>TMDBAccessToken</key>

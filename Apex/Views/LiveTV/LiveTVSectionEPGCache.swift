@@ -14,86 +14,108 @@ import SwiftData
 @Observable
 @MainActor
 final class LiveTVSectionEPGCache {
-  private struct SectionSnapshot {
-    var programsByChannel: [String: [EPGProgram]] = [:]
-    var epgByChannel: [String: ChannelEPG] = [:]
-  }
-
-  private(set) var programsByChannel: [String: [EPGProgram]] = [:]
-  private(set) var epgByChannel: [String: ChannelEPG] = [:]
-
-  private var sections: [String: SectionSnapshot] = [:]
-  private(set) var activeSectionToken: String = ""
-
-  func activate(section: String) {
-    guard activeSectionToken != section else { return }
-    persistActiveSection()
-    activeSectionToken = section
-    if let snapshot = sections[section] {
-      programsByChannel = snapshot.programsByChannel
-      epgByChannel = snapshot.epgByChannel
-    } else {
-      programsByChannel = [:]
-      epgByChannel = [:]
+    private struct SectionSnapshot {
+        var programsByChannel: [String: [EPGProgram]] = [:]
+        var epgByChannel: [String: ChannelEPG] = [:]
     }
-  }
 
-  func merge(
-    section: String,
-    loaded: (channelEPG: [String: ChannelEPG], programs: [String: [EPGProgram]])
-  ) {
-    var snapshot = sections[section] ?? SectionSnapshot()
-    var changed = false
-    for (channelId, programs) in loaded.programs {
-      // Skip identical lists so mid-sync / gap-fill refreshes don't rebuild the
-      // tvOS guide focus tree for channels that already have this data.
-      if snapshot.programsByChannel[channelId] != programs {
-        snapshot.programsByChannel[channelId] = programs
-        changed = true
-      }
-    }
-    for (channelId, epg) in loaded.channelEPG {
-      if snapshot.epgByChannel[channelId] != epg {
-        snapshot.epgByChannel[channelId] = epg
-        changed = true
-      }
-    }
-    guard changed else { return }
-    sections[section] = snapshot
-    if section == activeSectionToken {
-      programsByChannel = snapshot.programsByChannel
-      epgByChannel = snapshot.epgByChannel
-    }
-  }
+    private(set) var programsByChannel: [String: [EPGProgram]] = [:]
+    private(set) var epgByChannel: [String: ChannelEPG] = [:]
 
-  func recomputeNowNext(now: Date = Date()) {
-    guard !programsByChannel.isEmpty else { return }
-    var next: [String: ChannelEPG] = [:]
-    for (channelId, programs) in programsByChannel {
-      let epg = EPGLiveLoader.makeChannelEPG(from: programs, now: now)
-      if epg.current != nil || epg.next != nil {
-        next[channelId] = epg
-      }
-    }
-    epgByChannel = next
-    if !activeSectionToken.isEmpty {
-      var snapshot = sections[activeSectionToken] ?? SectionSnapshot()
-      snapshot.epgByChannel = next
-      sections[activeSectionToken] = snapshot
-    }
-  }
+    private var sections: [String: SectionSnapshot] = [:]
+    private var sectionOrder: [String] = []
+    private static let sectionLimit = 12
+    private(set) var activeSectionToken: String = ""
 
-  func channelsNeedingLoad(_ channels: [LiveStream]) -> [LiveStream] {
-    // Treat empty arrays as still needing a load — store/warm may have filled
-    // in since the last empty result (common during deferred EPG sync).
-    channels.filter { programsByChannel[$0.primaryEPGChannelId]?.isEmpty ?? true }
-  }
+    func activate(section: String) {
+        guard activeSectionToken != section else { return }
+        persistActiveSection()
+        activeSectionToken = section
+        touch(section)
+        if let snapshot = sections[section] {
+            programsByChannel = snapshot.programsByChannel
+            epgByChannel = snapshot.epgByChannel
+        } else {
+            programsByChannel = [:]
+            epgByChannel = [:]
+        }
+    }
 
-  private func persistActiveSection() {
-    guard !activeSectionToken.isEmpty else { return }
-    sections[activeSectionToken] = SectionSnapshot(
-      programsByChannel: programsByChannel,
-      epgByChannel: epgByChannel
-    )
-  }
+    func merge(
+        section: String,
+        loaded: (channelEPG: [String: ChannelEPG], programs: [String: [EPGProgram]])
+    ) {
+        var snapshot = sections[section] ?? SectionSnapshot()
+        var changed = false
+        for (channelId, programs) in loaded.programs {
+            // Skip identical lists so mid-sync / gap-fill refreshes don't rebuild the
+            // tvOS guide focus tree for channels that already have this data.
+            if snapshot.programsByChannel[channelId] != programs {
+                snapshot.programsByChannel[channelId] = programs
+                changed = true
+            }
+        }
+        for (channelId, epg) in loaded.channelEPG {
+            if snapshot.epgByChannel[channelId] != epg {
+                snapshot.epgByChannel[channelId] = epg
+                changed = true
+            }
+        }
+        guard changed else { return }
+        sections[section] = snapshot
+        touch(section)
+        if section == activeSectionToken {
+            programsByChannel = snapshot.programsByChannel
+            epgByChannel = snapshot.epgByChannel
+        }
+    }
+
+    func recomputeNowNext(now: Date = Date()) {
+        guard !programsByChannel.isEmpty else { return }
+        var next: [String: ChannelEPG] = [:]
+        for (channelId, programs) in programsByChannel {
+            let epg = EPGLiveLoader.makeChannelEPG(from: programs, now: now)
+            if epg.previous != nil || epg.current != nil || epg.next != nil {
+                next[channelId] = epg
+            }
+        }
+        epgByChannel = next
+        if !activeSectionToken.isEmpty {
+            var snapshot = sections[activeSectionToken] ?? SectionSnapshot()
+            snapshot.epgByChannel = next
+            sections[activeSectionToken] = snapshot
+        }
+    }
+
+    func channelsNeedingLoad(_ channels: [LiveStream]) -> [LiveStream] {
+        // Treat empty arrays as still needing a load — store/warm may have filled
+        // in since the last empty result (common during deferred EPG sync).
+        // Also reload when a channel has current data but lacks enough future
+        // programmes to fill the guide timeline — without this, iOS/macOS
+        // guides show only "now" while tvOS displays the full schedule.
+        let now = Date()
+        return channels.filter {
+            let programs = programsByChannel[$0.primaryEPGChannelId] ?? []
+            return !EPGLiveLoader.hasLiveOrUpcoming(programs, now: now)
+                || !EPGBrowseLoader.hasSufficientFutureCoverage(programs, now: now)
+        }
+    }
+
+    private func touch(_ section: String) {
+        sectionOrder.removeAll { $0 == section }
+        sectionOrder.append(section)
+        while sectionOrder.count > Self.sectionLimit {
+            guard let oldest = sectionOrder.first(where: { $0 != activeSectionToken }) else { break }
+            sectionOrder.removeAll { $0 == oldest }
+            sections.removeValue(forKey: oldest)
+        }
+    }
+
+    private func persistActiveSection() {
+        guard !activeSectionToken.isEmpty else { return }
+        sections[activeSectionToken] = SectionSnapshot(
+            programsByChannel: programsByChannel,
+            epgByChannel: epgByChannel
+        )
+    }
 }

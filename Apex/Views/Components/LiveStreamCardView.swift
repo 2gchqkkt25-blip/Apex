@@ -12,6 +12,8 @@ struct LiveStreamCardView: View {
     /// The channel's now/next programmes, resolved once by the parent list (see
     /// `ChannelEPGSnapshot`) rather than by a per-card `@Query`.
     var epg: ChannelEPG?
+    @ScaledMetric(relativeTo: .subheadline) private var guideHeight: CGFloat = 94
+    @ScaledMetric(relativeTo: .caption2) private var catchupHeight: CGFloat = 18
 
     private var currentEPG: EPGSlot? {
         epg?.current
@@ -29,7 +31,7 @@ struct LiveStreamCardView: View {
                 cornerRadius: logoCorner,
                 contentPadding: logoPadding
             )
-                .id("\(stream.id)-\(stream.streamIcon ?? "")")
+            .id("\(stream.id)-\(stream.streamIcon ?? "")")
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 4) {
@@ -99,9 +101,11 @@ struct LiveStreamCardView: View {
                         Text("Catchup: \(stream.tvArchiveDuration)d")
                     }
                     .font(.caption2)
-                    .foregroundStyle(.blue)
+                    .foregroundStyle(.tint)
                 }
             }
+
+            .frame(minHeight: guideHeight + (stream.tvArchive > 0 ? catchupHeight : 0), alignment: .leading)
 
             Spacer()
 

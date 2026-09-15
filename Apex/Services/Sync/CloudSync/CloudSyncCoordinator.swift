@@ -62,6 +62,11 @@ final class CloudSyncCoordinator {
     /// the catalog scan and the `@Query` refresh that froze the UI on tvOS.
     private var cloudImportPending = false
 
+    /// Set when a background flush had to wait because CloudKit already held
+    /// the cloud-store lock. When that event finishes, publish mirrors and
+    /// reconcile so Recently Watched / Plex connections are not stuck local.
+    private var needsPublishAfterCloudKitIdle = false
+
     // Covers pre-suspension flush / in-flight reconcile saves so SQLite isn't
     // left locked when RunningBoard suspends the process (`0xdead10cc`).
     // `nonisolated(unsafe)`: the expiration handler may run off the main actor
@@ -128,6 +133,9 @@ final class CloudSyncCoordinator {
         #endif
         try? await Task.sleep(for: launchDelay)
         reconcile(reason: .launch)
+        // Connection rows must reach CloudKit even if a Plex/Jellyfin import
+        // is already holding the full reconcile gate.
+        await publishLocalCloudExports()
         scheduleInitialSyncTimeout()
     }
 
@@ -165,9 +173,10 @@ final class CloudSyncCoordinator {
         beginBackgroundExecutionIfNeeded()
         if status.isSyncing {
             // CloudKit import/export is mid-transaction on the cloud store. Starting
-            // our own save races that lock. Keep background time only if a reconcile
-            // is already running so *its* save can finish; otherwise drop the task.
-            Logger.sync.debug("Background flush skipped — CloudKit sync in progress")
+            // our own save races that lock. Retry as soon as that event ends.
+            pendingReconcile = true
+            needsPublishAfterCloudKitIdle = true
+            Logger.sync.debug("Background flush deferred — CloudKit sync in progress")
             if !isReconciling {
                 endBackgroundExecution()
             }
@@ -234,15 +243,42 @@ final class CloudSyncCoordinator {
         }
     }
 
+    /// Writes local media-server connections to the CloudKit mirror now.
+    /// Used after Connect (the full reconcile is blocked while the library
+    /// imports) so Apple TV can receive Plex/Jellyfin/Emby before that finishes.
+    func publishLocalMediaServers() async {
+        do {
+            try await engine.publishLocalMediaServers()
+        } catch {
+            Logger.sync.error("Media server publish failed: \(error.localizedDescription)")
+        }
+    }
+
+    func publishLocalUserContent() async {
+        do {
+            try await engine.publishLocalUserContent()
+        } catch {
+            Logger.sync.error("User content publish failed: \(error.localizedDescription)")
+        }
+    }
+
+    /// Media-server connections plus Recently Watched / favorites / hides.
+    func publishLocalCloudExports() async {
+        await publishLocalMediaServers()
+        await publishLocalUserContent()
+    }
+
     private func runReconcile() {
         guard !MediaSyncGate.isActive else {
             pendingReconcile = true
             Logger.sync.debug("Reconcile deferred — media library sync in progress")
+            Task { await publishLocalCloudExports() }
             return
         }
         guard !MediaConnectGate.isActive else {
             pendingReconcile = true
             Logger.sync.debug("Reconcile deferred — media server connect in progress")
+            Task { await publishLocalCloudExports() }
             return
         }
         guard !isReconciling else {
@@ -470,6 +506,13 @@ final class CloudSyncCoordinator {
         // carries the playlists hasn't run yet.
         if (type == .import && !inProgress) || error != nil {
             completeInitialSync()
+        }
+        if !inProgress, needsPublishAfterCloudKitIdle {
+            needsPublishAfterCloudKitIdle = false
+            Task {
+                await publishLocalCloudExports()
+                reconcile(reason: .queued, debounced: false)
+            }
         }
     }
 

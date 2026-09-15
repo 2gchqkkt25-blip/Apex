@@ -134,6 +134,18 @@ struct LiveTVMiniPreview: View {
     @MainActor
     private func preparePlayback() async {
         guard !isHandingOff else { return }
+        // Tear down any existing playback session before starting a new one.
+        // Without this, switching channels in the guide view leaves the old
+        // VLC stream running while the new one tries to start — the two
+        // streams compete for resources and the preview spins forever.
+        // Resigning the old session also clears the stale onPlaybackFailure
+        // closure so a late failure from the outgoing stream can't trigger
+        // an expand on the wrong channel.
+        if playbackSessionToken != 0 {
+            PlaybackSession.resign(playbackSessionToken)
+            vlcCoordinator.onPlaybackFailure = nil
+            playbackSessionToken = 0
+        }
         activateAudioSessionIfNeeded()
         vlcCoordinator.startupTimeout = 20
         vlcCoordinator.onPlaybackFailure = {
