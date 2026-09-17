@@ -90,10 +90,11 @@ struct EPGProgramCell: Identifiable, Equatable {
     /// The underlying listing id, or `nil` for gap fillers.
     let listingID: String?
     let isGap: Bool
+    let isProviderLive: Bool
     let width: CGFloat
 
     func isLive(at now: Date) -> Bool {
-        !isGap && start <= now && now < end
+        !isGap && (isProviderLive || (start <= now && now < end))
     }
 
     func isPast(at now: Date) -> Bool {
@@ -137,6 +138,11 @@ enum EPGGridBuilder {
     ) -> [EPGProgramCell] {
         var cells: [EPGProgramCell] = []
         var cursor = timeline.start
+        let now = Date()
+        // Accurate schedule coverage wins over a provider's occasionally stale
+        // `now_playing` flag. Use the flag only when no timestamped row actually
+        // covers now (the HBO East-style missing-overlay case).
+        let hasExactAiring = programs.contains { $0.start <= now && now < $0.end }
 
         for program in programs {
             let clampedStart = max(program.start, timeline.start)
@@ -153,15 +159,26 @@ enum EPGGridBuilder {
                 )
             }
 
+            // Providers occasionally return duplicate or overlapping slots.
+            // An HStack lays cells out sequentially, so retaining the overlap's
+            // full width shifts everything after it away from the time ruler.
+            // That can place a programme beneath the Now line while its dates
+            // say it is not live, causing the live overlay to appear missing.
+            // Trim the later slot to the uncovered portion so visual position
+            // and programme time remain identical.
+            let displayStart = max(clampedStart, cursor)
+            guard clampedEnd > displayStart else { continue }
+
             cells.append(EPGProgramCell(
                 id: cellID(program.id, identityNamespace: identityNamespace),
                 title: program.title,
                 detail: program.description,
-                start: clampedStart,
+                start: displayStart,
                 end: clampedEnd,
                 listingID: program.id,
                 isGap: false,
-                width: timeline.width(from: clampedStart, to: clampedEnd)
+                isProviderLive: program.isProviderLive && !hasExactAiring,
+                width: timeline.width(from: displayStart, to: clampedEnd)
             ))
             cursor = clampedEnd
         }
@@ -244,15 +261,19 @@ enum EPGGridBuilder {
                 )
             }
 
+            let displayStart = max(clampedStart, cursor)
+            guard clampedEnd > displayStart else { continue }
+
             cells.append(EPGProgramCell(
                 id: cellID(listing.id, identityNamespace: identityNamespace),
                 title: listing.title,
                 detail: listing.listingDescription,
-                start: clampedStart,
+                start: displayStart,
                 end: clampedEnd,
                 listingID: listing.id,
                 isGap: false,
-                width: timeline.width(from: clampedStart, to: clampedEnd)
+                isProviderLive: false,
+                width: timeline.width(from: displayStart, to: clampedEnd)
             ))
             cursor = clampedEnd
         }
@@ -312,6 +333,7 @@ enum EPGGridBuilder {
             end: end,
             listingID: nil,
             isGap: true,
+            isProviderLive: false,
             width: timeline.width(from: start, to: end)
         )
     }

@@ -70,6 +70,66 @@ final class LiveTVSectionEPGCache {
         }
     }
 
+    /// Applies live-API authority without replacing existing programme arrays.
+    /// Replacing a row's gap/program geometry while it is focused or under a
+    /// drag invalidates cell identities and makes the guide jump. Existing rows
+    /// keep their layout; only the matching title's provider-live bit changes.
+    /// Channels with no cached data still accept the loaded schedule once.
+    func mergeLiveStatus(
+        section: String,
+        loaded: (channelEPG: [String: ChannelEPG], programs: [String: [EPGProgram]])
+    ) {
+        var snapshot = sections[section] ?? SectionSnapshot()
+        var changed = false
+
+        for (channelId, loadedPrograms) in loaded.programs {
+            guard var existing = snapshot.programsByChannel[channelId], !existing.isEmpty else {
+                snapshot.programsByChannel[channelId] = loadedPrograms
+                changed = true
+                continue
+            }
+
+            let liveTitle = loadedPrograms.first(where: \.isProviderLive)?.title
+            let normalizedLiveTitle = liveTitle?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            let now = Date()
+            let hasExactAiring = existing.contains { $0.start <= now && now < $0.end }
+            var channelChanged = false
+            for index in existing.indices {
+                let normalizedTitle = existing[index].title
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .lowercased()
+                let shouldBeLive = !hasExactAiring
+                    && normalizedLiveTitle != nil
+                    && normalizedTitle == normalizedLiveTitle
+                guard existing[index].isProviderLive != shouldBeLive else { continue }
+                let program = existing[index]
+                existing[index] = EPGProgram(
+                    title: program.title,
+                    description: program.description,
+                    start: program.start,
+                    end: program.end,
+                    isProviderLive: shouldBeLive
+                )
+                channelChanged = true
+            }
+            if channelChanged {
+                snapshot.programsByChannel[channelId] = existing
+                changed = true
+            }
+        }
+
+        guard changed else { return }
+        snapshot.epgByChannel = snapshot.programsByChannel.mapValues {
+            EPGLiveLoader.makeChannelEPG(from: $0, now: Date())
+        }
+        sections[section] = snapshot
+        touch(section)
+        if section == activeSectionToken {
+            programsByChannel = snapshot.programsByChannel
+            epgByChannel = snapshot.epgByChannel
+        }
+    }
+
     func recomputeNowNext(now: Date = Date()) {
         guard !programsByChannel.isEmpty else { return }
         var next: [String: ChannelEPG] = [:]
@@ -96,7 +156,7 @@ final class LiveTVSectionEPGCache {
         let now = Date()
         return channels.filter {
             let programs = programsByChannel[$0.primaryEPGChannelId] ?? []
-            return !EPGLiveLoader.hasLiveOrUpcoming(programs, now: now)
+            return !EPGLiveLoader.hasAiringProgram(programs, now: now)
                 || !EPGBrowseLoader.hasSufficientFutureCoverage(programs, now: now)
         }
     }

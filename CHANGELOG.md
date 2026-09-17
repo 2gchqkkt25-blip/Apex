@@ -4,6 +4,33 @@ All notable changes to Apex Stream Player.
 
 ---
 
+## Build 59 (1.2.0) — September 17, 2026
+
+### Bug Fixes
+
+- **Apple TV remains usable after playlist refresh** — tvOS completes a bounded, high-yield EPG pass while the refresh cover is still visible instead of starting a large guide import immediately after dismissal. Rating/indexing work waits for the focus hierarchy to settle, and focus returns to the Sync button when refreshing from playlist settings.
+- **TV Guide live overlay matches the Now line** — Programme blocks are positioned directly from their timestamps instead of accumulating measured row widths. This prevents individual rows from drifting away from the time ruler and keeps the current-programme colour overlay aligned across iOS, macOS, tvOS, and visionOS.
+- **Current-programme detection is more reliable** — Accurate schedule timestamps take precedence over stale provider `now_playing` markers. Provider live status remains available as a fallback for channels whose schedule timestamps do not cover the current time.
+- **Guide scrolling remains stable while EPG data updates** — Overlapping programme slots are trimmed to uncovered time, missing coverage uses fixed half-hour cells, and live-status refreshes do not replace a focused row's geometry.
+
+### Improvements
+
+- Apple TV downloads all three quick-refresh EPG feeds concurrently, skips a redundant store-wide trim, and does not launch the remaining per-channel prefetch outside the refresh cover.
+- A shared leaf-level guide clock updates live styling without rebuilding the parent grid or disturbing scroll position and tvOS focus.
+- Main app and Top Shelf extension build metadata are aligned at **59**.
+
+### Verification
+
+- Focused EPG timestamp, overlap, empty-row, and live-state tests: **15 passed**.
+- Generic tvOS device build: passed.
+- Manual Build 59 coverage is listed in `TESTFLIGHT_CHECKLIST.md`.
+
+### Release
+
+- Build number **59** (1.2.0).
+
+---
+
 ## Build 58 (1.2.0) — September 15, 2026
 
 ### Bug Fixes

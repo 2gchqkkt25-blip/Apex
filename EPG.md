@@ -1,7 +1,22 @@
 # EPG (TV Guide) — Architecture Notes
 
-> Last updated: **September 15, 2026 (Build 58)**
-> Status: **Generic providers** — offset-honest `xmltv.php` bulk sync works. Playlist refresh includes EPG, valid listings persist across relaunch, live results publish incrementally, and the Guide remains stable for channels with no programme data. iOS scrolling and tvOS focus/navigation are optimized for the shared grid.
+> Last updated: **September 17, 2026 (Build 59)**
+> Status: **Generic providers** — offset-honest `xmltv.php` bulk sync works. Playlist refresh includes EPG, valid listings persist across relaunch, live results publish incrementally, and the Guide remains stable for channels with no programme data. Programme blocks, the time ruler, and the live Now overlay share the same timestamp geometry on every platform.
+
+## Build 59 — post-refresh responsiveness and Guide alignment
+
+- **Safe tvOS refresh lifecycle:** Apple TV performs `.tvOSQuick` while the blocking refresh cover is mounted. No large EPG import escapes into the newly restored browse UI, rating work waits ten seconds and yields to EPG activity, and playlist-settings focus is explicitly restored after dismissal.
+- **Faster tvOS guide step:** The three quick feeds download concurrently; insert-time caps make the store-wide trim unnecessary; API fallback primes only the bounded foreground slice rather than scheduling the entire remainder.
+- **Timestamp-aligned programme rows:** Every programme block uses `timeline.x(for: cell.start)` for its absolute horizontal position. It no longer inherits positioning errors from preceding blocks or tvOS lazy-stack width estimates, so its live overlay intersects the red Now line at the correct time.
+- **Stable live updates:** A shared leaf-level clock refreshes current-programme styling without rebuilding the grid. Live-status refreshes update flags without replacing row geometry, and exact timestamp coverage overrides stale provider `now_playing` flags.
+- **Shared implementation:** The absolute placement and live-state rules are in the common Guide code and apply to iOS, macOS, tvOS, and visionOS.
+
+### Build 59 regression rules
+
+1. Position programme cells from timestamps, never by accumulating measured widths from preceding cells.
+2. Keep the red Now indicator and live-overlay evaluation on the same current-time source without invalidating the parent grid or tvOS focus tree.
+3. Do not start heavy EPG or rating/indexing work as the tvOS refresh cover dismisses.
+4. Do not replace programme arrays solely to update provider live status while a Guide row may be focused or scrolling.
 
 ## Build 58 — persistence, refresh, and smooth Guide scrolling
 

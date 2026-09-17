@@ -22,6 +22,9 @@ struct PlaylistDetailView: View {
     @State private var editMacAddress = ""
     @State private var showDeleteConfirmation = false
     @State private var showSync = false
+    #if os(tvOS)
+        @FocusState private var isSyncButtonFocused: Bool
+    #endif
 
     private var isM3U: Bool {
         playlist.sourceType == .m3u
@@ -274,7 +277,7 @@ struct PlaylistDetailView: View {
             } message: {
                 Text("All synced content for this playlist will also be removed.")
             }
-            .fullScreenCover(isPresented: $showSync) {
+            .fullScreenCover(isPresented: $showSync, onDismiss: restoreFocusAfterSync) {
                 SyncProgressView(playlist: playlist)
             }
         }
@@ -299,8 +302,20 @@ struct PlaylistDetailView: View {
                 }
             }
             .buttonStyle(TVSettingsRowButtonStyle())
+            .focused($isSyncButtonFocused)
             .disabled(playlist.syncStatus == .syncing)
             .padding(.horizontal, TVSettingsMetrics.rowHPadding)
+        }
+
+        private func restoreFocusAfterSync() {
+            ContentIndexingService.shared.pauseForBrowse(duration: .seconds(10))
+            Task { @MainActor in
+                // Full-screen-cover dismissal completes inside a focus-engine
+                // update. Restore on the following turn so the destination view
+                // is mounted and the Siri Remote has a valid focus target.
+                await Task.yield()
+                isSyncButtonFocused = true
+            }
         }
 
         private var tvServerSection: some View {

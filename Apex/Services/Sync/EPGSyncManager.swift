@@ -18,7 +18,7 @@ import SwiftData
 
 /// How aggressively to fetch external EPG during a playlist refresh vs a full
 /// manual guide sync from Settings.
-enum EPGSyncMode: Sendable {
+nonisolated enum EPGSyncMode: Sendable {
     /// All 14 regional feeds; may take several minutes.
     case full
     /// US feeds only, stop once ~88% of channels are matched.
@@ -104,7 +104,15 @@ actor EPGSyncManager {
 
         if anySucceeded {
             Self.pruneExpiredListings(in: modelContainer)
-            Self.trimExcessListings(in: modelContainer)
+            // The quick Apple TV path runs while the blocking playlist-refresh
+            // cover is visible. Every importer already enforces the per-channel
+            // cap, so rescanning and grouping the entire active guide here adds
+            // noticeable wait time without changing newly imported data. Full
+            // and background guide syncs retain the self-healing trim for stores
+            // created before the insert-time cap was introduced.
+            if mode != .tvOSQuick {
+                Self.trimExcessListings(in: modelContainer)
+            }
         }
 
         return anySucceeded
@@ -301,7 +309,8 @@ actor EPGSyncManager {
             result: nil,
             credentials: credentials,
             identities: identities,
-            sourceID: source.id
+            sourceID: source.id,
+            scheduleRemaining: mode != .tvOSQuick
         )
         return true
     }
@@ -445,9 +454,12 @@ actor EPGSyncManager {
         // Download all feeds in parallel (capped at 4 concurrent to avoid
         // saturating the connection or tripping rate limits). Each download
         // writes to a temp file on disk so memory stays flat.
-        // tvOS has tighter memory limits, so cap at 2 concurrent there.
+        // These are streamed directly to temporary files rather than retained
+        // in memory. The tvOS quick set contains exactly three modest feeds, so
+        // downloading all three together removes an avoidable second network
+        // wave while preserving the sequential, memory-bounded parse below.
         #if os(tvOS)
-        let maxConcurrentDownloads = 2
+        let maxConcurrentDownloads = mode == .tvOSQuick ? 3 : 2
         #else
         let maxConcurrentDownloads = 4
         #endif
@@ -495,7 +507,6 @@ actor EPGSyncManager {
         // Parse must be sequential because each feed's dedup set and per-channel
         // counts build on the previous feed's results.
         for (parseIndex, downloaded) in downloadedFeeds.enumerated() {
-            let feedIndex = downloaded.index
             let url = downloaded.url
             let feedLabel = downloaded.label
             let fileURL = downloaded.fileURL
@@ -735,14 +746,16 @@ actor EPGSyncManager {
     private static let apiPrimeChannelCount = 200
 
     /// Primes a slice of channels via the per-channel API when the bulk XMLTV
-    /// dump is stale or empty. Background prefetch continues the rest after this
-    /// returns.
+    /// dump is stale or empty. Normal modes prefetch the remainder afterwards;
+    /// tvOS quick refresh stops at the prime slice so no heavy work escapes the
+    /// refresh cover.
     private func syncAPIPrime(
         strategy: EPGProviderStrategy,
         result: EPGInserter.Result?,
         credentials: EPGPlaylistCredentials,
         identities: [ChannelRef],
-        sourceID: UUID
+        sourceID: UUID,
+        scheduleRemaining: Bool = true
     ) async {
         let primeSlice = Array(identities.prefix(Self.apiPrimeChannelCount))
         guard !primeSlice.isEmpty else { return }
@@ -759,7 +772,7 @@ actor EPGSyncManager {
         )
 
         // Schedule background prefetch for the remaining channels
-        if identities.count > Self.apiPrimeChannelCount {
+        if scheduleRemaining, identities.count > Self.apiPrimeChannelCount {
             await EPGBackgroundPrefetch.shared.schedule(
                 credentials: credentials,
                 identities: identities,

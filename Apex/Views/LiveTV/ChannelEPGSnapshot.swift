@@ -27,7 +27,7 @@ nonisolated struct ChannelEPG: Equatable {
 }
 
 /// Bounds how much guide data is kept on disk and considered during import.
-enum EPGRetention {
+nonisolated enum EPGRetention {
     /// Programmes ending more than an hour ago are dropped on sync.
     static let pastGrace: TimeInterval = 3600
     /// Near-term horizon for bulk XMLTV import — the on-screen guide is a 6-hour
@@ -57,4 +57,3 @@ enum EPGRetention {
         return end > now.addingTimeInterval(-pastGrace)
     }
 }
-

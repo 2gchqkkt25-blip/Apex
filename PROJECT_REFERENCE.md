@@ -171,6 +171,29 @@ Without these keys, the app works but metadata is limited to what the IPTV provi
 | 102 | **Build 54 — episodes, Recently Added/Watched, subtitles, skip** | ✅ **Done (Sep 3)** — Sync Now refreshes Xtream `last_modified` series; Recently Added is playlist-scoped; Recently Watched requires real playback; skip works with unknown duration; subtitles on by default. See § Build 54. |
 | 103 | **Build 55 — in-player Guide, exclusive playback, hidden iCloud** | ✅ **Done (Sep 4)** — Compact tvOS mini-Guide scrolls the full list; iPhone portrait Guide; leftover audio; second-playlist spinner; hidden channels/categories sync. See § Build 55. |
 | 104 | **Build 58 — EPG, channel switching, poster scores, navigation, themes** | ✅ **Done (Sep 15)** — Unified playlist/EPG refresh; persistent and faster guide data; stable empty rows and smooth iOS scrolling; faster repeated channel changes; TMDB scores after sync; tvOS Back flow; complete theme tinting. See § Build 58. |
+| 105 | **Build 59 — tvOS post-refresh recovery + EPG alignment** | ✅ **Done (Sep 17)** — Bounded inline tvOS guide refresh; no heavy post-dismissal EPG/rating collision; restored settings focus; absolute timestamp placement; stable live-status merge; Now-line/overlay parity across platforms. See § Build 59. |
+
+---
+
+## Build 59 — tvOS Refresh and EPG Alignment (Sep 17, 2026)
+
+### ✅ Apple TV remains responsive after playlist refresh
+
+- The three-feed `.tvOSQuick` guide pass completes inside the blocking refresh cover. It downloads all three streamed feeds concurrently, skips the redundant store-wide trim, and does not schedule the remaining per-channel prefetch after dismissal.
+- TMDB rating work waits for the guide and focus hierarchy to settle, with a smaller initial tvOS batch. Returning from playlist settings restores focus to the Sync button.
+
+### ✅ Guide rows, live overlay, and Now line agree
+
+- Each programme block is placed at the absolute x-coordinate calculated from its start timestamp. Sequential lazy-stack measurement can no longer shift one row tens of minutes away from the shared ruler.
+- Overlap trimming and fixed half-hour gap cells preserve deterministic geometry. Provider live-state refreshes merge into existing rows without replacing focused cell identities.
+- Exact schedule timestamps override stale provider `now_playing` flags; the provider marker remains a fallback when no timestamped programme covers now.
+- The implementation is shared by iOS, macOS, tvOS, and visionOS.
+
+### Verification and release
+
+- Fifteen focused EPG tests passed, including overlap alignment, empty coverage, inaccurate provider timestamps, and stale live-marker precedence.
+- Generic tvOS device build passed.
+- Version **1.2.0**, Build **59**. Apex and Top Shelf extension build numbers match.
 
 ---
 
@@ -982,7 +1005,7 @@ Full rules: `EPG.md` § **Stability rules (do not regress)**. Highlights:
 2. ~~**Website / support email**~~ — ✅ support@streaminfinitytv.com, GitHub as homepage
 3. ~~**Apple Developer setup**~~ — ✅ Team `VS7D6GB238`, bundle ID registered, IAP products created, iOS TestFlight builds uploaded (July 2, 2026)
 4. ~~**CloudKit Development schema**~~ — ✅ Bootstrapped; **Production deployed** — playlist + user data sync verified on TestFlight (July 2, 2026)
-5. **TestFlight build 58** — 🔄 Ready to archive (Sep 15). EPG, repeated channel switching, post-sync TMDB scores, tvOS Back navigation, and theme coverage are ready for device testing. See § Build 58, `CHANGELOG.md`, `EPG.md`, and `TESTFLIGHT_CHECKLIST.md`.
+5. **TestFlight build 59** — 🔄 Ready to archive (Sep 17). Apple TV post-refresh responsiveness and cross-platform Guide overlay/timeline alignment are ready for device testing. See § Build 59, `CHANGELOG.md`, `EPG.md`, and `TESTFLIGHT_CHECKLIST.md`.
 6. **External TestFlight** — Age rating + privacy URL + App Privacy + What to Test → Beta App Review (~1–2 days)
 7. ~~**tvOS large-library hardening**~~ — ✅ Lazy tab mount, deferred indexing/EPG (tvOS-only); in build 17
 8. ~~**EPG guide**~~ — ✅ Working (`xmltv.php` bulk download, offset-honest parse; slow-sync + mismatch fixed); notes in `EPG.md`
@@ -1655,17 +1678,17 @@ Internal TestFlight (team only): upload build, no Beta App Review.
 **What to Test** (paste in TestFlight → External Testing):
 
 ```
-Build 58 (1.2.0)
+Build 59 (1.2.0)
 
 Apex is an IPTV player—users add their own Xtream or M3U playlist. No content is bundled.
 
-Refresh one playlist and confirm Movies, Series, Live TV, TV Guide data, and TMDB scores populate together. Force-close and reopen Apex; the Guide and scores should remain.
+On Apple TV, refresh one playlist and wait for the TV Guide step. When the refresh closes, navigation and focus should work immediately without force-quitting Apex.
 
-On iPhone/iPad, scroll the Guide in every direction and across channels with no programme data. It should stay smooth and never jump. Switch between several channels from the Guide; each should start promptly.
+Open the Guide and confirm the coloured current-programme overlay intersects the red Now line and matches the programme shown as on now. Check HBO East HD and channels with short or back-to-back programmes.
 
-On Apple TV, Back should move from Guide/list to categories, then to the top navigation. Confirm movie and series poster scores appear without opening details and that focus remains responsive.
+Scroll the Guide vertically and horizontally, including channels with no programme data. Rows should remain aligned with the time ruler and should not jump. Repeat on iPhone/iPad and Mac.
 
-Try several themes and confirm spinners, progress rings, focus states, badges, and controls use the selected colours.
+Force-close and reopen Apex; previously loaded Guide data should remain.
 
 Contact: support@streaminfinitytv.com
 ```
@@ -1776,7 +1799,7 @@ See **What's Been Built → iOS Device — Large Library Fix** above for full de
 2. ~~**Deploy CloudKit schema** Development → Production~~ — ✅ Done; sync verified
 3. ~~**Archive + upload build 19**~~ — ✅ Done.
 4. ~~**EPG on device**~~ — ✅ **Working (Jul 8)** on both iOS and tvOS.
-5. **TestFlight build 58** — 🔄 **Ready to archive** — unified/persistent EPG, smooth Guide scrolling, faster repeated channel switching, post-sync TMDB scores, tvOS Back flow, and complete theme tinting. See § Build 58 and `TESTFLIGHT_CHECKLIST.md`.
+5. **TestFlight build 59** — 🔄 **Ready to archive** — Apple TV stays responsive after playlist refresh, and Guide programme blocks/live overlays align with the shared time ruler on every platform. See § Build 59 and `TESTFLIGHT_CHECKLIST.md`.
 6. **External TestFlight** — Age rating 17+, privacy URL, App Privacy, What to Test → Beta App Review
 7. **Smoke-test** — sync (branded UI + TV Guide **%**), hero, subtitles, Discord, tvOS home, **EPG** (cards populate immediately after sync, grid + in-player browser, persistence after force-quit)
 8. **Screenshots + store copy** — when ready for **public** App Store
@@ -1876,4 +1899,4 @@ See **What's Been Built → iOS Device — Large Library Fix** above for full de
 
 ---
 
-*Last updated: September 15, 2026 (Build 58 — EPG, channel switching, poster scores, tvOS navigation, themes).*
+*Last updated: September 17, 2026 (Build 59 — tvOS post-refresh responsiveness and timestamp-aligned EPG overlays).*

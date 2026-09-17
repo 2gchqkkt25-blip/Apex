@@ -1,6 +1,6 @@
 import Foundation
 
-enum ExternalEPGSources {
+nonisolated enum ExternalEPGSources {
     /// Known-good external EPG sources with current schedule data.
     /// These are tried as primary sources when a provider's own xmltv.php is stale.
     ///

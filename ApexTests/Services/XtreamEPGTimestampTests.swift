@@ -104,6 +104,20 @@ struct XtreamEPGTimestampTests {
         #expect(times != nil)
         #expect(times!.start <= now)
         #expect(times!.end > now)
+        #expect(times!.end > now)
+        #expect(times!.end.timeIntervalSince(times!.start) == 60 * 60)
+    }
+
+    @Test func `now playing row without timestamps gets a durable live interval`() {
+        let now = Date(timeIntervalSince1970: 1_751_569_200)
+        let epg = XtreamShortEPG(title: "On Air", nowPlaying: true)
+
+        let times = epg.programmeTimes(timezoneIdentifier: nil, now: now)
+
+        #expect(times != nil)
+        #expect(times!.start <= now && now < times!.end)
+        #expect(times!.end > now)
+        #expect(times!.end.timeIntervalSince(times!.start) == 60 * 60)
     }
 
     @Test func `parse preserves real provider timestamps without shifting`() {

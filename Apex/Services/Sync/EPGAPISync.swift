@@ -300,7 +300,8 @@ enum EPGAPISync {
                 title: title,
                 description: item.decodedDescription,
                 start: times.start,
-                end: times.end
+                end: times.end,
+                isProviderLive: item.nowPlaying == true
             ))
         }
         programs.sort { $0.start < $1.start }

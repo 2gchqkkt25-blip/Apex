@@ -9,6 +9,28 @@
 
 import SwiftUI
 
+// MARK: - Clock
+
+/// One clock per guide. Programme leaves observe `now` directly, so a minute
+/// tick repaints live state without invalidating the grid, scroll position, or
+/// tvOS focus tree. The optional environment value lets the same programme view
+/// continue to work in the in-player guide, which supplies its own timestamp.
+@Observable
+final class EPGGuideClock {
+    var now = Date()
+}
+
+private struct EPGGuideClockKey: EnvironmentKey {
+    static let defaultValue: EPGGuideClock? = nil
+}
+
+extension EnvironmentValues {
+    var epgGuideClock: EPGGuideClock? {
+        get { self[EPGGuideClockKey.self] }
+        set { self[EPGGuideClockKey.self] = newValue }
+    }
+}
+
 // MARK: - Palette
 
 /// Explicit guide colours. `Color.platformAccent` always returns the standard
@@ -249,14 +271,7 @@ struct EPGProgramBlockView: View {
     let metrics: EPGMetrics
     let now: Date
     let isFocused: Bool
-
-    private var isLive: Bool {
-        cell.isLive(at: now)
-    }
-
-    private var isPast: Bool {
-        cell.isPast(at: now)
-    }
+    @Environment(\.epgGuideClock) private var guideClock
 
     /// Hairline gap between adjacent blocks. Applied as inset *inside* the
     /// cell's exact width so tiling stays pixel-aligned across rows.
@@ -265,17 +280,26 @@ struct EPGProgramBlockView: View {
     }
 
     var body: some View {
-        ZStack(alignment: .bottomLeading) {
+        // Reading the shared observable here invalidates only this leaf. The
+        // grid itself never observes `clock.now`, so scroll/focus stays fixed.
+        content(at: guideClock?.now ?? now)
+    }
+
+    private func content(at currentDate: Date) -> some View {
+        let isLive = cell.isLive(at: currentDate)
+        let isPast = cell.isPast(at: currentDate)
+
+        return ZStack(alignment: .bottomLeading) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(cell.isGap ? "No Programme" : cell.title)
                     .font(titleFont)
-                    .foregroundStyle(titleColor)
+                    .foregroundStyle(titleColor(isLive: isLive))
                     .lineLimit(lineLimit)
 
                 if showsTime {
                     Text(cell.start, format: .dateTime.hour().minute())
                         .font(timeFont)
-                        .foregroundStyle(timeColor)
+                        .foregroundStyle(timeColor(isLive: isLive))
                 }
             }
             .padding(.horizontal, metrics.blockInset)
@@ -283,11 +307,11 @@ struct EPGProgramBlockView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
 
             if isLive {
-                liveProgressBar
+                liveProgressBar(at: currentDate)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(background)
+        .background(background(isLive: isLive))
         .clipShape(RoundedRectangle(cornerRadius: metrics.blockCornerRadius, style: .continuous))
         .opacity(cell.isGap ? 0.5 : (isPast && !isFocused ? 0.55 : 1))
         .padding(.trailing, gap)
@@ -306,7 +330,7 @@ struct EPGProgramBlockView: View {
     }
 
     @ViewBuilder
-    private var background: some View {
+    private func background(isLive: Bool) -> some View {
         let shape = RoundedRectangle(cornerRadius: metrics.blockCornerRadius, style: .continuous)
         if cell.isGap {
             #if os(tvOS)
@@ -324,17 +348,21 @@ struct EPGProgramBlockView: View {
             #endif
         } else {
             #if os(tvOS)
-                // Focused cells use the system idiom (solid white, dark text)
-                // for maximum readability on the 10-foot UI. Live programmes
-                // get a subtle theme-accent fill so the guide palette stays
-                // consistent with the rest of the app.
-                if isFocused {
-                    shape.fill(.white)
-                } else if isLive {
-                    shape.fill(EPGColors.live.opacity(0.12))
+                // Live status must win over focus. Previously a focused live
+                // programme became solid white, which made the current channel
+                // look like it was missing the live overlay. Keep live cells
+                // accent-coloured and strengthen that treatment under focus;
+                // non-live focused cells retain the standard white tvOS idiom.
+                if isLive {
+                    shape.fill(EPGColors.live.opacity(isFocused ? 0.82 : 0.18))
                         .overlay {
-                            shape.strokeBorder(EPGColors.live.opacity(0.55), lineWidth: 1.5)
+                            shape.strokeBorder(
+                                isFocused ? Color.white.opacity(0.9) : EPGColors.live.opacity(0.65),
+                                lineWidth: isFocused ? 2 : 1.5
+                            )
                         }
+                } else if isFocused {
+                    shape.fill(.white)
                 } else {
                     shape.fill(.white.opacity(0.08))
                 }
@@ -353,13 +381,13 @@ struct EPGProgramBlockView: View {
         }
     }
 
-    private var liveProgressBar: some View {
+    private func liveProgressBar(at currentDate: Date) -> some View {
         // The cell already knows its exact width — compute the progress bar
         // directly instead of wrapping it in a GeometryReader, which forces a
         // layout pass on every visible live programme block.
         Capsule()
             .fill(progressTint)
-            .frame(width: max(0, (cell.width - gap) * cell.progress(at: now)), height: 3)
+            .frame(width: max(0, (cell.width - gap) * cell.progress(at: currentDate)), height: 3)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
             .padding(.horizontal, 2)
             .padding(.bottom, 2)
@@ -367,26 +395,24 @@ struct EPGProgramBlockView: View {
 
     private var progressTint: Color {
         #if os(tvOS)
-            // A coloured bar stays readable on both the translucent and the
-            // focused (white) fill; a white bar would vanish on the latter.
-            return EPGColors.live
+            return isFocused ? .white : EPGColors.live
         #else
             return isFocused ? .white : EPGColors.live
         #endif
     }
 
-    private var titleColor: Color {
+    private func titleColor(isLive: Bool) -> Color {
         if cell.isGap { return .secondary }
         #if os(tvOS)
-            return isFocused ? .black : .white
+            return isFocused && !isLive ? .black : .white
         #else
             return isFocused ? .white : .primary
         #endif
     }
 
-    private var timeColor: Color {
+    private func timeColor(isLive: Bool) -> Color {
         #if os(tvOS)
-            return isFocused ? .black.opacity(0.6) : .white.opacity(0.6)
+            return isFocused && !isLive ? .black.opacity(0.6) : .white.opacity(0.7)
         #else
             return .secondary
         #endif

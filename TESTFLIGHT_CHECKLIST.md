@@ -1,40 +1,34 @@
-# TestFlight Checklist — Build 58
+# TestFlight Checklist — Build 59
 
 ## What to Test (paste in App Store Connect → TestFlight → What to Test)
 
 ```
-Build 58 (1.2.0)
+Build 59 (1.2.0)
 
 Apex is an IPTV player—users add their own Xtream or M3U playlist. No content is bundled.
 
-Please focus on playlist refresh, TV Guide, channel switching, poster scores, navigation, and themes.
+Please focus on Apple TV behavior after playlist refresh and TV Guide alignment.
 
-1. Refresh a playlist. Movies, series, Live TV, TV Guide data, and TMDB scores should populate from that one refresh.
-2. Force-close and reopen Apex. Previously loaded TV Guide data and poster scores should still be present.
-3. On iPhone/iPad, scroll the Guide up/down and left/right, including across channels with no programme data. It should remain smooth and should not jump.
-4. From the Guide, open one channel and then switch to several others. Each replacement should begin promptly without a 10–15 second delay.
-5. On Apple TV, browse the Guide and channel list. Menu/Back should return to categories first, then to the top navigation on the next press.
-6. Confirm TMDB scores appear on both movie and series posters on iOS, macOS, and tvOS without opening each detail page.
-7. Try several themes. Spinners, progress rings, focus states, badges, and tinted controls should follow the selected theme.
-8. Browse and play content for a while; navigation should stay responsive without requiring a force-quit.
+1. On Apple TV, refresh a playlist and wait for the TV Guide step to finish. After the refresh closes, navigation and focus should work immediately without force-quitting Apex.
+2. Open the Guide and confirm the coloured current-programme overlay intersects the red Now line and matches the programme shown as on now. Please check HBO East HD and channels with short or back-to-back programmes.
+3. Scroll the Guide vertically and horizontally, including channels with no programme data. Rows should remain aligned with the time ruler and the Guide should not jump.
+4. Repeat the Guide checks on iPhone/iPad and Mac. Overlay alignment and smooth scrolling should match Apple TV.
+5. Force-close and reopen Apex. Previously loaded Guide data should remain available.
 
 Contact: support@streaminfinitytv.com
 ```
 
-## Build 58 Focused Checklist
+## Build 59 Focused Checklist
 
-- [ ] Playlist refresh completes and includes EPG without a second manual refresh
-- [ ] Movie and series posters show TMDB scores after sync on iOS, macOS, and tvOS
-- [ ] Force-quit and relaunch preserves existing EPG data
-- [ ] iOS/iPadOS Guide scrolls smoothly vertically and horizontally
+- [ ] tvOS playlist refresh completes its TV Guide step and the app is usable immediately afterward
+- [ ] Returning from playlist-settings refresh restores a valid focus target
+- [ ] On iOS, macOS, and tvOS, the coloured live overlay intersects the red Now line and matches the programme shown as currently airing
+- [ ] HBO East HD and rows containing short/back-to-back programmes remain aligned with the time ruler while scrolling
 - [ ] Empty-EPG channels remain normal-height rows and do not make the Guide jump
-- [ ] Repeated Guide channel changes start promptly and never leave the previous channel playing
-- [ ] tvOS Back: content → categories → top navigation
-- [ ] tvOS focus and navigation remain fast after browsing several categories
-- [ ] Every theme colours spinners, progress, focus states, badges, and controls consistently
-- [ ] App remains responsive after extended browsing, syncing, and playback
+- [ ] Vertical and horizontal Guide scrolling remains smooth on iOS, macOS, and tvOS
+- [ ] Guide data remains available after force-quit and relaunch
 
-**Release metadata:** Apex app and Top Shelf extension are both Build **58** (version 1.2.0).
+**Release metadata:** Apex app and Top Shelf extension are both Build **59** (version 1.2.0).
 
 ---
 

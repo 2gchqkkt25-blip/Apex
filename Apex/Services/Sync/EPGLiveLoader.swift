@@ -23,6 +23,25 @@ nonisolated struct EPGProgram: Sendable, Equatable, Identifiable {
     let description: String
     let start: Date
     let end: Date
+    /// Authoritative current-slot marker returned by Xtream's short EPG API.
+    /// Some providers expose useful titles but inaccurate schedule timestamps;
+    /// this keeps their explicitly live row visually live without changing its
+    /// geometry or identity.
+    let isProviderLive: Bool
+
+    init(
+        title: String,
+        description: String,
+        start: Date,
+        end: Date,
+        isProviderLive: Bool = false
+    ) {
+        self.title = title
+        self.description = description
+        self.start = start
+        self.end = end
+        self.isProviderLive = isProviderLive
+    }
 }
 
 /// Sendable snapshot of playlist credentials — never pass SwiftData `Playlist`
@@ -387,7 +406,8 @@ actor EPGLiveLoader {
                 title: title,
                 description: item.decodedDescription,
                 start: times.start,
-                end: times.end
+                end: times.end,
+                isProviderLive: item.nowPlaying == true
             ))
         }
 
@@ -416,7 +436,8 @@ actor EPGLiveLoader {
                 title: title,
                 description: item.decodedDescription,
                 start: start,
-                end: start.addingTimeInterval(duration)
+                end: start.addingTimeInterval(duration),
+                isProviderLive: true
             ))
         }
         guard !programs.isEmpty else { return nil }
@@ -451,7 +472,8 @@ actor EPGLiveLoader {
                 title: program.title,
                 description: program.description,
                 start: program.start.addingTimeInterval(dayOffset),
-                end: program.end.addingTimeInterval(dayOffset)
+                end: program.end.addingTimeInterval(dayOffset),
+                isProviderLive: program.isProviderLive
             )
         }
 
@@ -573,6 +595,13 @@ actor EPGLiveLoader {
 
     nonisolated static func hasLiveOrUpcoming(_ programs: [EPGProgram], now: Date) -> Bool {
         programs.contains { isLiveOrUpcoming($0, now: now) }
+    }
+
+    nonisolated static func hasAiringProgram(_ programs: [EPGProgram]?, now: Date) -> Bool {
+        guard let programs else { return false }
+        return programs.contains {
+            $0.isProviderLive || ($0.start <= now && now < $0.end)
+        }
     }
 
     private struct LiveChannelEPGFetchResult {
@@ -705,7 +734,7 @@ enum EPGBrowseLoader {
             // as the live API gap-fill below.
             let missingAfterStore = snapshots.filter {
                 let channelPrograms = programs[$0.primaryEPGChannelId]
-                return !hasAiringOrUpcoming(channelPrograms, now: now)
+                return !EPGLiveLoader.hasAiringProgram(channelPrograms, now: now)
                     || !hasSufficientFutureCoverage(channelPrograms, now: now)
             }
             if !missingAfterStore.isEmpty {
@@ -735,7 +764,7 @@ enum EPGBrowseLoader {
             // data) displays the full upcoming schedule.
             let needsLive = snapshots.filter {
                 let channelPrograms = programs[$0.primaryEPGChannelId]
-                return !hasAiringOrUpcoming(channelPrograms, now: now)
+                return !EPGLiveLoader.hasAiringProgram(channelPrograms, now: now)
                     || !hasSufficientFutureCoverage(channelPrograms, now: now)
             }
             if allowGapFill, !Task.isCancelled, !needsLive.isEmpty, !MemoryPressureGate.isActive {

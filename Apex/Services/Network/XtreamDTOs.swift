@@ -753,7 +753,11 @@ struct XtreamShortEPG: Decodable {
             return (s, e)
         }()
 
-        // now_playing: trust whatever we have, prefer the one overlapping now.
+        // `now_playing` is the provider's authoritative current-slot signal.
+        // Keep accurate timestamps unchanged, but when both timestamp variants
+        // are stale/misaligned, anchor a programme-length interval around now.
+        // The old fallback ended at `now + 60s`, so the live overlay disappeared
+        // before an async guide reload completed (or on its next minute tick).
         if nowPlaying == true {
             if let wall = wallPair, wall.start <= now && now < wall.end {
                 return wall
@@ -761,14 +765,20 @@ struct XtreamShortEPG: Decodable {
             if let unix = unixPair, unix.start <= now && now < unix.end {
                 return unix
             }
-            // Neither overlaps now — stretch the closest one to cover now.
+            // Prefer wall-clock when both are unusable for "now", matching the
+            // provider-first ordering above. Keep this scalar instead of using
+            // an optional-tuple collection; the latter trips a Swift runtime
+            // isolation check under the project's default MainActor setting.
             let basis = wallPair ?? unixPair
-            if let basis {
-                let adjustedStart = min(basis.start, now)
-                let adjustedEnd = max(basis.end, now.addingTimeInterval(60))
-                return (adjustedStart, adjustedEnd)
-            }
-            return nil
+            let duration = basis.map {
+                min(max($0.end.timeIntervalSince($0.start), 15 * 60), 6 * 3600)
+            } ?? 3600
+            // Anchor to a deterministic duration-sized wall-clock slot. Using
+            // `now - 5 minutes` made each API refresh produce a new listing id,
+            // so old + new cells overlapped and the guide shifted under focus.
+            let slot = floor(now.timeIntervalSince1970 / duration)
+            let adjustedStart = Date(timeIntervalSince1970: slot * duration)
+            return (adjustedStart, adjustedStart.addingTimeInterval(duration))
         }
 
         // Both available — pick the one closer to now (handles stale unix + live wall-clock).

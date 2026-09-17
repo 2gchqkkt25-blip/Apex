@@ -65,10 +65,19 @@ struct SyncProgressView: View {
 
     private var headerSubtitle: LocalizedStringKey {
         switch phase {
-        case .ready: "Content refreshes first. The TV guide continues in the background."
+        case .ready:
+            #if os(tvOS)
+                "Content and the TV guide refresh together."
+            #else
+                "Content refreshes first. The TV guide continues in the background."
+            #endif
         case .syncing: "This usually finishes once the provider lists are in…"
         case .finished:
-            includesGuideStep ? "Your playlist is up to date. The TV guide is filling in." : "Your playlist is up to date."
+            #if os(tvOS)
+                includesGuideStep ? "Your playlist and TV guide are up to date." : "Your playlist is up to date."
+            #else
+                includesGuideStep ? "Your playlist is up to date. The TV guide is filling in." : "Your playlist is up to date."
+            #endif
         case .failed: "Something went wrong. You can try again."
         }
     }
@@ -92,13 +101,32 @@ struct SyncProgressView: View {
 
                 if SyncStep.includesEPG(for: playlist.sourceType) {
                     try Task.checkCancellation()
-                    // Do not wait on XMLTV here. The old inline `.tvOSQuick` pass
-                    // held this sheet on "TV guide" for up to two minutes (and
-                    // longer when cancel didn't reach the awaited sync). Catalog
-                    // refresh should finish when the provider lists are in;
-                    // the guide fills in the background like other IPTV apps.
                     progress.start(.epgGuide)
-                    progress.update(detail: "Updating in background", fraction: 1)
+                    #if os(tvOS)
+                        // Keep Apple TV's EPG work inside the refresh cover. Starting
+                        // the larger bundled import immediately after dismissal made
+                        // the focus engine and every mounted @Query compete with its
+                        // SwiftData saves, leaving the app apparently frozen until a
+                        // relaunch cancelled the work. The quick pass is three small,
+                        // high-yield feeds and finishes before browsing resumes.
+                        let guideUpdated = await EPGSyncService.shared.syncAwaiting(
+                            container: modelContext.container,
+                            mode: .tvOSQuick
+                        ) { fraction, label in
+                            progress.update(
+                                detail: label ?? "Updating TV guide",
+                                fraction: fraction ?? 0
+                            )
+                        }
+                        progress.update(
+                            detail: guideUpdated ? "TV guide updated" : "Using saved TV guide",
+                            fraction: 1
+                        )
+                    #else
+                        // iOS/macOS have enough headroom for the bundled guide to
+                        // continue after the catalog sheet dismisses.
+                        progress.update(detail: "Updating in background", fraction: 1)
+                    #endif
                     progress.complete(.epgGuide)
                 }
 
@@ -119,22 +147,14 @@ struct SyncProgressView: View {
         }
     }
 
-    /// Indexing plus deferred guide fill. Background work runs after the sheet
-    /// can dismiss — playlist refresh must not wait on XMLTV.
+    /// Starts post-refresh work. Apple TV has already completed its lightweight
+    /// guide pass inside the cover; iOS/macOS can fill the guide after dismissal.
     private func schedulePostSyncIndexing() async {
         #if os(tvOS)
         await MainActor.run {
             ContentIndexingService.shared.kick(after: .seconds(20))
             // Update Top Shelf content so the extension shows fresh data
             TopShelfDataWriter.update(container: modelContext.container)
-        }
-        // Short delay so the sync sheet can tear down and release catalog
-        // buffers before the bundled US feed parse starts.
-        Task.detached(priority: .utility) {
-            try? await Task.sleep(for: .seconds(2))
-            await MainActor.run {
-                EPGSyncService.shared.syncBundledInBackground()
-            }
         }
         #else
         await MainActor.run {

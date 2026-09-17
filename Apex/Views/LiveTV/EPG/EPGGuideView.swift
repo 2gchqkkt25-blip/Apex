@@ -145,7 +145,11 @@ struct EPGGuideView: View {
         )
         guard !Task.isCancelled else { return }
 
-        epgCache.merge(section: sectionToken, loaded: loaded)
+        if force {
+            epgCache.mergeLiveStatus(section: sectionToken, loaded: loaded)
+        } else {
+            epgCache.merge(section: sectionToken, loaded: loaded)
+        }
 
         let logoURLs = channels.compactMap(\.iconURL)
         guard !logoURLs.isEmpty else { return }
@@ -291,6 +295,7 @@ private struct EPGGridScroller: View {
     private let now = Date()
 
     @State private var sync = EPGScrollSync()
+    @State private var clock = EPGGuideClock()
     @State private var selection: EPGSelection?
     @State private var jumpToken = 0
 
@@ -335,6 +340,18 @@ private struct EPGGridScroller: View {
         #if !os(tvOS)
         .background(.background)
         #endif
+        .environment(\.epgGuideClock, clock)
+        .task {
+            while !Task.isCancelled {
+                let seconds = Calendar.current.component(.second, from: Date())
+                do {
+                    try await Task.sleep(for: .seconds(max(1, 60 - seconds)))
+                } catch {
+                    return
+                }
+                clock.now = Date()
+            }
+        }
         .sheet(item: $selection) { selection in
             EPGProgramDetailView(
                 stream: selection.stream,
@@ -627,6 +644,7 @@ private struct EPGRows: View {
             ForEach(rows) { row in
                 EPGProgramStrip(
                     row: row,
+                    timeline: timeline,
                     metrics: metrics,
                     now: now,
                     contentWidth: timeline.totalWidth,
@@ -658,6 +676,7 @@ private struct EPGRows: View {
 /// on tvOS or context menu on iOS/macOS.
 private struct EPGProgramStrip: View {
     let row: EPGChannelRow
+    let timeline: EPGTimeline
     let metrics: EPGMetrics
     let now: Date
     /// The full timeline width. Pinned on the lazy stack so the row reserves its
@@ -668,21 +687,13 @@ private struct EPGProgramStrip: View {
     let onShowDetails: (EPGProgramCell) -> Void
 
     var body: some View {
-        Group {
-            #if os(tvOS)
-                // Keep tvOS lazy: its focus engine otherwise tracks every cell
-                // across the complete timeline for each realized row.
-                LazyHStack(spacing: 0) {
-                    programmeCells
-                }
-            #else
-                // iOS/macOS build the modest number of cells in each visible
-                // row up front. LazyHStack realizing and measuring cells during
-                // a horizontal drag was a major source of stutter and jumps.
-                HStack(spacing: 0) {
-                    programmeCells
-                }
-            #endif
+        // Place every block from its timestamp instead of accumulating the
+        // measured widths of all preceding blocks. tvOS can temporarily report
+        // estimated LazyHStack widths while focus realizes off-screen buttons;
+        // that shifted entire rows away from the ruler, so the live overlay
+        // appeared on a block that did not intersect the red Now line.
+        ZStack(alignment: .topLeading) {
+            programmeCells
         }
         .frame(width: contentWidth, height: metrics.rowHeight, alignment: .leading)
     }
@@ -699,6 +710,7 @@ private struct EPGProgramStrip: View {
                     Color.clear.frame(width: cell.width, height: metrics.rowHeight)
                 }
                 .buttonStyle(EPGBlockButtonStyle(cell: cell, metrics: metrics, now: now))
+                .offset(x: timeline.x(for: cell.start))
                 .accessibilityLabel(Text(row.name))
                 .accessibilityHint(Text("No programme information"))
             } else {
@@ -708,6 +720,7 @@ private struct EPGProgramStrip: View {
                     Color.clear.frame(width: cell.width, height: metrics.rowHeight)
                 }
                 .buttonStyle(EPGBlockButtonStyle(cell: cell, metrics: metrics, now: now))
+                .offset(x: timeline.x(for: cell.start))
                 #if os(tvOS)
                     .onLongPressGesture(minimumDuration: 0.4) {
                         onShowDetails(cell)

@@ -82,7 +82,13 @@ final class ContentIndexingService {
         guard ratingTask == nil, let container else { return }
         ratingTask = Task { [weak self] in
             defer { self?.ratingTask = nil }
-            try? await Task.sleep(for: .milliseconds(500))
+            #if os(tvOS)
+                // Let the refresh cover's quick EPG pass finish and the focus
+                // hierarchy settle before rating saves begin.
+                try? await Task.sleep(for: .seconds(10))
+            #else
+                try? await Task.sleep(for: .milliseconds(500))
+            #endif
             while !Task.isCancelled, let playlistID = self?.pendingRatingPlaylistIDs.first {
                 self?.pendingRatingPlaylistIDs.remove(playlistID)
                 let indexer = ContentIndexer(modelContainer: container)
@@ -90,7 +96,7 @@ final class ContentIndexingService {
                     // Visible cards finish enrichment on demand. Keep this
                     // initial pass small so a large sync cannot monopolize
                     // networking and SwiftData while the focus engine is live.
-                    await indexer.backfillMissingRatings(playlistID: playlistID, maxCandidates: 50)
+                    await indexer.backfillMissingRatings(playlistID: playlistID, maxCandidates: 24)
                 #else
                     await indexer.backfillMissingRatings(playlistID: playlistID)
                 #endif

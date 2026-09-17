@@ -388,6 +388,7 @@ struct MainTabView: View {
     }
 
     private func handleSyncCoverDismissed() {
+        ContentIndexingService.shared.pauseForBrowse(duration: .seconds(10))
         promoteNextIfIdle()
     }
 }

@@ -374,10 +374,16 @@ actor ContentIndexer {
                 let service = ContentIndexingService.shared
                 return service.isPlaybackActive || service.isCloudSyncActive || service.isBrowsePaused
             }
-            // Poster scores are intentionally independent of EPG refresh. The
-            // guide can run for minutes after a playlist refresh; making rating
-            // work wait for it left every poster blank during normal use.
-            if !busy, !MediaSyncGate.isActive, !MediaConnectGate.isActive {
+            #if os(tvOS)
+                // On Apple TV, simultaneous EPG and rating saves invalidate the
+                // mounted browse queries often enough to starve the focus engine.
+                let guideImportActive = EPGSyncGate.isActive
+            #else
+                // Larger devices can resolve ratings while the long background
+                // guide pass continues, so posters do not remain blank for minutes.
+                let guideImportActive = false
+            #endif
+            if !busy, !guideImportActive, !MediaSyncGate.isActive, !MediaConnectGate.isActive {
                 return true
             }
             try? await Task.sleep(for: .seconds(2))
