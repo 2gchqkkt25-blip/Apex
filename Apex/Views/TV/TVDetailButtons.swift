@@ -51,7 +51,7 @@
 
     /// Generic card lift used by episode, poster and cast cards.
     struct TVCardButtonStyle: ButtonStyle {
-        var focusScale: CGFloat = 1.08
+        var focusScale: CGFloat = 1.14
 
         func makeBody(configuration: Configuration) -> some View {
             StyleBody(configuration: configuration, focusScale: focusScale)

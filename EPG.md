@@ -1,7 +1,12 @@
 # EPG (TV Guide) — Architecture Notes
 
-> Last updated: **September 17, 2026 (Build 59)**
+> Last updated: **September 24, 2026 (Build 61)**
 > Status: **Generic providers** — offset-honest `xmltv.php` bulk sync works. Playlist refresh includes EPG, valid listings persist across relaunch, live results publish incrementally, and the Guide remains stable for channels with no programme data. Programme blocks, the time ruler, and the live Now overlay share the same timestamp geometry on every platform.
+
+## Build 61 — return to now after playback
+
+- Leaving fullscreen playback refreshes the still-mounted guide to wall-clock time and scrolls there. The guide no longer stays parked at the moment the channel was tuned.
+- On Apple TV, focus moves to the programme airing now on that channel so the old programme does not pull the grid back.
 
 ## Build 59 — post-refresh responsiveness and Guide alignment
 

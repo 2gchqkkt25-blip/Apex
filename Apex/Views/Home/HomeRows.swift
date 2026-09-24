@@ -228,7 +228,10 @@ private struct HomePosterCard: View {
             .posterRatingOverlay(rating)
             .posterFavoriteOverlay(isFavorite)
             .clipShape(RoundedRectangle(cornerRadius: PosterCardMetrics.cornerRadius))
-            .shadow(radius: 2)
+            .posterFocusRing()
+            #if !os(tvOS)
+                .shadow(radius: 2)
+            #endif
 
             Text(title)
                 .font(PosterCardMetrics.titleFont)

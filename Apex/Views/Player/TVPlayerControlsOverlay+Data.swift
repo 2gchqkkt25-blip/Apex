@@ -24,6 +24,8 @@
             isScrubbing = false
             scrubResetTask?.cancel()
             scrubResetTask = nil
+            scrubSeekTask?.cancel()
+            scrubSeekTask = nil
             episode = nil
             seasonEpisodes = []
             movie = nil
@@ -113,6 +115,8 @@
         private func finishScrub(resume: Bool) {
             scrubResetTask?.cancel()
             scrubResetTask = nil
+            scrubSeekTask?.cancel()
+            scrubSeekTask = nil
             withAnimation(.easeOut(duration: 0.15)) { isScrubbing = false }
             onPanelOpenChange(false)
             if resume, !coordinator.isPlaying { onTogglePlay() }
@@ -123,12 +127,20 @@
         /// Step the scrub target on a left/right press. The step grows with
         /// sustained input in one direction and decays after a brief pause.
         func moveScrub(_ direction: MoveCommandDirection) {
-            guard isScrubbing, clock.duration > 0 else { return }
+            guard !media.isLive else { return }
             let sign: Double
             switch direction {
             case .left: sign = -1
             case .right: sign = 1
             default: return
+            }
+            if !isScrubbing {
+                wasPlayingBeforeScrub = coordinator.isPlaying
+                scrubTarget = clock.current.isFinite ? clock.current : 0
+                scrubStepLevel = 0
+                scrubLastDirection = nil
+                onPanelOpenChange(true)
+                isScrubbing = true
             }
             if direction != scrubLastDirection { scrubStepLevel = 0 }
             scrubLastDirection = direction
@@ -136,7 +148,12 @@
             // A single tap nudges ~30s; a held d-pad ramps to ~20 min/press, so
             // even a long movie crosses in a second or two of sustained input.
             let step = 30.0 * Double(scrubStepLevel)
-            scrubTarget = min(max(scrubTarget + sign * step, 0), clock.duration)
+            // Some IPTV files never report a duration. Clamping to 0 made every
+            // swipe a no-op; only clamp once a real length is known.
+            let upper = (clock.duration.isFinite && clock.duration > 1)
+                ? clock.duration
+                : .greatestFiniteMagnitude
+            scrubTarget = min(max(scrubTarget + sign * step, 0), upper)
             onResetHideTimer()
 
             scrubResetTask?.cancel()
@@ -145,6 +162,17 @@
                 guard !Task.isCancelled else { return }
                 scrubStepLevel = 0
                 scrubLastDirection = nil
+            }
+            scrubSeekTask?.cancel()
+            scrubSeekTask = Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(180))
+                guard !Task.isCancelled else { return }
+                let target = PlaybackSeek.target(current: scrubTarget, duration: clock.duration, delta: 0)
+                coordinator.seek(to: target)
+                clock.current = target
+                try? await Task.sleep(for: .milliseconds(900))
+                guard !Task.isCancelled, isScrubbing else { return }
+                finishScrub(resume: false)
             }
         }
 

@@ -13,7 +13,7 @@
 
 import SwiftData
 import SwiftUI
-#if os(iOS)
+#if os(iOS) || os(tvOS)
     import UIKit
 #endif
 
@@ -23,6 +23,10 @@ struct EPGGuideView: View {
     let playlist: Playlist?
     let sectionToken: String
     @Bindable var epgCache: LiveTVSectionEPGCache
+    /// Bumped when fullscreen playback ends. The guide stays mounted under the
+    /// player, so without this it restores the scroll position from when the
+    /// channel was tuned instead of the current time.
+    var playbackReturnToken: Int = 0
     let onPlay: (LiveStream) -> Void
 
     @Environment(\.modelContext) private var modelContext
@@ -43,6 +47,7 @@ struct EPGGuideView: View {
         sort: ContentSortOption,
         sectionToken: String,
         epgCache: LiveTVSectionEPGCache,
+        playbackReturnToken: Int = 0,
         onPlay: @escaping (LiveStream) -> Void
     ) {
         self.scope = scope
@@ -50,6 +55,7 @@ struct EPGGuideView: View {
         self.playlist = playlist
         self.sectionToken = sectionToken
         _epgCache = Bindable(epgCache)
+        self.playbackReturnToken = playbackReturnToken
         self.onPlay = onPlay
 
         // 12h ahead balances showing upcoming programmes with smooth scrolling.
@@ -85,6 +91,7 @@ struct EPGGuideView: View {
             EPGGridScroller(
                 rows: displayRows,
                 timeline: timeline,
+                playbackReturnToken: playbackReturnToken,
                 onPlay: onPlay,
                 onNearEnd: {
                     guard visibleCount < channels.count else { return }
@@ -96,6 +103,16 @@ struct EPGGuideView: View {
                 // first frame renders with programme cells (not blank gaps).
                 // The .task below then fills any remaining gaps from the store.
                 epgCache.activate(section: sectionToken)
+
+                // First presentation only. Returning from the player does not
+                // run this — the guide stays mounted under the cover — so that
+                // path uses `playbackReturnToken` instead.
+                timeline = EPGTimeline.live(
+                    now: Date(),
+                    pointsPerMinute: EPGMetrics.current.pointsPerMinute,
+                    hoursBehind: 6,
+                    hoursAhead: 12
+                )
             }
             .task(id: sectionToken) {
                 epgCache.activate(section: sectionToken)
@@ -103,6 +120,14 @@ struct EPGGuideView: View {
             }
             .onChange(of: sectionToken) {
                 visibleCount = LiveChannelQuery.pageSize
+            }
+            .onChange(of: playbackReturnToken) {
+                timeline = EPGTimeline.live(
+                    now: Date(),
+                    pointsPerMinute: EPGMetrics.current.pointsPerMinute,
+                    hoursBehind: 6,
+                    hoursAhead: 12
+                )
             }
             .onChange(of: epgSync.refreshGeneration) {
                 pendingRefreshTask?.cancel()
@@ -279,6 +304,38 @@ final class EPGScrollSync {
     }
 #endif
 
+#if os(tvOS)
+    /// Pins `clipsToBounds` on the guide's scroll view. SwiftUI turns it off
+    /// so a focused programme can scale past the cell, and the unclipped
+    /// cells then draw across the channel column and the time ruler.
+    private struct EPGScrollClipEnforcer: UIViewRepresentable {
+        func makeUIView(context _: Context) -> UIView {
+            ProbeView()
+        }
+
+        func updateUIView(_ view: UIView, context _: Context) {
+            (view as? ProbeView)?.clipNearestScrollView()
+        }
+
+        private final class ProbeView: UIView {
+            func clipNearestScrollView() {
+                Task { @MainActor [weak self] in
+                    await Task.yield()
+                    guard let self else { return }
+                    var candidate = superview
+                    while let view = candidate {
+                        if let scrollView = view as? UIScrollView {
+                            scrollView.clipsToBounds = true
+                            return
+                        }
+                        candidate = view.superview
+                    }
+                }
+            }
+        }
+    }
+#endif
+
 // MARK: - Scroller
 
 /// Lays out the frozen panes (corner, ruler, channel column) beside the single
@@ -288,11 +345,12 @@ final class EPGScrollSync {
 private struct EPGGridScroller: View {
     let rows: [EPGChannelRow]
     let timeline: EPGTimeline
+    var playbackReturnToken: Int = 0
     let onPlay: (LiveStream) -> Void
     var onNearEnd: () -> Void = {}
 
     private let metrics = EPGMetrics.current
-    private let now = Date()
+    @State private var now = Date()
 
     @State private var sync = EPGScrollSync()
     @State private var clock = EPGGuideClock()
@@ -312,20 +370,35 @@ private struct EPGGridScroller: View {
                 EPGRulerStrip(timeline: timeline, metrics: metrics, now: now, sync: sync)
             }
             .frame(height: metrics.headerHeight)
+            #if os(tvOS)
+                .background(ThemeManager.shared.colors.background)
+            #endif
+            // Painted above the grid so a scrolling row can't cover the ruler.
+            .zIndex(1)
 
             #if !os(tvOS)
                 Divider()
             #endif
 
             // Body: frozen channel column + scrollable programme grid.
-            HStack(spacing: 0) {
-                EPGFrozenColumn(rows: rows, metrics: metrics, sync: sync)
+            // Top alignment keeps channel cells level with programme rows.
+            // The default centre alignment let the taller tvOS column hang
+            // over the ruler while the grid stayed pinned to the top.
+            HStack(alignment: .top, spacing: 0) {
+                #if !os(tvOS)
+                    // tvOS draws the channel label inside each programme row so
+                    // it scrolls vertically with that row. A second column
+                    // synced by offset drifted off the programmes.
+                    EPGFrozenColumn(rows: rows, metrics: metrics, sync: sync)
+                        .zIndex(1)
+                #endif
 
                 EPGGrid(
                     rows: rows,
                     timeline: timeline,
                     metrics: metrics,
                     now: now,
+                    playbackReturnToken: playbackReturnToken,
                     sync: sync,
                     jumpToken: jumpToken,
                     nowTarget: nowScrollTarget,
@@ -336,11 +409,22 @@ private struct EPGGridScroller: View {
                     onNearEnd: onNearEnd
                 )
             }
+            .clipped()
         }
         #if !os(tvOS)
         .background(.background)
         #endif
         .environment(\.epgGuideClock, clock)
+        .onChange(of: playbackReturnToken) {
+            reanchorToNow()
+            // Focus restoration after the player cover can scroll back to the
+            // programme that was selected. A second pass lands on the clock
+            // once that restoration has finished.
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(450))
+                reanchorToNow()
+            }
+        }
         .task {
             while !Task.isCancelled {
                 let seconds = Calendar.current.component(.second, from: Date())
@@ -365,6 +449,11 @@ private struct EPGGridScroller: View {
     /// Scroll offset that places "now" just inside the leading edge of the grid.
     private var nowScrollTarget: CGFloat {
         max(0, timeline.x(for: now) - 12)
+    }
+
+    private func reanchorToNow() {
+        now = Date()
+        jumpToken += 1
     }
 
     @ViewBuilder
@@ -436,13 +525,22 @@ private struct EPGFrozenColumn: View {
     let sync: EPGScrollSync
 
     var body: some View {
-        GeometryReader { geo in
-            Color.clear
+        #if os(tvOS)
+            // tvOS: no GeometryReader — it creates an opaque layout boundary
+            // that hides child frames from the focus engine, so vertical focus
+            // moves don't land on the correct channel cell even though the
+            // padding-based windowing renders them at the right position.
+            // The grid's own viewport-height tracking already constrains the
+            // column; we just need a fixed frame here.
+            SyncedColumnCells(rows: rows, metrics: metrics, sync: sync)
+                .frame(maxHeight: .infinity, alignment: .top)
                 .frame(width: metrics.channelColumnWidth)
-                .overlay(alignment: .top) {
-                    #if os(tvOS)
-                        SyncedColumnCells(rows: rows, metrics: metrics, scrollY: sync.verticalOffset)
-                    #else
+                .clipped()
+        #else
+            GeometryReader { geo in
+                Color.clear
+                    .frame(width: metrics.channelColumnWidth)
+                    .overlay(alignment: .top) {
                         // Window only the rows near the viewport. A `LazyVStack`
                         // shifted by `.offset` never realizes off-screen cells, and
                         // SwiftUI `Image(uiImage:)` draws blank in that layout on iOS.
@@ -452,41 +550,73 @@ private struct EPGFrozenColumn: View {
                             scrollY: sync.verticalOffset,
                             viewportHeight: geo.size.height
                         )
-                    #endif
-                }
-                .clipped()
-        }
-        .frame(width: metrics.channelColumnWidth)
-        #if !os(tvOS)
+                    }
+                    .clipped()
+            }
+            .frame(width: metrics.channelColumnWidth)
             // The channel cards on tvOS already read as a separate rail, so
             // a vertical rule would only add visual weight.
             .overlay(alignment: .trailing) { Rectangle().fill(.quaternary).frame(width: 1) }
         #endif
     }
 
-    /// tvOS: mirror the grid's vertical offset by scrolling, not transforming,
-    /// so `LazyVStack` still realizes the rows in view.
+    /// tvOS: render only the channel cells near the current scroll position
+    /// using a plain VStack with computed windowing. The previous approaches
+    /// both failed on tvOS: a second ScrollView created a competing focus
+    /// coordinate space that desynced from the grid, and GeometryReader +
+    /// .offset broke focus-engine layout reporting because the transformed
+    /// coordinates were invisible to the focus system. This version renders
+    /// a small window of cells pinned to the top with padding that matches
+    /// the grid's scroll position, keeping cells in the same focus tree
+    /// while avoiding GeometryReader entirely.
+    ///
+    /// Crucially, this view observes `EPGScrollSync` directly rather than
+    /// receiving `scrollY` as a value parameter. Passing a CGFloat snapshot
+    /// breaks @Observable tracking on tvOS — the child never re-renders when
+    /// the grid scrolls because SwiftUI only tracks property access inside
+    /// the observing view's own body. Reading `sync.verticalOffset` here
+    /// ensures every scroll update triggers a re-layout.
     private struct SyncedColumnCells: View {
         let rows: [EPGChannelRow]
         let metrics: EPGMetrics
-        let scrollY: CGFloat
+        let sync: EPGScrollSync
 
-        @State private var position = ScrollPosition()
+        private var rowStride: CGFloat {
+            metrics.rowHeight + metrics.rowSpacing
+        }
+
+        private var scrollY: CGFloat {
+            sync.verticalOffset
+        }
+
+        private var startIndex: Int {
+            guard rowStride > 0 else { return 0 }
+            // Keep two rows above the viewport so focus can move up without
+            // hitting an unrealized cell at the top edge.
+            return max(0, min(rows.count, Int(floor(max(0, scrollY) / rowStride)) - 2))
+        }
+
+        private var visibleRows: ArraySlice<EPGChannelRow> {
+            guard rowStride > 0, !rows.isEmpty else { return rows.prefix(0) }
+            let start = startIndex
+            // Render enough rows to fill a 1080p viewport plus buffer for
+            // focus movement and scroll momentum.
+            let visibleCount = 14
+            let end = min(rows.count, start + visibleCount)
+            return rows[start ..< end]
+        }
 
         var body: some View {
-            ScrollView(.vertical) {
-                LazyVStack(spacing: metrics.rowSpacing) {
-                    ForEach(rows) { row in
-                        EPGChannelCell(row: row, metrics: metrics)
-                            .id(row.id)
-                    }
+            VStack(spacing: metrics.rowSpacing) {
+                ForEach(Array(visibleRows)) { row in
+                    EPGChannelCell(row: row, metrics: metrics)
+                        .id(row.id)
+                        .frame(height: metrics.rowHeight)
                 }
             }
-            .scrollDisabled(true)
-            .scrollPosition($position)
-            .onChange(of: scrollY) { _, newY in
-                position.scrollTo(y: max(0, newY))
-            }
+            .padding(.top, CGFloat(startIndex) * rowStride - max(0, scrollY))
+            .frame(width: metrics.channelColumnWidth, alignment: .top)
+            .clipped()
         }
     }
 
@@ -546,6 +676,7 @@ private struct EPGGrid: View {
     let timeline: EPGTimeline
     let metrics: EPGMetrics
     let now: Date
+    var playbackReturnToken: Int = 0
     let sync: EPGScrollSync
     let jumpToken: Int
     let nowTarget: CGFloat
@@ -571,6 +702,8 @@ private struct EPGGrid: View {
                 timeline: timeline,
                 metrics: metrics,
                 now: now,
+                playbackReturnToken: playbackReturnToken,
+                sync: sync,
                 onPlay: onPlay,
                 onShowDetails: onShowDetails,
                 onNearEnd: onNearEnd
@@ -583,8 +716,14 @@ private struct EPGGrid: View {
                         jumpToken: jumpToken
                     )
                 }
+            #elseif os(tvOS)
+                // tvOS leaves the guide scroll view unclipped so focus can
+                // lift. Programme cells then paint over the channel column
+                // and the time ruler while the grid moves. Force clipping.
+                .background { EPGScrollClipEnforcer() }
             #endif
         }
+        .clipped()
         .background {
             GeometryReader { geo in
                 Color.clear
@@ -595,7 +734,12 @@ private struct EPGGrid: View {
         #if !os(iOS)
             .scrollPosition($position)
         #endif
-        .onScrollGeometryChange(for: CGPoint.self) { $0.contentOffset } action: { _, new in
+        .onScrollGeometryChange(for: CGPoint.self) { geo in
+            // visibleRect is the content under the viewport. contentOffset
+            // lags that on tvOS once safe-area insets are applied, which
+            // slid the frozen column off the programme rows.
+            CGPoint(x: geo.visibleRect.minX, y: geo.visibleRect.minY)
+        } action: { _, new in
             let horizontal = max(0, new.x)
             let vertical = max(0, new.y)
             if sync.horizontalOffset != horizontal {
@@ -610,13 +754,20 @@ private struct EPGGrid: View {
         #endif
         #if !os(iOS)
             .onAppear {
-                guard !didInitialScroll else { return }
+                // Always scroll to "now" on appear. The parent refreshes
+                // `timeline` in its own onAppear when returning from playback,
+                // which changes `nowTarget`; guarding with a one-shot flag
+                // would leave the grid anchored at the stale selection time
+                // after watching a long movie. SwiftUI preserves this child's
+                // @State across navigation, so resetting here is safe and
+                // keeps every platform aligned with wall-clock time.
                 didInitialScroll = true
                 position.scrollTo(x: nowTarget)
             }
             .onChange(of: jumpToken) {
+                let target = max(0, timeline.x(for: Date()) - 12)
                 withAnimation(.easeInOut(duration: 0.4)) {
-                    position.scrollTo(x: nowTarget)
+                    position.scrollTo(x: target)
                 }
             }
         #endif
@@ -630,9 +781,30 @@ private struct EPGRows: View {
     let timeline: EPGTimeline
     let metrics: EPGMetrics
     let now: Date
+    var playbackReturnToken: Int = 0
+    let sync: EPGScrollSync
     let onPlay: (EPGChannelRow, EPGProgramCell) -> Void
     let onShowDetails: (EPGChannelRow, EPGProgramCell) -> Void
     var onNearEnd: () -> Void = {}
+
+    #if os(tvOS)
+        /// Time that vertical moves should keep. A live programme anchors on
+        /// "now", so the next channel focuses what is airing there rather than
+        /// the block that happens to sit under a longer box.
+        @State private var verticalAnchor = Date()
+        @State private var focusedRowID: String?
+        @FocusState private var focusedCellID: String?
+    #endif
+
+    /// tvOS keeps the channel label inside the scrolling row. The label is
+    /// shifted back by the horizontal offset so it stays under the corner.
+    private var channelInset: CGFloat {
+        #if os(tvOS)
+            metrics.channelColumnWidth
+        #else
+            0
+        #endif
+    }
 
     private var contentHeight: CGFloat {
         guard !rows.isEmpty else { return 0 }
@@ -642,29 +814,178 @@ private struct EPGRows: View {
     var body: some View {
         LazyVStack(spacing: metrics.rowSpacing) {
             ForEach(rows) { row in
-                EPGProgramStrip(
-                    row: row,
-                    timeline: timeline,
-                    metrics: metrics,
-                    now: now,
-                    contentWidth: timeline.totalWidth,
-                    onPlay: { cell in onPlay(row, cell) },
-                    onShowDetails: { cell in onShowDetails(row, cell) }
-                )
-                .onAppear {
-                    if row.id == rows.last?.id {
-                        onNearEnd()
+                rowView(row)
+                    .onAppear {
+                        if row.id == rows.last?.id {
+                            onNearEnd()
+                        }
                     }
-                }
             }
         }
-        .frame(width: timeline.totalWidth, alignment: .topLeading)
+        .frame(width: timeline.totalWidth + channelInset, alignment: .topLeading)
+        #if os(tvOS)
+            .onChange(of: playbackReturnToken) {
+                focusCurrentProgramme()
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(450))
+                    focusCurrentProgramme()
+                }
+            }
+            .onChange(of: focusedCellID) { _, id in
+                guard let id, let match = locatedCell(id) else { return }
+                if focusedRowID != match.row.id {
+                    let enteredFromAnotherRow = focusedRowID != nil
+                    focusedRowID = match.row.id
+                    if enteredFromAnotherRow,
+                       let desired = match.row.cells.first(where: { $0.start <= verticalAnchor && verticalAnchor < $0.end }),
+                       desired.id != id
+                    {
+                        focusedCellID = desired.id
+                        return
+                    }
+                }
+                let current = Date()
+                verticalAnchor = match.cell.isLive(at: current) ? current : match.cell.start
+            }
+        #endif
         .overlay(alignment: .topLeading) {
             TimelineView(.everyMinute) { context in
                 EPGNowIndicator(height: contentHeight)
-                    .offset(x: timeline.x(for: context.date) - 4.5)
+                    .offset(x: channelInset + timeline.x(for: context.date) - 4.5)
                     .allowsHitTesting(false)
             }
+        }
+    }
+
+    #if os(tvOS)
+        /// Move focus onto whatever is airing on the focused channel at the
+        /// current time, so leaving the player does not restore the programme
+        /// that was highlighted when playback started.
+        private func focusCurrentProgramme() {
+            let current = Date()
+            verticalAnchor = current
+            guard let rowID = focusedRowID,
+                  let row = rows.first(where: { $0.id == rowID }),
+                  let live = row.cells.first(where: { $0.isLive(at: current) })
+            else { return }
+            focusedCellID = live.id
+        }
+    #endif
+
+    @ViewBuilder
+    private func rowView(_ row: EPGChannelRow) -> some View {
+        #if os(tvOS)
+            let target = row.cells.first { $0.start <= verticalAnchor && verticalAnchor < $0.end }?.id
+            EPGProgramStrip(
+                row: row,
+                timeline: timeline,
+                metrics: metrics,
+                now: now,
+                contentWidth: timeline.totalWidth,
+                scrollSync: sync,
+                verticalAnchor: verticalAnchor,
+                focusedCellID: $focusedCellID,
+                onPlay: { cell in onPlay(row, cell) },
+                onShowDetails: { cell in onShowDetails(row, cell) }
+            )
+            .focusSection()
+            .modifier(EPGDefaultFocus(focused: $focusedCellID, cellID: target))
+            .padding(.leading, metrics.channelColumnWidth)
+            .overlay(alignment: .topLeading) {
+                EPGStickyChannel(row: row, metrics: metrics, sync: sync)
+            }
+        #else
+            EPGProgramStrip(
+                row: row,
+                timeline: timeline,
+                metrics: metrics,
+                now: now,
+                contentWidth: timeline.totalWidth,
+                scrollSync: sync,
+                onPlay: { cell in onPlay(row, cell) },
+                onShowDetails: { cell in onShowDetails(row, cell) }
+            )
+        #endif
+    }
+
+    #if os(tvOS)
+        private func locatedCell(_ id: String) -> (row: EPGChannelRow, cell: EPGProgramCell)? {
+            for row in rows {
+                if let cell = row.cells.first(where: { $0.id == id }) {
+                    return (row, cell)
+                }
+            }
+            return nil
+        }
+    #endif
+}
+
+#if os(tvOS)
+    /// Applies `defaultFocus` only when this row has a programme at the anchor
+    /// time. Entering the row then lands on that programme.
+    private struct EPGDefaultFocus: ViewModifier {
+        var focused: FocusState<String?>.Binding
+        var cellID: String?
+
+        func body(content: Content) -> some View {
+            if let cellID {
+                content.defaultFocus(focused, cellID)
+            } else {
+                content
+            }
+        }
+    }
+
+    /// Channel label that lives on the programme row, so vertical scrolling
+    /// cannot separate it from that row. Horizontal scrolling moves the row;
+    /// this view shifts back by the same amount and covers the programmes
+    /// passing underneath it.
+    private struct EPGStickyChannel: View {
+        let row: EPGChannelRow
+        let metrics: EPGMetrics
+        let sync: EPGScrollSync
+
+        var body: some View {
+            EPGChannelCell(row: row, metrics: metrics)
+                .frame(width: metrics.channelColumnWidth, height: metrics.rowHeight)
+                .background {
+                    ThemeManager.shared.colors.background
+                        .frame(height: metrics.rowHeight + metrics.rowSpacing)
+                }
+                .offset(x: sync.horizontalOffset)
+                .zIndex(1)
+        }
+    }
+#endif
+
+/// Focus target with no system highlight. The programme block draws the
+/// selection; the default tvOS button style was adding a second white box.
+private struct EPGClearFocusButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .focusEffectDisabled()
+    }
+}
+
+/// Lays programme blocks out at their timeline position so the focus frame
+/// matches the pixels on screen. `.offset` does not do that on tvOS.
+private struct EPGProgramTimelineLayout: Layout {
+    var origins: [CGFloat]
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews _: Subviews, cache _: inout ()) -> CGSize {
+        CGSize(width: proposal.width ?? 0, height: proposal.height ?? 0)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal _: ProposedViewSize, subviews: Subviews, cache _: inout ()) {
+        for index in subviews.indices {
+            let subview = subviews[index]
+            let size = subview.sizeThatFits(.unspecified)
+            let origin = index < origins.count ? origins[index] : 0
+            subview.place(
+                at: CGPoint(x: bounds.minX + origin, y: bounds.minY),
+                anchor: .topLeading,
+                proposal: ProposedViewSize(width: size.width, height: bounds.height)
+            )
         }
     }
 }
@@ -683,23 +1004,93 @@ private struct EPGProgramStrip: View {
     /// whole horizontal extent up front — the scroll region and the "now" line
     /// stay correct even before trailing (off-screen) blocks are realized.
     let contentWidth: CGFloat
+    var scrollSync: EPGScrollSync? = nil
+    #if os(tvOS)
+        /// Time vertical focus should stay aligned with. The focusable slice of
+        /// each programme sits on this instant, so a long box cannot pull the
+        /// selection onto a later show.
+        var verticalAnchor: Date
+        var focusedCellID: FocusState<String?>.Binding
+    #endif
     let onPlay: (EPGProgramCell) -> Void
     let onShowDetails: (EPGProgramCell) -> Void
 
     var body: some View {
-        // Place every block from its timestamp instead of accumulating the
-        // measured widths of all preceding blocks. tvOS can temporarily report
-        // estimated LazyHStack widths while focus realizes off-screen buttons;
-        // that shifted entire rows away from the ruler, so the live overlay
-        // appeared on a block that did not intersect the red Now line.
-        ZStack(alignment: .topLeading) {
+        // Place every block from its timestamp. `.offset` only moves the
+        // drawing; tvOS focus still sees every button stacked at x = 0 and
+        // scrolls the guide to that point, so the grid jumps away from the
+        // cell on screen. A layout puts the focus frame on the drawn cell.
+        EPGProgramTimelineLayout(origins: layoutOrigins) {
             programmeCells
         }
-        .frame(width: contentWidth, height: metrics.rowHeight, alignment: .leading)
+        .frame(width: contentWidth, height: metrics.rowHeight, alignment: .topLeading)
     }
+
+    private var layoutOrigins: [CGFloat] {
+        #if os(tvOS)
+            row.cells.map { timeline.x(for: $0.start) }
+                + row.cells.map { timeline.x(for: focusSlice(for: $0).start) }
+        #else
+            row.cells.map { timeline.x(for: $0.start) }
+        #endif
+    }
+
+    #if os(tvOS)
+        /// A short focus target on `verticalAnchor`, clamped inside the programme.
+        /// The drawn block stays full length; only this slice is focusable, so
+        /// moving down stays on the same time.
+        private func focusSlice(for cell: EPGProgramCell) -> (start: Date, end: Date) {
+            let latestStart = cell.end.addingTimeInterval(-60)
+            let start = min(max(verticalAnchor, cell.start), max(cell.start, latestStart))
+            let end = min(cell.end, start.addingTimeInterval(30 * 60))
+            if end > start {
+                return (start, end)
+            }
+            return (cell.start, cell.end)
+        }
+    #endif
 
     @ViewBuilder
     private var programmeCells: some View {
+        #if os(tvOS)
+            ForEach(row.cells) { cell in
+                EPGProgramBlockView(
+                    cell: cell,
+                    metrics: metrics,
+                    now: now,
+                    isFocused: focusedCellID.wrappedValue == cell.id,
+                    scrollSync: scrollSync,
+                    timelineOrigin: timeline.x(for: cell.start)
+                )
+                .allowsHitTesting(false)
+                .scaleEffect(focusedCellID.wrappedValue == cell.id ? 1.04 : 1)
+                .animation(.easeOut(duration: 0.18), value: focusedCellID.wrappedValue == cell.id)
+            }
+            ForEach(row.cells) { cell in
+                let slice = focusSlice(for: cell)
+                let sliceWidth = timeline.width(from: slice.start, to: slice.end)
+                Button {
+                    onPlay(cell)
+                } label: {
+                    Color.clear
+                        .frame(width: sliceWidth, height: metrics.rowHeight)
+                }
+                .buttonStyle(EPGClearFocusButtonStyle())
+                .focusEffectDisabled()
+                .frame(width: sliceWidth, height: metrics.rowHeight)
+                .focused(focusedCellID, equals: cell.id)
+                .onLongPressGesture(minimumDuration: 0.4) {
+                    if !cell.isGap { onShowDetails(cell) }
+                }
+                .accessibilityLabel(Text(cell.isGap ? row.name : cell.title))
+            }
+        #else
+            programmeButtons
+        #endif
+    }
+
+    @ViewBuilder
+    private var programmeButtons: some View {
         ForEach(row.cells) { cell in
             if cell.isGap {
                 // Gap slots stay playable so a channel without guide data can
@@ -709,8 +1100,14 @@ private struct EPGProgramStrip: View {
                 } label: {
                     Color.clear.frame(width: cell.width, height: metrics.rowHeight)
                 }
-                .buttonStyle(EPGBlockButtonStyle(cell: cell, metrics: metrics, now: now))
-                .offset(x: timeline.x(for: cell.start))
+                .buttonStyle(EPGBlockButtonStyle(
+                    cell: cell,
+                    metrics: metrics,
+                    now: now,
+                    scrollSync: scrollSync,
+                    timelineOrigin: timeline.x(for: cell.start)
+                ))
+                .frame(width: cell.width, height: metrics.rowHeight, alignment: .leading)
                 .accessibilityLabel(Text(row.name))
                 .accessibilityHint(Text("No programme information"))
             } else {
@@ -719,8 +1116,14 @@ private struct EPGProgramStrip: View {
                 } label: {
                     Color.clear.frame(width: cell.width, height: metrics.rowHeight)
                 }
-                .buttonStyle(EPGBlockButtonStyle(cell: cell, metrics: metrics, now: now))
-                .offset(x: timeline.x(for: cell.start))
+                .buttonStyle(EPGBlockButtonStyle(
+                    cell: cell,
+                    metrics: metrics,
+                    now: now,
+                    scrollSync: scrollSync,
+                    timelineOrigin: timeline.x(for: cell.start)
+                ))
+                .frame(width: cell.width, height: metrics.rowHeight, alignment: .leading)
                 #if os(tvOS)
                     .onLongPressGesture(minimumDuration: 0.4) {
                         onShowDetails(cell)

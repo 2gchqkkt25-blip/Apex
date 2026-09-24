@@ -265,8 +265,15 @@ struct PlayerEPGGuidePanel: View {
             .focusSection()
         #endif
         .onAppear {
-            guard !didScrollToNow else { return }
+            // Always re-anchor to "now" when the guide overlay appears.
+            // The player can run for hours; guarding with a one-shot flag
+            // would leave the timeline pinned at the original open time
+            // instead of wall-clock time after returning from playback or
+            // reopening the overlay. The 60-second timer keeps `now` fresh
+            // while visible, but only this handler resets the scroll target
+            // on each appearance across all platforms.
             didScrollToNow = true
+            now = Date()
             scrollPosition.scrollTo(x: nowScrollTarget)
             #if os(tvOS)
                 moveFocusIntoProgrammeGrid()

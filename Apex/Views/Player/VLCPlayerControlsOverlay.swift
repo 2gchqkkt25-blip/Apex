@@ -31,6 +31,7 @@ struct VLCPlayerControlsOverlay: View {
     var onPanelOpenChange: ((Bool) -> Void)?
 
     @Environment(\.modelContext) private var modelContext
+    @Environment(ExternalSubtitleSession.self) private var externalSubtitles: ExternalSubtitleSession?
     /// Mirrors the backing model's favorite flag; refreshed when the media
     /// changes and updated locally on toggle so the heart re-renders.
     @State private var isFavorite = false
@@ -243,12 +244,11 @@ struct VLCPlayerControlsOverlay: View {
 
     private var secondaryControls: some View {
         let hasAudio = coordinator.audioTracks.count > 1
-        let hasText = !coordinator.textTracks.isEmpty
         let hasRate = !media.isLive
 
         return HStack(spacing: 4) {
             if media.isLive { guideButton }
-            if hasText { subtitleMenu }
+            subtitleMenu
             if hasAudio { audioTrackMenu }
             if hasRate { playbackRateMenu }
             favoriteButton
@@ -298,25 +298,46 @@ struct VLCPlayerControlsOverlay: View {
     private var subtitleMenu: some View {
         let tracks = coordinator.textTracks
         let hasSelection = tracks.contains(where: \.isSelectedExclusively)
-        Menu {
-            Button {
-                coordinator.selectTextTrack(nil)
-                onResetHideTimer()
-            } label: {
-                checkmarkLabel("Off", checked: !hasSelection)
-            }
-            ForEach(Array(tracks.enumerated()), id: \.offset) { _, track in
-                Button {
-                    coordinator.selectTextTrack(track)
-                    onResetHideTimer()
-                } label: {
-                    checkmarkLabel(track.trackName, checked: track.isSelectedExclusively)
+        let downloadedTitle = tracks.isEmpty ? externalSubtitles?.title : nil
+        if tracks.isEmpty, downloadedTitle == nil {
+            EmptyView()
+        } else {
+            Menu {
+                PlayerMenuHold { onPanelOpenChange?($0) }
+                if tracks.isEmpty, let downloadedTitle, let externalSubtitles {
+                    Button {
+                        externalSubtitles.isEnabled = false
+                        onResetHideTimer()
+                    } label: {
+                        checkmarkLabel("Off", checked: !externalSubtitles.isEnabled)
+                    }
+                    Button {
+                        externalSubtitles.isEnabled = true
+                        onResetHideTimer()
+                    } label: {
+                        checkmarkLabel(downloadedTitle, checked: externalSubtitles.isEnabled)
+                    }
+                } else {
+                    Button {
+                        coordinator.selectTextTrack(nil)
+                        onResetHideTimer()
+                    } label: {
+                        checkmarkLabel("Off", checked: !hasSelection)
+                    }
+                    ForEach(Array(tracks.enumerated()), id: \.offset) { _, track in
+                        Button {
+                            coordinator.selectTextTrack(track)
+                            onResetHideTimer()
+                        } label: {
+                            checkmarkLabel(track.trackName, checked: track.isSelectedExclusively)
+                        }
+                    }
                 }
+            } label: {
+                pillGlyph("captions.bubble.fill", dimmed: !hasSelection && externalSubtitles?.isEnabled != true)
             }
-        } label: {
-            pillGlyph("captions.bubble.fill", dimmed: !hasSelection)
+            .menuIndicator(.hidden)
         }
-        .menuIndicator(.hidden)
     }
 
     @ViewBuilder

@@ -566,13 +566,20 @@ extension CloudSyncEngine {
         }
     }
 
-    func applyContentToCloud(_ value: ContentStateValues?, id: String, kind: SyncedContentKind?, mirror: UserContentState?) {
+    @discardableResult
+    func applyContentToCloud(_ value: ContentStateValues?, id: String, kind: SyncedContentKind?, mirror: UserContentState?) -> Bool {
         guard let value, !value.isEmpty else {
-            if let mirror { cloudContext.delete(mirror) }
-            return
+            if let mirror {
+                cloudContext.delete(mirror)
+                return true
+            }
+            return false
         }
         let kind = kind ?? mirror?.kind ?? .movie
         if let mirror {
+            if Self.values(from: mirror) == value, mirror.kind == kind, mirror.profileID == activeProfileID {
+                return false
+            }
             mirror.profileID = activeProfileID // heals a legacy nil record on first touch
             mirror.kindRaw = kind.rawValue
             mirror.watchProgress = value.watchProgress
@@ -584,6 +591,7 @@ extension CloudSyncEngine {
             mirror.isHidden = value.isHidden
             mirror.recommendationVoteRaw = value.recommendationVoteRaw
             mirror.updatedAt = Date()
+            return true
         } else {
             cloudContext.insert(UserContentState(
                 contentId: id,
@@ -598,6 +606,7 @@ extension CloudSyncEngine {
                 isHidden: value.isHidden,
                 recommendationVoteRaw: value.recommendationVoteRaw
             ))
+            return true
         }
     }
 

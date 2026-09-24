@@ -43,6 +43,7 @@ struct SeriesCardView: View {
             .posterRatingOverlay(PosterRatingDisplay.forSeries(series))
             .posterFavoriteOverlay(series.isFavorite)
             .clipShape(RoundedRectangle(cornerRadius: PosterCardMetrics.cornerRadius))
+            .posterFocusRing()
             // A shadow applied after clipShape forces an offscreen render pass per
             // card every frame. On tvOS the focus style already supplies depth and
             // a 2pt shadow is invisible on the 10-foot UI, so we skip it there.

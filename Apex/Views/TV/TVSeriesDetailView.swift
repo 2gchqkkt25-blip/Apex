@@ -118,6 +118,7 @@
                     group.cancelAll()
                 }
                 guard playingMedia == nil else { return }
+                await SeriesEpisodeCatalog.mergeGuideEpisodes(into: series, context: modelContext)
                 // Ratings are best-effort; run inline but don't let them block
                 // the rest of the setup if they hang.
                 await enrichSeriesRatingsIfNeeded(series, context: modelContext)
@@ -146,6 +147,7 @@
                     try? await Task.sleep(for: .seconds(5))
                 }
                 if series.tmdbEnrichedAt != nil {
+                    await SeriesEpisodeCatalog.mergeGuideEpisodes(into: series, context: modelContext)
                     await enrichSeriesRatingsIfNeeded(series, context: modelContext)
                     if !series.isMediaServerCatalogItem {
                         resolveSimilar()

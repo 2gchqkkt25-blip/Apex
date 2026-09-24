@@ -410,8 +410,8 @@ struct OpenSubtitlesSettingsView: View {
         testResult = nil
         Task {
             do {
-                let url = try await WyzieSubsClient.shared.fetchBestSubtitle(imdbId: "tt0111161")
-                try? FileManager.default.removeItem(at: url)
+                let file = try await WyzieSubsClient.shared.fetchBestSubtitle(imdbId: "tt0111161")
+                try? FileManager.default.removeItem(at: file.url)
                 await MainActor.run {
                     testResult = "✓ Connected"
                     isTesting = false

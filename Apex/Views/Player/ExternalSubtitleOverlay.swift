@@ -10,6 +10,25 @@
 import OSLog
 import SwiftUI
 
+/// Downloaded subtitle currently available to the player. The captions button
+/// reads this so a Wyzie file shows up even when the video itself has no track.
+@MainActor
+@Observable
+final class ExternalSubtitleSession {
+    var title: String?
+    var isEnabled = true
+
+    func present(title: String) {
+        self.title = title
+        isEnabled = true
+    }
+
+    func clear() {
+        title = nil
+        isEnabled = true
+    }
+}
+
 /// Parses and renders an SRT subtitle file, displaying cues based on playback time.
 struct ExternalSubtitleOverlay: View {
     let subtitleURL: URL

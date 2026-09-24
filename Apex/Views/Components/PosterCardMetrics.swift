@@ -58,9 +58,35 @@ extension View {
     @ViewBuilder
     func posterCardButtonStyle() -> some View {
         #if os(tvOS)
-            buttonStyle(TVCardButtonStyle(focusScale: 1.08))
+            buttonStyle(TVCardButtonStyle(focusScale: 1.14))
         #else
             buttonStyle(.plain)
         #endif
     }
+
+    /// White ring around the poster that currently has focus. The scale lift
+    /// alone is easy to miss while moving through a rail of similar artwork.
+    @ViewBuilder
+    func posterFocusRing() -> some View {
+        #if os(tvOS)
+            modifier(PosterFocusRing())
+        #else
+            self
+        #endif
+    }
 }
+
+#if os(tvOS)
+    private struct PosterFocusRing: ViewModifier {
+        @Environment(\.isFocused) private var isFocused
+
+        func body(content: Content) -> some View {
+            content
+                .overlay {
+                    RoundedRectangle(cornerRadius: PosterCardMetrics.cornerRadius, style: .continuous)
+                        .strokeBorder(.white, lineWidth: isFocused ? 6 : 0)
+                }
+                .animation(.easeOut(duration: 0.18), value: isFocused)
+        }
+    }
+#endif

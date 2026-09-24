@@ -431,7 +431,7 @@ struct AVPlayerEngineView: View {
         guard coordinator.isPlaying, !isPanelOpen else { return }
         hideTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: UInt64(autoHideInterval * 1_000_000_000))
-            guard !Task.isCancelled, coordinator.isPlaying else { return }
+            guard !Task.isCancelled, coordinator.isPlaying, !isPanelOpen else { return }
             withAnimation(.easeInOut(duration: 0.2)) { isControlsVisible = false }
         }
     }

@@ -499,6 +499,14 @@ final class VLCPlayerCoordinator: NSObject, ObservableObject {
         didReportPlaybackEnd = false
         lastTextTrackCount = 0
         lastAudioTrackCount = 0
+        // Re-assert the delegate on every reload. VLCKit can silently drop
+        // the delegate reference when media is replaced on an already-playing
+        // player, which means the `.playing` state callback never fires and
+        // `hasStartedPlayback` stays false — the mini preview spins forever
+        // even though frames are rendering. Setting it here is idempotent
+        // (configureLivePreview already set it on first load) and guarantees
+        // the state machine runs on channel switch.
+        mediaPlayer.delegate = self
         startStartupWatchdog()
 
         guard let vlcMedia = VLCMedia(url: media.url) else {
@@ -670,6 +678,15 @@ extension VLCPlayerCoordinator: VLCMediaPlayerDelegate {
     func mediaPlayerTimeChanged(_: Notification) {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
+            // Time progress is definitive proof that frames are rendering,
+            // even when the state delegate misses the .playing transition
+            // during rapid live-preview reloads. Setting hasStartedPlayback
+            // here guarantees the mini-preview spinner dismisses once VLC
+            // starts producing output, regardless of callback ordering.
+            if !hasStartedPlayback {
+                hasStartedPlayback = true
+                cancelStartupWatchdog()
+            }
             seekToResumeIfNeeded()
             let seconds = (mediaPlayer.time.value?.doubleValue ?? 0) / 1000
             guard isResumeSettled(currentSeconds: seconds) else { return }

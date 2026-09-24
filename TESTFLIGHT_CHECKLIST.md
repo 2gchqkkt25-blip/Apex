@@ -1,22 +1,34 @@
-# TestFlight Checklist — Build 59
+# TestFlight Checklist — Build 61
 
 ## What to Test (paste in App Store Connect → TestFlight → What to Test)
 
 ```
-Build 59 (1.2.0)
+Build 61 (1.2.0)
 
 Apex is an IPTV player—users add their own Xtream or M3U playlist. No content is bundled.
 
-Please focus on Apple TV behavior after playlist refresh and TV Guide alignment.
-
-1. On Apple TV, refresh a playlist and wait for the TV Guide step to finish. After the refresh closes, navigation and focus should work immediately without force-quitting Apex.
-2. Open the Guide and confirm the coloured current-programme overlay intersects the red Now line and matches the programme shown as on now. Please check HBO East HD and channels with short or back-to-back programmes.
-3. Scroll the Guide vertically and horizontally, including channels with no programme data. Rows should remain aligned with the time ruler and the Guide should not jump.
-4. Repeat the Guide checks on iPhone/iPad and Mac. Overlay alignment and smooth scrolling should match Apple TV.
-5. Force-close and reopen Apex. Previously loaded Guide data should remain available.
+1. On Apple TV, play a movie or episode, bring up the controls, and swipe the clickpad left and right. The picture and the progress bar should both jump.
+2. Open Subtitles and move through the list. The menu should stay open until you pick a track or dismiss it.
+3. Play a title whose file has no built-in captions (Wyzie on in Settings). After a few seconds the captions button should appear with Off and a language. Titles that already have tracks should still list those tracks.
+4. Watch a long programme, then exit to the TV Guide. The guide should open at the current time, not the time you pressed play.
+5. On Apple TV, scroll the Guide. Programme titles should stay readable, and the selected poster on Movies and Series should be obvious.
 
 Contact: support@streaminfinitytv.com
 ```
+
+## Build 61 Focused Checklist
+
+- [ ] Apple TV clickpad swipe rewinds and fast-forwards while the controls are up
+- [ ] Subtitle menu stays open long enough to read the list
+- [ ] Wyzie download shows a captions button when the file has no embedded track
+- [ ] Embedded subtitle tracks still appear in the menu when the file has them
+- [ ] Leaving playback returns the TV Guide to the current time
+- [ ] Guide titles stay readable and Apple TV poster focus is easy to see
+- [ ] Settings → iCloud Sync does not sit on “CKErrorDomain error 2” after a normal launch
+
+**Release metadata:** Apex app and Top Shelf extension are both Build **61** (version 1.2.0).
+
+---
 
 ## Build 59 Focused Checklist
 

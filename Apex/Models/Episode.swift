@@ -78,6 +78,13 @@ extension Episode {
         }
     }
 
+    /// Provider episodes can be played. Rows added from TMDB for episodes the
+    /// service has not released a stream for use an id prefix and stay visible
+    /// in the season list without a play action.
+    var isProviderEpisode: Bool {
+        !episodeId.hasPrefix("tmdb-")
+    }
+
     /// Whether any episode in the same series is ordered before this one
     /// (earlier season, or same season and earlier episode number).
     var hasEarlierEpisodes: Bool {

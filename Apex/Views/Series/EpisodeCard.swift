@@ -17,7 +17,7 @@ struct EpisodeCard: View {
     #endif
 
     var body: some View {
-        Button(action: onPlay) {
+        Button(action: { if episode.isProviderEpisode { onPlay() } }) {
             HStack(alignment: .top, spacing: 14) {
                 thumbnail
 
@@ -53,7 +53,9 @@ struct EpisodeCard: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .disabled(!episode.isProviderEpisode)
         .contextMenu {
+            if episode.isProviderEpisode {
             if let playFromStart = onPlayFromBeginning, episode.watchProgress > 1 {
                 Button {
                     playFromStart()
@@ -91,6 +93,7 @@ struct EpisodeCard: View {
                     }
                 }
             #endif
+            }
         }
     }
 
@@ -105,9 +108,11 @@ struct EpisodeCard: View {
                 default:
                     Rectangle().fill(.fill.quaternary)
                         .overlay {
-                            Text("E\(episode.episodeNum)")
-                                .font(.headline)
+                            Text(placeholderTitle)
+                                .font(.caption.weight(.semibold))
+                                .multilineTextAlignment(.center)
                                 .foregroundStyle(.secondary)
+                                .padding(6)
                         }
                 }
             }
@@ -128,12 +133,14 @@ struct EpisodeCard: View {
                 }
             #endif
 
-            Image(systemName: "play.circle.fill")
-                .font(.title2)
-                .foregroundStyle(.white)
-                .shadow(radius: 4)
-                .opacity(0.9)
-                .frame(width: 142, height: 80)
+            if episode.isProviderEpisode {
+                Image(systemName: "play.circle.fill")
+                    .font(.title2)
+                    .foregroundStyle(.white)
+                    .shadow(radius: 4)
+                    .opacity(0.9)
+                    .frame(width: 142, height: 80)
+            }
         }
         .frame(width: 142, height: 80)
     }
@@ -166,13 +173,32 @@ struct EpisodeCard: View {
         }
     #endif
 
+    private var placeholderTitle: String {
+        if !episode.title.isEmpty { return episode.title }
+        if let name = episode.series?.name, !name.isEmpty { return name }
+        return "E\(episode.episodeNum)"
+    }
+
     /// Air date and runtime joined on a single caption line, omitting whichever is missing.
     private var metaLine: String? {
-        let parts = [
+        var parts = [
             DetailFormat.date(from: episode.airDate),
             DetailFormat.minutes(episode.durationSecs)
         ].compactMap(\.self)
+        if !episode.isProviderEpisode {
+            parts.insert(availabilityLabel, at: 0)
+        }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    private var availabilityLabel: String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        guard let raw = episode.airDate, let parsed = formatter.date(from: raw) else {
+            return "Not available"
+        }
+        return parsed > Date() ? "Upcoming" : "Not available"
     }
 
     private var resumeFraction: Double? {

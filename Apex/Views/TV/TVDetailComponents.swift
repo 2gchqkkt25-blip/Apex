@@ -374,9 +374,11 @@
                     default:
                         Rectangle().fill(Color.white.opacity(0.08))
                             .overlay {
-                                Image(systemName: "play.tv")
-                                    .font(.system(size: 44))
-                                    .foregroundStyle(.white.opacity(0.5))
+                                Text(episode.title.isEmpty ? "E\(episode.episodeNum)" : episode.title)
+                                    .font(.system(size: 24, weight: .semibold))
+                                    .multilineTextAlignment(.center)
+                                    .foregroundStyle(.white.opacity(0.7))
+                                    .padding(16)
                             }
                     }
                 }
@@ -506,6 +508,7 @@
                 .posterRatingOverlay(rating)
                 .posterFavoriteOverlay(isFavorite)
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .posterFocusRing()
 
                 Text(title)
                     .font(.system(size: 24, weight: .medium))

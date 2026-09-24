@@ -60,7 +60,7 @@ final class WyzieSubsClient {
     /// Searches for subtitles and returns the best match's download URL.
     /// Wyzie returns direct download links in the search response — no separate
     /// download endpoint needed.
-    func fetchBestSubtitle(imdbId: String, season: Int? = nil, episode: Int? = nil) async throws -> URL {
+    func fetchBestSubtitle(imdbId: String, season: Int? = nil, episode: Int? = nil) async throws -> WyzieSubtitleFile {
         guard let apiKey, !apiKey.isEmpty else { throw WyzieSubsError.notConfigured }
 
         var components = URLComponents(url: baseURL.appendingPathComponent("search"), resolvingAgainstBaseURL: false)!
@@ -87,23 +87,32 @@ final class WyzieSubsClient {
         }
 
         let results = try JSONDecoder().decode([WyzieSubtitleResult].self, from: data)
-        guard let best = results.first, let downloadLink = best.url, let downloadURL = URL(string: downloadLink) else {
-            throw WyzieSubsError.noSubtitlesFound
-        }
+        guard !results.isEmpty else { throw WyzieSubsError.noSubtitlesFound }
 
-        // Download the subtitle file to a temp location
+        // The first hit is often a ZIP. Keep going until one file is a real SRT.
+        var lastError: Error = WyzieSubsError.noSubtitlesFound
+        for result in results {
+            guard let downloadLink = result.url, let downloadURL = URL(string: downloadLink) else { continue }
+            do {
+                let file = try await downloadSRT(from: downloadURL, language: result.lang)
+                return file
+            } catch {
+                lastError = error
+            }
+        }
+        throw lastError
+    }
+
+    private func downloadSRT(from downloadURL: URL, language: String?) async throws -> WyzieSubtitleFile {
         let (fileData, _) = try await session.data(from: downloadURL)
 
-        // Detect if the response is a ZIP archive (some sources wrap SRT in ZIP).
-        // ZIP files start with "PK\x03\x04".
+        // ZIP files start with "PK\x03\x04". Those are skipped so a later result can win.
         let isZip = fileData.count > 4 && fileData.prefix(4) == Data([0x50, 0x4B, 0x03, 0x04])
         if isZip {
-            Logger.player.warning("[Subtitles] Wyzie returned a ZIP file — skipping (unsupported)")
+            Logger.player.warning("[Subtitles] Wyzie returned a ZIP file — trying the next result")
             throw WyzieSubsError.downloadFailed
         }
 
-        // Try to decode as text to verify it's a valid subtitle file.
-        // Many subtitle files use Latin-1 or Windows-1252 instead of UTF-8.
         let textContent: String?
         if let utf8 = String(data: fileData, encoding: .utf8) {
             textContent = utf8
@@ -118,14 +127,43 @@ final class WyzieSubsClient {
             throw WyzieSubsError.downloadFailed
         }
 
-        // Write as UTF-8 so the SRT parser can read it reliably
         let tempURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString + ".srt")
         try content.write(to: tempURL, atomically: true, encoding: .utf8)
 
         Logger.player.info("[Subtitles] Wyzie downloaded subtitle to \(tempURL.lastPathComponent) (\(content.count) chars)")
-        return tempURL
+        return WyzieSubtitleFile(url: tempURL, label: Self.languageLabel(language))
     }
+
+    private static func languageLabel(_ code: String?) -> String {
+        switch String(code?.lowercased().prefix(2) ?? "") {
+        case "en": return "English"
+        case "es": return "Spanish"
+        case "fr": return "French"
+        case "de": return "German"
+        case "pt": return "Portuguese"
+        case "it": return "Italian"
+        case "nl": return "Dutch"
+        case "pl": return "Polish"
+        case "sv": return "Swedish"
+        case "no", "nb": return "Norwegian"
+        case "da": return "Danish"
+        case "fi": return "Finnish"
+        case "ar": return "Arabic"
+        case "hi": return "Hindi"
+        case "ja": return "Japanese"
+        case "ko": return "Korean"
+        case "zh": return "Chinese"
+        default:
+            if let code, !code.isEmpty { return code.uppercased() }
+            return "Subtitles"
+        }
+    }
+}
+
+struct WyzieSubtitleFile {
+    let url: URL
+    let label: String
 }
 
 // MARK: - Response Models

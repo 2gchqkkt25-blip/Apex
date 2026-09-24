@@ -8,6 +8,7 @@
 //
 
 @testable import Apex
+import CloudKit
 import Foundation
 import SwiftData
 import Testing
@@ -828,5 +829,26 @@ struct CloudSyncInitialGateTests {
             cloudKitEnabled: false
         )
         #expect(coordinator.status.hasCompletedInitialSync)
+    }
+}
+
+struct CloudKitFailureMessageTests {
+    @Test func `partial failure surfaces the rejected record instead of error 2`() {
+        let inner = CKError(.serverRejectedRequest)
+        let outer = CKError(.partialFailure, userInfo: [
+            CKPartialErrorsByItemIDKey: ["CD_UserContentState": inner]
+        ])
+        let message = CloudKitFailureMessage.userFacing(outer)
+        #expect(message?.contains("Production") == true)
+        #expect(message?.contains("error 2") != true)
+    }
+
+    @Test func `retryable partial failure is not shown in settings`() {
+        let inner = CKError(.networkUnavailable)
+        let outer = CKError(.partialFailure, userInfo: [
+            CKPartialErrorsByItemIDKey: ["row": inner]
+        ])
+        #expect(CloudKitFailureMessage.userFacing(outer) == nil)
+        #expect(CloudKitFailureMessage.userFacing(CKError(.partialFailure)) == nil)
     }
 }

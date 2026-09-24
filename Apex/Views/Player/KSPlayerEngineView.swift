@@ -638,7 +638,7 @@ struct KSPlayerEngineView: View {
         hideTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: UInt64(autoHideInterval * 1_000_000_000))
             #if os(tvOS)
-                guard !Task.isCancelled, engine.isPlaying else { return }
+                guard !Task.isCancelled, engine.isPlaying, !isPanelOpen else { return }
             #else
                 guard !Task.isCancelled, isPlaying else { return }
             #endif

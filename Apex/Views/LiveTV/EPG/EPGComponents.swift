@@ -197,8 +197,10 @@ struct EPGChannelCell: View {
             logo
             Text(row.name)
                 .font(nameFont)
-                .lineLimit(2)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .lineLimit(3)
+                .minimumScaleFactor(0.6)
+                .multilineTextAlignment(.leading)
+                .frame(width: nameWidth, height: metrics.rowHeight - 16, alignment: .leading)
         }
         .padding(.horizontal, 12)
         #if os(tvOS)
@@ -207,6 +209,7 @@ struct EPGChannelCell: View {
                 .white.opacity(0.06),
                 in: RoundedRectangle(cornerRadius: 14, style: .continuous)
             )
+            .clipped()
         #else
             .frame(width: metrics.channelColumnWidth, height: metrics.rowHeight, alignment: .leading)
                 .background(.background)
@@ -214,6 +217,11 @@ struct EPGChannelCell: View {
                     Rectangle().fill(.quaternary).frame(width: 1)
                 }
         #endif
+    }
+
+    /// Width left for the name after the logo and the cell's horizontal padding.
+    private var nameWidth: CGFloat {
+        max(40, metrics.channelColumnWidth - logoSide - 10 - 24)
     }
 
     private var logoSide: CGFloat {
@@ -255,7 +263,7 @@ struct EPGChannelCell: View {
 
     private var nameFont: Font {
         #if os(tvOS)
-            .system(size: 24, weight: .semibold)
+            .system(size: 22, weight: .semibold)
         #else
             .subheadline.weight(.medium)
         #endif
@@ -271,6 +279,11 @@ struct EPGProgramBlockView: View {
     let metrics: EPGMetrics
     let now: Date
     let isFocused: Bool
+    /// Horizontal scroll position of the guide. The title stays at the visible
+    /// leading edge of a long block instead of sitting at the block's start,
+    /// which is often off screen to the left.
+    var scrollSync: EPGScrollSync? = nil
+    var timelineOrigin: CGFloat = 0
     @Environment(\.epgGuideClock) private var guideClock
 
     /// Hairline gap between adjacent blocks. Applied as inset *inside* the
@@ -302,7 +315,8 @@ struct EPGProgramBlockView: View {
                         .foregroundStyle(timeColor(isLive: isLive))
                 }
             }
-            .padding(.horizontal, metrics.blockInset)
+            .padding(.leading, metrics.blockInset + titleInset)
+            .padding(.trailing, metrics.blockInset)
             .padding(.vertical, metrics.blockInset * 0.55)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
 
@@ -318,6 +332,15 @@ struct EPGProgramBlockView: View {
         .padding(.vertical, gap / 2)
         .frame(width: cell.width, height: metrics.rowHeight, alignment: .leading)
         .contentShape(Rectangle())
+    }
+
+    /// How far the visible guide edge is into this block. Zero when the
+    /// block's own leading edge is already on screen.
+    private var titleInset: CGFloat {
+        guard let scrollSync else { return 0 }
+        let intoBlock = scrollSync.horizontalOffset - timelineOrigin
+        guard intoBlock > 0 else { return 0 }
+        return min(intoBlock, max(0, cell.width - metrics.blockInset * 2 - 80))
     }
 
     /// The block is wide enough to show a start time alongside the title.
@@ -442,9 +465,18 @@ struct EPGBlockButtonStyle: ButtonStyle {
     let cell: EPGProgramCell
     let metrics: EPGMetrics
     let now: Date
+    var scrollSync: EPGScrollSync? = nil
+    var timelineOrigin: CGFloat = 0
 
     func makeBody(configuration: Configuration) -> some View {
-        StyleBody(cell: cell, metrics: metrics, now: now, isPressed: configuration.isPressed)
+        StyleBody(
+            cell: cell,
+            metrics: metrics,
+            now: now,
+            isPressed: configuration.isPressed,
+            scrollSync: scrollSync,
+            timelineOrigin: timelineOrigin
+        )
     }
 
     private struct StyleBody: View {
@@ -452,11 +484,20 @@ struct EPGBlockButtonStyle: ButtonStyle {
         let metrics: EPGMetrics
         let now: Date
         let isPressed: Bool
+        var scrollSync: EPGScrollSync?
+        var timelineOrigin: CGFloat
         @Environment(\.isFocused) private var isFocused
 
         var body: some View {
             let scale = isFocused ? 1.04 : (isPressed ? 0.97 : 1.0)
-            EPGProgramBlockView(cell: cell, metrics: metrics, now: now, isFocused: isFocused)
+            EPGProgramBlockView(
+                cell: cell,
+                metrics: metrics,
+                now: now,
+                isFocused: isFocused,
+                scrollSync: scrollSync,
+                timelineOrigin: timelineOrigin
+            )
                 .shadow(color: .black.opacity(isFocused ? 0.4 : 0), radius: 10, y: 6)
                 .scaleEffect(scale)
                 .animation(.easeOut(duration: 0.18), value: isFocused)

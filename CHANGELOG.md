@@ -4,6 +4,40 @@ All notable changes to Apex Stream Player.
 
 ---
 
+## Build 61 (1.2.0) — September 24, 2026
+
+### Bug Fixes
+
+- **Apple TV rewind and fast-forward follow the clickpad** — With the player controls up, a left or right swipe on the Siri Remote seeks immediately. One swipe is about 30 seconds and a held swipe speeds up. Files that never report a duration can be seeked too.
+- **Subtitle menu stays open** — Opening captions no longer dismisses with the player controls after a few seconds. The list stays up until a track is chosen or the menu is closed.
+- **Downloaded subtitles get a captions button** — When the video file has no subtitle track, a Wyzie download appears in the captions menu as Off plus the language. The search is no longer cancelled by a stream probe that disagrees with the player, ZIP results are skipped for the next file, and a TMDB id is turned into an IMDb id when the catalog does not already have one.
+- **iCloud sync no longer rewrites unchanged history** — Opening Settings or launching no longer marks every watch-progress row dirty. A CloudKit partial failure (the old “CKErrorDomain error 2”) is not shown as that wrapper; a real rejection names the cause, and retryable failures stay in the log.
+
+### Release
+
+- Build number **61** (1.2.0). Includes the Build 60 guide, preview, series, and poster-focus work below, which had not been uploaded separately.
+
+---
+
+## Build 60 (1.2.0) — September 24, 2026
+
+### Bug Fixes
+
+- **Mini preview loading wheel dismissed reliably on channel switch** — The VLC coordinator re-asserts its delegate during live-preview reload and treats time-progress callbacks as definitive playback-started signals, so the spinner clears even when the `.playing` state callback is missed during rapid channel changes.
+- **TV Guide re-anchors to current time after playback** — Returning from a long movie or series episode now refreshes the timeline to wall-clock time instead of restoring the stale selection timestamp. Both the main guide and the in-player overlay reset their scroll anchors on every appearance across iOS, macOS, tvOS, and visionOS.
+- **tvOS EPG frozen column stays synced during navigation** — The channel column observes the shared scroll-sync object directly and renders a padding-based window without GeometryReader, keeping focus-engine coordinates aligned with the programme grid during rapid Siri Remote navigation.
+
+### Improvements
+
+- **Series pages list full seasons from TMDB** — Episodes that have not aired yet appear as "Upcoming" with fallback artwork (series backdrop, poster, or title), and episodes without an available stream are marked "Not available." Playable provider episodes remain unchanged.
+- **Apple TV poster focus is easier to see** — Focused posters in movies, series, and media rails scale up slightly and display a white ring around the artwork, making selection clear while scrolling.
+
+### Release
+
+- Build number **60** (1.2.0).
+
+---
+
 ## Build 59 (1.2.0) — September 17, 2026
 
 ### Bug Fixes

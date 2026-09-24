@@ -41,6 +41,7 @@
         /// `internal` (not `private`) so the derived-data extension in
         /// `TVPlayerControlsOverlay+Data.swift` can read this view's state.
         @Environment(\.modelContext) var modelContext
+        @Environment(ExternalSubtitleSession.self) private var externalSubtitles: ExternalSubtitleSession?
 
         // Resolved SwiftData backing for the active stream.
         @State var episode: Episode?
@@ -66,6 +67,8 @@
         @State var scrubLastDirection: MoveCommandDirection?
         /// Decays `scrubStepLevel` back to zero after a pause in input.
         @State var scrubResetTask: Task<Void, Never>?
+        /// Seeks to the latest swipe target once the remote stops repeating.
+        @State var scrubSeekTask: Task<Void, Never>?
 
         enum TabKind: Hashable { case episodes, recent, guide, info }
         @State var openTab: TabKind?
@@ -89,11 +92,14 @@
                 .padding(.horizontal, 80)
                 .padding(.bottom, 56)
             }
-            .defaultFocus($focus, .transport)
+            .defaultFocus($focus, media.isLive ? TVPlayerFocus.transport : TVPlayerFocus.scrubber)
             .onMoveCommand { direction in
-                // While scrubbing, left/right step the playhead; vertical moves
-                // are swallowed so focus can't escape the bar.
-                if isScrubbing {
+                // A swipe on the progress bar seeks immediately. Scrub mode used
+                // to require a click first, so a left/right swipe — the gesture
+                // in user reports — never moved the playhead.
+                let swipingBar = !media.isLive && focus == .scrubber
+                    && (direction == .left || direction == .right)
+                if isScrubbing || swipingBar {
                     if direction == .left || direction == .right { moveScrub(direction) }
                     return
                 }
@@ -120,7 +126,9 @@
                 // Every time the controls reappear this is a fresh subtree;
                 // `defaultFocus` alone is unreliable here, so place focus on the
                 // play/pause button explicitly once the buttons have mounted.
-                Task { @MainActor in focus = .transport }
+                Task { @MainActor in
+                    focus = media.isLive ? .transport : .scrubber
+                }
             }
             .onChange(of: focus) {
                 // Moving between controls counts as activity — keep them up.
@@ -385,6 +393,7 @@
             let tracks = coordinator.audioTrackOptions
             if tracks.count > 1 {
                 Menu {
+                    PlayerMenuHold { onPanelOpenChange($0) }
                     ForEach(tracks) { track in
                         Button {
                             coordinator.selectAudioTrack(id: track.id)
@@ -409,27 +418,52 @@
         @ViewBuilder
         private var subtitleMenu: some View {
             let tracks = coordinator.textTrackOptions
-            if !tracks.isEmpty {
+            let downloadedTitle = tracks.isEmpty ? externalSubtitles?.title : nil
+            if !tracks.isEmpty || downloadedTitle != nil {
                 Menu {
-                    Button {
-                        coordinator.selectTextTrack(id: nil)
-                        onResetHideTimer()
-                    } label: {
-                        if !tracks.contains(where: \.isSelected) {
-                            Label("Off", systemImage: "checkmark")
-                        } else {
-                            Text("Off")
-                        }
-                    }
-                    ForEach(tracks) { track in
+                    PlayerMenuHold { onPanelOpenChange($0) }
+                    if tracks.isEmpty, let downloadedTitle, let externalSubtitles {
                         Button {
-                            coordinator.selectTextTrack(id: track.id)
+                            externalSubtitles.isEnabled = false
                             onResetHideTimer()
                         } label: {
-                            if track.isSelected {
-                                Label(track.label, systemImage: "checkmark")
+                            if externalSubtitles.isEnabled {
+                                Text("Off")
                             } else {
-                                Text(track.label)
+                                Label("Off", systemImage: "checkmark")
+                            }
+                        }
+                        Button {
+                            externalSubtitles.isEnabled = true
+                            onResetHideTimer()
+                        } label: {
+                            if externalSubtitles.isEnabled {
+                                Label(downloadedTitle, systemImage: "checkmark")
+                            } else {
+                                Text(downloadedTitle)
+                            }
+                        }
+                    } else {
+                        Button {
+                            coordinator.selectTextTrack(id: nil)
+                            onResetHideTimer()
+                        } label: {
+                            if !tracks.contains(where: \.isSelected) {
+                                Label("Off", systemImage: "checkmark")
+                            } else {
+                                Text("Off")
+                            }
+                        }
+                        ForEach(tracks) { track in
+                            Button {
+                                coordinator.selectTextTrack(id: track.id)
+                                onResetHideTimer()
+                            } label: {
+                                if track.isSelected {
+                                    Label(track.label, systemImage: "checkmark")
+                                } else {
+                                    Text(track.label)
+                                }
                             }
                         }
                     }
@@ -562,3 +596,17 @@
     }
 
 #endif
+
+/// Holds the player controls open for as long as a track menu is on screen.
+/// The controls otherwise hide after a few seconds and take the menu with them.
+struct PlayerMenuHold: View {
+    var onChange: (Bool) -> Void
+
+    var body: some View {
+        Color.clear
+            .frame(width: 0, height: 0)
+            .accessibilityHidden(true)
+            .onAppear { onChange(true) }
+            .onDisappear { onChange(false) }
+    }
+}

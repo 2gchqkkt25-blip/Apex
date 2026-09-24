@@ -60,28 +60,37 @@ extension CloudSyncEngine {
         defer { releaseHydratedRows() }
         let locals = try fetchLocalMediaServers()
         let mirrors = try fetchMediaServerMirrors()
+        var wrote = false
         for (id, local) in locals {
             let values = Self.mediaServerValues(from: local)
-            applyMediaServerToCloud(values, id: id, mirror: mirrors[id])
+            if applyMediaServerToCloud(values, id: id, mirror: mirrors[id]) {
+                wrote = true
+            }
             shadow.setMediaServerShadow(id.uuidString, values)
         }
+        guard wrote else { return }
         try saveStores()
         shadow.persist()
     }
 
     /// Writes local Recently Watched / favorites / hides into `UserContentState`
-    /// so CloudKit has rows to export. Bumps `updatedAt` so a previously failed
-    /// export (missing Production field) is retried.
+    /// so CloudKit has rows to export. Rows that already match are left alone —
+    /// rewriting `updatedAt` on every launch re-uploads the whole history and
+    /// CloudKit reports that batch as CKErrorDomain error 2 (partial failure).
     func publishLocalUserContent() throws {
         defer { releaseHydratedRows() }
         activeProfileID = ActiveProfileStore.current ?? UserProfile.defaultProfileID
         let locals = try fetchLocalContentValues()
         let mirrors = try fetchContentMirrors()
+        var wrote = false
         for (id, entry) in locals {
             guard !entry.values.isEmpty else { continue }
-            applyContentToCloud(entry.values, id: id, kind: entry.kind, mirror: mirrors[id])
+            if applyContentToCloud(entry.values, id: id, kind: entry.kind, mirror: mirrors[id]) {
+                wrote = true
+            }
             shadow.setContentShadow(id, entry.values)
         }
+        guard wrote else { return }
         try saveStores()
         shadow.persist()
     }
@@ -170,16 +179,20 @@ extension CloudSyncEngine {
         }
     }
 
-    func applyMediaServerToCloud(_ value: MediaServerConfigValues?, id: UUID, mirror: SyncedMediaServer?) {
+    @discardableResult
+    func applyMediaServerToCloud(_ value: MediaServerConfigValues?, id: UUID, mirror: SyncedMediaServer?) -> Bool {
         guard let value else {
             if let mirror {
                 tombstoneMediaServerMirror(mirror)
             } else {
                 insertMediaServerTombstone(id: id, baseline: nil)
             }
-            return
+            return true
         }
         if let mirror {
+            if mirror.deletedAt == nil, Self.mediaServerValues(from: mirror) == value {
+                return false
+            }
             mirror.deletedAt = nil
             mirror.name = value.name
             mirror.baseURL = value.baseURL
@@ -193,6 +206,7 @@ extension CloudSyncEngine {
             mirror.syncEnabled = value.syncEnabled
             mirror.sortOrder = value.sortOrder
             mirror.updatedAt = Date()
+            return true
         } else {
             cloudContext.insert(SyncedMediaServer(
                 id: id,
@@ -208,6 +222,7 @@ extension CloudSyncEngine {
                 syncEnabled: value.syncEnabled,
                 sortOrder: value.sortOrder
             ))
+            return true
         }
     }
 

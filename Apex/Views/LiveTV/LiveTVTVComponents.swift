@@ -289,6 +289,7 @@
         @Binding var layoutModeRaw: String
         let contentSort: ContentSortOption
         let onPlay: (LiveStream) -> Void
+        var playbackReturnToken: Int = 0
 
         /// The active playlist's id prefix, needed to scope the virtual
         /// (favorites / recently watched) collections in-memory.
@@ -395,6 +396,7 @@
                             sort: contentSort,
                             sectionToken: token,
                             epgCache: epgCache,
+                            playbackReturnToken: playbackReturnToken,
                             onPlay: onPlay
                         )
                     }

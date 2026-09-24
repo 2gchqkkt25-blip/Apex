@@ -86,6 +86,7 @@ struct FullScreenPlayerView: View {
     /// External subtitle file URL (from OpenSubtitles.com). Set when the stream
     /// doesn't have embedded subtitle tracks and OpenSubtitles is configured.
     @State private var externalSubtitleURL: URL?
+    @State private var externalSubtitles = ExternalSubtitleSession()
     /// Set by the active engine when it discovers embedded subtitle tracks.
     /// Unlike AVAsset preflight this also works for MKV and other formats that
     /// KSPlayer/VLCKit can parse but AVFoundation cannot inspect reliably.
@@ -209,7 +210,7 @@ struct FullScreenPlayerView: View {
 
             // External subtitles (OpenSubtitles.com) — shown when the stream
             // doesn't have embedded subtitle tracks.
-            if displayMedia != nil, !hasEmbeddedSubtitles, let externalSubtitleURL {
+            if displayMedia != nil, !hasEmbeddedSubtitles, externalSubtitles.isEnabled, let externalSubtitleURL {
                 ExternalSubtitleOverlay(
                     subtitleURL: externalSubtitleURL,
                     clock: clock,
@@ -239,6 +240,7 @@ struct FullScreenPlayerView: View {
         #endif
         .persistentSystemOverlays(.hidden)
         .preferredColorScheme(.dark)
+        .environment(externalSubtitles)
         .sheet(isPresented: $showStreamPicker) {
             StremioStreamPickerView(
                 streams: stremioStreamOptions,
@@ -317,6 +319,7 @@ struct FullScreenPlayerView: View {
             // Only for VOD content (not live) and only when no embedded tracks
             // are detected after a brief delay.
             externalSubtitleURL = nil
+            externalSubtitles.clear()
             hasEmbeddedSubtitles = false
             guard !activeMedia.isLive else { return }
 
@@ -340,23 +343,13 @@ struct FullScreenPlayerView: View {
             // If embedded subs exist, the user can pick those instead.
             try? await Task.sleep(for: .seconds(3))
             guard !Task.isCancelled else { return }
-
-            let playbackURL = displayMedia?.url ?? activeMedia.url
-
-            // Skip external subtitles when the stream has *real* embedded legible
-            // tracks. HLS manifests sometimes advertise subtitle metadata without
-            // any actually selectable/renderable options; filter those out so we
-            // still fetch external subs when the embedded list is effectively empty.
-            let asset = AVURLAsset(url: playbackURL)
-            if let legible = try? await asset.loadMediaSelectionGroup(for: .legible) {
-                let realTracks = legible.options.filter { option in
-                    option.locale != nil || !option.displayName.isEmpty
-                }
-                if !realTracks.isEmpty {
-                    Logger.player.info("[Subtitles] Stream has \(realTracks.count) real embedded tracks — skipping external fetch")
-                    return
-                }
-                Logger.player.info("[Subtitles] Stream advertised \(legible.options.count) legible options but none are real — proceeding with external fetch")
+            // The captions button is driven by tracks the playback engine can
+            // actually select. An AVFoundation probe of the URL often disagrees
+            // with that list (or never returns on an IPTV file) and used to
+            // cancel the download while the button stayed hidden.
+            guard !hasEmbeddedSubtitles else {
+                Logger.player.info("[Subtitles] Playback engine already has embedded tracks — skipping external fetch")
+                return
             }
 
             // Resolve IMDB ID from the content reference
@@ -369,7 +362,7 @@ struct FullScreenPlayerView: View {
                 var descriptor = FetchDescriptor<Movie>(predicate: #Predicate { $0.id == id })
                 descriptor.fetchLimit = 1
                 let movie = try? modelContext.fetch(descriptor).first
-                imdbId = movie?.imdbId
+                imdbId = await resolvedMovieIMDbID(movie)
                 season = nil
                 episode = nil
             case let .episode(id):
@@ -391,7 +384,10 @@ struct FullScreenPlayerView: View {
                 episode = nil
             }
 
-            guard let imdbId, !imdbId.isEmpty else { return }
+            guard let imdbId, !imdbId.isEmpty else {
+                Logger.player.info("[Subtitles] No IMDb id for this title — cannot fetch external subtitles")
+                return
+            }
 
             // Fetch subtitles from Wyzie Subs
             guard WyzieSubsClient.shared.isConfigured else { return }
@@ -403,7 +399,8 @@ struct FullScreenPlayerView: View {
                 )
                 guard !Task.isCancelled else { return }
                 await MainActor.run {
-                    externalSubtitleURL = subtitleFile
+                    externalSubtitleURL = subtitleFile.url
+                    externalSubtitles.present(title: subtitleFile.label)
                 }
                 Logger.player.info("[Subtitles] Wyzie loaded for \(imdbId, privacy: .public)")
             } catch {
@@ -746,6 +743,21 @@ struct FullScreenPlayerView: View {
         switchMedia(to: next)
     }
 
+    /// Provider catalogs often store a TMDB id and leave `imdbId` empty. Wyzie
+    /// searches by IMDb, so resolve it from TMDB before giving up.
+    private func resolvedMovieIMDbID(_ movie: Movie?) async -> String? {
+        if let cached = movie?.imdbId?.trimmingCharacters(in: .whitespacesAndNewlines), !cached.isEmpty {
+            return cached
+        }
+        guard let movie, let tmdbId = movie.tmdbId else { return nil }
+        guard let resolved = try? await TMDBClient.shared.movieExternalIMDbID(tmdbId), !resolved.isEmpty else {
+            return nil
+        }
+        movie.imdbId = resolved
+        try? modelContext.save()
+        return resolved
+    }
+
     /// Latch embedded-track discovery for this media item and immediately
     /// remove any downloaded overlay that may already have appeared.
     private func noteEmbeddedSubtitlesAvailable() {
@@ -754,6 +766,7 @@ struct FullScreenPlayerView: View {
             guard !hasEmbeddedSubtitles else { return }
             hasEmbeddedSubtitles = true
             externalSubtitleURL = nil
+            externalSubtitles.clear()
             Logger.player.info("[Subtitles] Embedded track discovered by playback engine — suppressing external overlay")
         }
     }

@@ -81,6 +81,9 @@ struct LiveTVView: View {
     @State private var selectedSection: LiveTVSection?
     @State private var showingSync = false
     @State private var playingMedia: PlayableMedia?
+    /// Bumped when fullscreen playback closes so the still-mounted guide
+    /// scrolls to the current time instead of the moment the channel was tuned.
+    @State private var guideReturnToken = 0
     @State private var showingSettings = false
     /// Corner AVPlayer preview while browsing (iOS/macOS, Wi‑Fi only).
     @State private var previewMedia: PlayableMedia?
@@ -184,7 +187,8 @@ struct LiveTVView: View {
                     playlist: activePlaylist,
                     sort: contentSort,
                     sectionToken: sectionToken,
-                    epgCache: epgCache
+                    epgCache: epgCache,
+                    playbackReturnToken: guideReturnToken
                 ) { stream in
                     handleChannelSelection(stream)
                 }
@@ -307,7 +311,9 @@ struct LiveTVView: View {
                 if !enabled { previewMedia = nil }
             }
             #if os(iOS) || os(tvOS)
-            .fullScreenCover(item: $playingMedia) { media in
+            .fullScreenCover(item: $playingMedia, onDismiss: {
+                guideReturnToken += 1
+            }) { media in
                 FullScreenPlayerView(media: media)
                     .onAppear { previewMedia = nil }
             }
@@ -390,6 +396,7 @@ struct LiveTVView: View {
                 layoutModeRaw: $layoutModeRaw,
                 contentSort: contentSort,
                 onPlay: { handleChannelSelection($0) },
+                playbackReturnToken: guideReturnToken,
                 playlistPrefix: playlistPrefix,
                 playlist: activePlaylist,
                 epgCache: epgCache,

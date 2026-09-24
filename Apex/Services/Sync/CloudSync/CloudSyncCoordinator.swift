@@ -533,28 +533,8 @@ final class CloudSyncCoordinator {
     ) -> String? {
         guard let error else { return nil }
         let phase = eventName(eventType)
-
-        // Usually the CKError directly; occasionally a Cocoa error wrapping it.
-        let ckError = (error as? CKError)
-            ?? ((error as NSError).userInfo[NSUnderlyingErrorKey] as? Error)
-            .flatMap { $0 as? CKError }
-
-        if let ckError, ckError.code == .partialFailure,
-           let perItem = ckError.partialErrorsByItemID, !perItem.isEmpty
-        {
-            for (itemID, itemError) in perItem {
-                Logger.sync.error(
-                    "CloudKit \(phase, privacy: .public) rejected \(String(describing: itemID), privacy: .public): \(String(reflecting: itemError), privacy: .public)"
-                )
-            }
-            // Records usually all fail identically; collapse to the distinct
-            // underlying messages so the UI shows the cause, not "error 2".
-            let messages = Set(perItem.values.map { ($0 as NSError).localizedDescription })
-            return messages.sorted().joined(separator: "; ")
-        }
-
         Logger.sync.error("CloudKit \(phase, privacy: .public) failed: \(String(reflecting: error), privacy: .public)")
-        return error.localizedDescription
+        return CloudKitFailureMessage.userFacing(error)
     }
 
     private nonisolated static func eventName(_ type: NSPersistentCloudKitContainer.EventType) -> String {
@@ -650,4 +630,103 @@ nonisolated extension Notification.Name {
     static let apexPlaylistCatalogSyncWillStart = Notification.Name("ApexPlaylistCatalogSyncWillStart")
     /// Posted when a playlist catalog fetch is cancelled or fails, releasing the lease.
     static let apexPlaylistCatalogSyncDidAbort = Notification.Name("ApexPlaylistCatalogSyncDidAbort")
+}
+
+/// Turns a CloudKit sync-event error into a sentence for Settings.
+///
+/// `CKErrorDomain` code 2 (`partialFailure`) is only a wrapper. Its
+/// `localizedDescription` is the opaque "error 2" line. The records that
+/// actually failed are in `CKPartialErrorsByItemIDKey`. Retryable leaves
+/// (network, rate limit, a batch cancelled because one sibling failed) are
+/// not shown — CloudKit retries those on its own.
+enum CloudKitFailureMessage {
+    static func userFacing(_ error: Error) -> String? {
+        if let server = serverMessage(in: String(reflecting: error)) {
+            return sentence(forServerMessage: server)
+        }
+        let leaves = collect(error).filter {
+            let code = CKError.Code(rawValue: $0.code)
+            return code != .partialFailure && code != .batchRequestFailed
+        }
+        let actionable = leaves.filter { !isRetryable(CKError.Code(rawValue: $0.code)) }
+        guard !actionable.isEmpty else { return nil }
+        let messages = Set(actionable.map(sentence(for:)))
+        let text = messages.sorted().joined(separator: " ")
+        return text.isEmpty ? nil : text
+    }
+
+    private static func collect(_ error: Error) -> [NSError] {
+        var result: [NSError] = []
+        func walk(_ error: Error) {
+            let ns = error as NSError
+            let partial = (error as? CKError)?.partialErrorsByItemID
+                ?? ns.userInfo[CKPartialErrorsByItemIDKey] as? [AnyHashable: any Error]
+            if let partial, !partial.isEmpty {
+                partial.values.forEach(walk)
+                return
+            }
+            if ns.domain == CKErrorDomain {
+                result.append(ns)
+            }
+            if let underlying = ns.userInfo[NSUnderlyingErrorKey] as? Error {
+                walk(underlying)
+            }
+        }
+        walk(error)
+        return result
+    }
+
+    private static func isRetryable(_ code: CKError.Code?) -> Bool {
+        switch code {
+        case .networkUnavailable, .networkFailure, .serviceUnavailable,
+             .requestRateLimited, .zoneBusy, .serverResponseLost,
+             .operationCancelled, .accountTemporarilyUnavailable,
+             .zoneNotFound, .changeTokenExpired, .serverRecordChanged,
+             .limitExceeded:
+            true
+        default:
+            false
+        }
+    }
+
+    private static func sentence(for error: NSError) -> String {
+        if let server = serverMessage(in: String(reflecting: error)) {
+            return sentence(forServerMessage: server)
+        }
+        switch CKError.Code(rawValue: error.code) {
+        case .serverRejectedRequest:
+            return "iCloud rejected a sync record. Deploy the CloudKit schema from Development to Production, then open Apex again."
+        case .quotaExceeded:
+            return "iCloud storage is full. Free space in Settings, then sync resumes."
+        case .notAuthenticated:
+            return "Sign in to iCloud again to resume sync."
+        case .permissionFailure, .managedAccountRestricted:
+            return "iCloud is restricted for this Apple Account."
+        case .missingEntitlement, .badContainer:
+            return "This build cannot use the iCloud container."
+        case .incompatibleVersion:
+            return "This version of Apex is too old to sync."
+        case .constraintViolation:
+            return "iCloud already has a conflicting copy of a record."
+        default:
+            return "iCloud sync failed."
+        }
+    }
+
+    private static func sentence(forServerMessage server: String) -> String {
+        let lower = server.lowercased()
+        if lower.contains("production") || lower.contains("schema") || lower.contains("cannot create") {
+            return "iCloud rejected a record because the CloudKit schema is out of date. Deploy Development to Production in CloudKit Console, then open Apex again. (\(server))"
+        }
+        return server
+    }
+
+    /// CloudKit puts the useful text in the debug description as `server message = "..."`.
+    private static func serverMessage(in reflected: String) -> String? {
+        guard let range = reflected.range(of: "server message = \"") else { return nil }
+        let rest = reflected[range.upperBound...]
+        guard let end = rest.firstIndex(of: "\"") else { return nil }
+        let message = String(rest[..<end]).trimmingCharacters(in: .whitespacesAndNewlines)
+        return message.isEmpty ? nil : message
+    }
 }

@@ -75,6 +75,8 @@ struct SeriesDetailView: View {
                         await refreshEpisodesFromProvider()
                     }
                     await enrichIfNeeded()
+                    await SeriesEpisodeCatalog.mergeGuideEpisodes(into: series, context: modelContext)
+                    recomputeSeasons()
                     await enrichSeriesRatingsIfNeeded(series, context: modelContext)
                     resolveSimilar()
                     resolveOtherSources()
@@ -259,12 +261,13 @@ struct SeriesDetailView: View {
     }
 
     private var markSeasonButton: some View {
-        let allWatched = seasonEpisodes.allSatisfy(\.isWatched)
+        let playable = seasonEpisodes.filter(\.isProviderEpisode)
+        let allWatched = !playable.isEmpty && playable.allSatisfy(\.isWatched)
         return Button {
             if allWatched {
-                seasonEpisodes.forEach { $0.setWatched(false) }
+                playable.forEach { $0.setWatched(false) }
             } else {
-                seasonEpisodes.forEach { $0.setWatched(true) }
+                playable.forEach { $0.setWatched(true) }
             }
             try? modelContext.save()
         } label: {

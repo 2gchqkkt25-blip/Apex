@@ -172,6 +172,7 @@ Without these keys, the app works but metadata is limited to what the IPTV provi
 | 103 | **Build 55 — in-player Guide, exclusive playback, hidden iCloud** | ✅ **Done (Sep 4)** — Compact tvOS mini-Guide scrolls the full list; iPhone portrait Guide; leftover audio; second-playlist spinner; hidden channels/categories sync. See § Build 55. |
 | 104 | **Build 58 — EPG, channel switching, poster scores, navigation, themes** | ✅ **Done (Sep 15)** — Unified playlist/EPG refresh; persistent and faster guide data; stable empty rows and smooth iOS scrolling; faster repeated channel changes; TMDB scores after sync; tvOS Back flow; complete theme tinting. See § Build 58. |
 | 105 | **Build 59 — tvOS post-refresh recovery + EPG alignment** | ✅ **Done (Sep 17)** — Bounded inline tvOS guide refresh; no heavy post-dismissal EPG/rating collision; restored settings focus; absolute timestamp placement; stable live-status merge; Now-line/overlay parity across platforms. See § Build 59. |
+| 106 | **Build 61 — seek, subtitles, guide return, iCloud** | ✅ **Done (Sep 24)** — Apple TV clickpad seek; subtitle menu stays open; Wyzie downloads appear in the captions button; guide returns to now after playback; iCloud no longer rewrites unchanged history. See `CHANGELOG.md`. |
 
 ---
 
@@ -1611,7 +1612,7 @@ Quick reference for [App Store Connect](https://appstoreconnect.apple.com) → *
 | Field | Value |
 |-------|-------|
 | Marketing version | **1.2.0** |
-| Build | **58** (`CURRENT_PROJECT_VERSION`) |
+| Build | **61** (`CURRENT_PROJECT_VERSION`) |
 | Bundle ID | `com.streaminfinity.apex` |
 | Team ID | `VS7D6GB238` |
 
@@ -1899,4 +1900,4 @@ See **What's Been Built → iOS Device — Large Library Fix** above for full de
 
 ---
 
-*Last updated: September 17, 2026 (Build 59 — tvOS post-refresh responsiveness and timestamp-aligned EPG overlays).*
+*Last updated: September 24, 2026 (Build 61 — Apple TV seek, subtitle menu, Wyzie captions button, guide return-to-now, iCloud sync).*

@@ -209,6 +209,31 @@ nonisolated struct TMDBClient {
         return response.normalized(isMovie: true, preferredLanguage: languageCode)
     }
 
+    /// Season numbers TMDB lists for a series, including specials (season 0)
+    /// and seasons that have not finished airing.
+    func tvSeasonNumbers(_ id: Int) async throws -> [Int] {
+        let response: TVSeasonsResponse = try await get("/tv/\(id)")
+        return (response.seasons ?? []).map(\.seasonNumber).sorted()
+    }
+
+    /// Every episode TMDB has for one season, including ones that have not
+    /// aired. The provider catalog is often only the episodes it can stream.
+    func tvSeasonEpisodes(_ id: Int, season: Int) async throws -> [TMDBSeasonEpisode] {
+        let response: TVSeasonResponse = try await get("/tv/\(id)/season/\(season)")
+        return (response.episodes ?? []).map { item in
+            TMDBSeasonEpisode(
+                seasonNumber: item.seasonNumber ?? season,
+                episodeNumber: item.episodeNumber ?? 0,
+                name: item.name ?? "",
+                overview: item.overview,
+                airDate: item.airDate,
+                runtimeMinutes: item.runtime,
+                stillURL: Self.backdropURL(item.stillPath, size: "w300")?.absoluteString,
+                rating: item.voteAverage
+            )
+        }
+    }
+
     /// Full detail payload for a TV series.
     func tvDetails(_ id: Int) async throws -> TMDBTitleDetails {
         let response: TitleDetailsResponse = try await get(
@@ -299,7 +324,17 @@ nonisolated struct TMDBClient {
     /// `IntroSkipResolver` when the series has a `tmdbId` but no cached `imdbId`.
     /// Returns `nil` when TMDB has no IMDb ID for the series.
     func tvExternalIMDbID(_ id: Int) async throws -> String? {
-        let ids: ExternalIds = try await get("/tv/\(id)/external_ids")
+        try await externalIMDbID(path: "/tv/\(id)/external_ids")
+    }
+
+    /// Same lookup for a movie. Playback uses this when the catalog row has a
+    /// TMDB id but the provider never stored an IMDb id.
+    func movieExternalIMDbID(_ id: Int) async throws -> String? {
+        try await externalIMDbID(path: "/movie/\(id)/external_ids")
+    }
+
+    private func externalIMDbID(path: String) async throws -> String? {
+        let ids: ExternalIds = try await get(path)
         guard let imdbId = ids.imdbId?.trimmingCharacters(in: .whitespaces), !imdbId.isEmpty else {
             return nil
         }
@@ -335,6 +370,18 @@ nonisolated struct TMDBClient {
 }
 
 // MARK: - Public types
+
+/// One TMDB episode, including episodes the provider cannot stream yet.
+struct TMDBSeasonEpisode: Sendable {
+    let seasonNumber: Int
+    let episodeNumber: Int
+    let name: String
+    let overview: String?
+    let airDate: String?
+    let runtimeMinutes: Int?
+    let stillURL: String?
+    let rating: Double?
+}
 
 /// A trending title with the metadata the home hero carousel renders.
 struct TrendingTitle: Identifiable, Hashable {
@@ -381,6 +428,39 @@ nonisolated struct TMDBCastMember: Hashable {
 }
 
 // MARK: - DTOs
+
+private nonisolated struct TVSeasonsResponse: Decodable {
+    let seasons: [SeasonRef]?
+
+    struct SeasonRef: Decodable {
+        let seasonNumber: Int
+        enum CodingKeys: String, CodingKey { case seasonNumber = "season_number" }
+    }
+}
+
+private nonisolated struct TVSeasonResponse: Decodable {
+    let episodes: [EpisodeItem]?
+
+    struct EpisodeItem: Decodable {
+        let seasonNumber: Int?
+        let episodeNumber: Int?
+        let name: String?
+        let overview: String?
+        let airDate: String?
+        let runtime: Int?
+        let stillPath: String?
+        let voteAverage: Double?
+
+        enum CodingKeys: String, CodingKey {
+            case name, overview, runtime
+            case seasonNumber = "season_number"
+            case episodeNumber = "episode_number"
+            case airDate = "air_date"
+            case stillPath = "still_path"
+            case voteAverage = "vote_average"
+        }
+    }
+}
 
 private nonisolated struct TrendingResponse: Decodable {
     let results: [TrendingItem]
