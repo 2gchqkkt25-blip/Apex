@@ -270,18 +270,24 @@ final class EPGSyncService {
         let syncContainer = container
         let syncMode = mode
         let shouldInvalidateLiveCache = invalidateLiveCache
+        // UI state transitions stay on the main actor; the heavy sync work
+        // runs on a non-isolated task so synchronous SwiftData saves inside
+        // EPGInserter don't block the runloop and trigger the 0xdead10cc
+        // watchdog kill observed in crash reports during large XMLTV imports.
         task = Task { @MainActor in
             isSyncing = true
             syncProgress = nil
             syncProgressLabel = nil
-
+        }
+        let syncTask = Task {
             defer {
-                // Clear the handle so `kick()`'s coalescing guard allows the next
-                // scheduled/manual refresh to start. Without this the guard would
-                // see a non-nil (finished) task forever and never sync again.
-                self.task = nil
-                EPGSyncManager.recoverInterruptedSyncs(in: ModelContext(syncContainer))
-                Task { @MainActor in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    // Clear the handle so `kick()`'s coalescing guard allows the next
+                    // scheduled/manual refresh to start. Without this the guard would
+                    // see a non-nil (finished) task forever and never sync again.
+                    self.task = nil
+                    EPGSyncManager.recoverInterruptedSyncs(in: ModelContext(syncContainer))
                     isSyncing = false
                     syncProgress = nil
                     syncProgressLabel = nil
@@ -300,8 +306,8 @@ final class EPGSyncService {
                 await EPGLiveLoader.shared.invalidateAll()
             }
 
-            ContentIndexingService.shared.prepareForEPGSync()
-            defer { ContentIndexingService.shared.epgSyncFinished() }
+            await ContentIndexingService.shared.prepareForEPGSync()
+            defer { Task { await ContentIndexingService.shared.epgSyncFinished() } }
 
             let manager = EPGSyncManager(modelContainer: syncContainer)
             let timeout: TimeInterval = switch syncMode {
@@ -335,6 +341,9 @@ final class EPGSyncService {
             }
             Logger.database.info("EPG refresh finished (success: \(succeeded))")
         }
+        // Chain the heavy work after the UI-state task so `isSyncing = true`
+        // is committed before any background work begins.
+        _ = await syncTask.value
     }
 
     /// Races `body` against a timeout. Throws `CancellationError` if the timeout
