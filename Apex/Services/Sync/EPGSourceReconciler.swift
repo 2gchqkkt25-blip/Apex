@@ -67,11 +67,10 @@ nonisolated enum EPGSourceReconciler {
                 return epgURL
             }
             return XtreamClient.xmltvURL(for: playlist)?.absoluteString
-        case .m3u, .stalker, .stremio:
+        case .m3u, .stalker:
             // m3u carries its guide URL; Stalker portals expose no standard XMLTV
             // URL, so the guide comes from a manually-attached XMLTV source (added
             // in EPG settings) — or, if one was set, the playlist's `epgURL`.
-            // Stremio addons may provide EPG via their catalog metadata.
             guard let epgURL = playlist.epgURL, !epgURL.isEmpty else { return nil }
             return epgURL
         }

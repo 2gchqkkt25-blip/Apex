@@ -210,8 +210,6 @@ actor ContentSyncManager {
             try await performM3USync(playlist: playlist, playlistId: playlistId, progress: progress)
         case .stalker:
             try await performStalkerSync(playlist: playlist, playlistId: playlistId, progress: progress, full: full)
-        case .stremio:
-            try await performStremioSync(playlist: playlist, playlistId: playlistId, progress: progress)
         }
 
         let doneContext = ModelContext(modelContainer)
@@ -630,8 +628,6 @@ actor ContentSyncManager {
         case .m3u:
             // M3U content is imported during sync; no lazy episode fetch.
             []
-        case .stremio:
-            try await fetchStremioEpisodes(seriesElementId: seriesElementId, playlist: playlist)
         }
     }
 
@@ -676,7 +672,7 @@ actor ContentSyncManager {
         switch playlist.sourceType {
         case .m3u:
             return
-        case .xtream, .stalker, .stremio:
+        case .xtream, .stalker:
             break
         }
 

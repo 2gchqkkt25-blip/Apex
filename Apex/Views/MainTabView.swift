@@ -297,11 +297,8 @@ struct MainTabView: View {
     // MARK: - Automatic sync
 
     /// Pins `apex.selectedPlaylistID` when empty or orphaned so a CloudKit
-    /// restore that materializes Stremio before Xtream does not leave Stremio
-    /// as the lasting default (`.active(for:)` alone is non-persisting).
-    ///
-    /// Also promotes Stremio → preferred catalog playlist when that catalog
-    /// entry has never synced locally (progressive iCloud import).
+    /// restore picks up the preferred catalog playlist as the lasting default
+    /// (`.active(for:)` alone is non-persisting).
     private func settleDefaultPlaylistSelection() {
         guard let preferred = playlists.preferredDefault() else { return }
 
@@ -309,20 +306,13 @@ struct MainTabView: View {
             || !playlists.contains(where: { $0.id.uuidString == selectedPlaylistID })
         {
             selectedPlaylistID = preferred.id.uuidString
-            return
         }
-
-        guard preferred.sourceType != .stremio, preferred.lastSyncDate == nil else { return }
-        guard let current = playlists.first(where: { $0.id.uuidString == selectedPlaylistID }),
-              current.sourceType == .stremio
-        else { return }
-        selectedPlaylistID = preferred.id.uuidString
     }
 
     /// Enqueues every due playlist for a blocking, progress-visible sync and
     /// presents the first one. Covers the never-synced first launch (where
     /// `lastSyncDate == nil` makes a playlist due) as well as periodic refreshes.
-    /// Catalog playlists (Xtream / M3U / Stalker) are queued ahead of Stremio.
+    /// Catalog playlists (Xtream / M3U / Stalker) are queued in priority order.
     /// Playlists that just arrived from iCloud after this screen was already
     /// showing are marked handled without a cover — Sync Now on another device
     /// must not pop this UI.

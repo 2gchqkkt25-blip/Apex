@@ -58,9 +58,6 @@ struct FullScreenPlayerView: View {
     /// failure overlay instead of an endless spinner.
     @State private var resolveError: String?
 
-    /// Stremio stream picker state. When multiple streams are available, the user
-    /// can choose quality/source instead of auto-selecting.
-    @State private var stremioStreamOptions: [StremioStreamOption] = []
     @State private var showStreamPicker = false
 
     /// The episode queued to play after `activeMedia`, resolved whenever the
@@ -98,7 +95,7 @@ struct FullScreenPlayerView: View {
     /// (engine overlays only mount after the first frame).
     @State private var arePlayerControlsVisible = false
 
-    /// True when the stream URL isn't ready yet (Stalker/Stremio resolve).
+    /// True when the stream URL isn't ready yet (Stalker resolves).
     private var isResolvingStream: Bool {
         displayMedia == nil
     }
@@ -241,20 +238,6 @@ struct FullScreenPlayerView: View {
         .persistentSystemOverlays(.hidden)
         .preferredColorScheme(.dark)
         .environment(externalSubtitles)
-        .sheet(isPresented: $showStreamPicker) {
-            StremioStreamPickerView(
-                streams: stremioStreamOptions,
-                onSelect: selectStremioStream,
-                onCancel: {
-                    showStreamPicker = false
-                    // If user cancels without picking, auto-select the best
-                    if let best = stremioStreamOptions.first {
-                        resolvedMedia = mediaWith(url: best.url)
-                    }
-                }
-            )
-            .presentationDetents([.medium, .large])
-        }
         .task {
             // Seed the recall pair with the channel we opened on, so the very
             // first in-player recall has somewhere to jump back to.
@@ -454,7 +437,6 @@ struct FullScreenPlayerView: View {
     /// never reaches the engine during a channel/episode switch.
     private var displayMedia: PlayableMedia? {
         guard StalkerLink.isPlaceholder(activeMedia.url)
-            || activeMedia.url.absoluteString.hasPrefix("stremio://")
             || MediaPlaybackResolver.isPlaceholder(activeMedia.url)
         else { return activeMedia }
         guard let resolvedMedia, resolvedMedia.id == activeMedia.id else { return nil }
@@ -532,7 +514,7 @@ struct FullScreenPlayerView: View {
         }
     }
 
-    /// Resolves Stalker and Stremio placeholders into playable URLs. A no-op for
+    /// Resolves Stalker placeholders into playable URLs. A no-op for
     /// directly playable streams. Re-runs whenever the active stream changes
     /// (open, channel surf, next episode), so each switch resolves a fresh,
     /// short-lived URL.
@@ -549,32 +531,6 @@ struct FullScreenPlayerView: View {
             } catch {
                 resolveError = error.localizedDescription
                 Logger.player.error("Stalker stream resolution failed: \(error.localizedDescription, privacy: .public)")
-            }
-        } else if url.absoluteString.hasPrefix("stremio://") {
-            resolvedMedia = nil
-            resolveError = nil
-            do {
-                // Fetch all available streams for the picker
-                let options = try await StremioStreamResolver.fetchAllOptions(
-                    for: activeMedia,
-                    container: modelContext.container
-                )
-                if options.isEmpty {
-                    throw StremioError.noCompatibleStreams
-                }
-                // If only one stream or user has auto-play enabled, play directly
-                if options.count == 1 {
-                    resolvedMedia = mediaWith(url: options[0].url)
-                } else {
-                    // Show picker — store options and present sheet
-                    await MainActor.run {
-                        stremioStreamOptions = options
-                        showStreamPicker = true
-                    }
-                }
-            } catch {
-                resolveError = error.localizedDescription
-                Logger.player.error("Stremio stream resolution failed: \(error.localizedDescription, privacy: .public)")
             }
         } else if MediaPlaybackResolver.isPlaceholder(url) {
             resolvedMedia = nil
@@ -599,7 +555,6 @@ struct FullScreenPlayerView: View {
         engineAttempt = 0
         mediaServerDirectPlayFallbackAttempted = false
         isRetryingMediaServerDirectPlay = false
-        stremioStreamOptions = []
         showStreamPicker = false
         Task { await resolveActiveMedia() }
     }
@@ -701,12 +656,6 @@ struct FullScreenPlayerView: View {
         default:
             return false
         }
-    }
-
-    /// Called when the user picks a stream from the Stremio picker sheet.
-    private func selectStremioStream(_ option: StremioStreamOption) {
-        showStreamPicker = false
-        resolvedMedia = mediaWith(url: option.url)
     }
 
     /// Persist the outgoing stream's progress, then swap in a new one. The

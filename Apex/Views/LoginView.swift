@@ -33,8 +33,6 @@ struct LoginView: View {
     // m3u fields
     @State private var m3uURL = ""
     @State private var epgURL = ""
-    // Stremio field
-    @State private var stremioURL = ""
     #if !os(tvOS)
         @State private var showFileImporter = false
     #endif
@@ -57,8 +55,6 @@ struct LoginView: View {
             !m3uURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         case .stalker:
             !portalURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        case .stremio:
-            StremioURL.normalize(stremioURL) != nil
         }
     }
 
@@ -79,7 +75,6 @@ struct LoginView: View {
                             Text("Xtream").tag(PlaylistSourceType.xtream)
                             Text("M3U").tag(PlaylistSourceType.m3u)
                             Text("Stalker").tag(PlaylistSourceType.stalker)
-                            Text("Stremio").tag(PlaylistSourceType.stremio)
                         }
                         .pickerStyle(.segmented)
                         .tint(themeManager.colors.accent)
@@ -89,7 +84,6 @@ struct LoginView: View {
                     case .xtream: xtreamSection
                     case .m3u: m3uSection
                     case .stalker: stalkerSection
-                    case .stremio: stremioSection
                     }
 
                     if let errorMessage {
@@ -246,25 +240,7 @@ struct LoginView: View {
             }
         }
 
-        private var stremioSection: some View {
-            Section {
-                TextField("e.g. My Addon", text: $name)
-                    .textContentType(.name)
-
-                TextField("e.g. https://example.com/", text: $stremioURL)
-                #if os(iOS)
-                    .textInputAutocapitalization(.never)
-                    .keyboardType(.URL)
-                #endif
-                    .autocorrectionDisabled()
-                    .textContentType(.URL)
-            } header: {
-                Text("Stremio Addon")
-            } footer: {
-                Text("Enter the manifest URL of a Stremio addon. The addon's catalogs will be synced automatically.")
-            }
-        }
-    #endif
+        #endif
 
     #if os(tvOS)
         private var stalkerHint: LocalizedStringKey {
@@ -272,7 +248,6 @@ struct LoginView: View {
             case .xtream: "Your credentials are stored locally on this device."
             case .m3u: "The EPG URL is read from the playlist when left empty."
             case .stalker: "Enter the portal URL and the MAC address your provider authorized."
-            case .stremio: "Enter the manifest URL of a Stremio addon."
             }
         }
 
@@ -292,7 +267,6 @@ struct LoginView: View {
                         Text("Xtream").tag(PlaylistSourceType.xtream)
                         Text("M3U").tag(PlaylistSourceType.m3u)
                         Text("Stalker").tag(PlaylistSourceType.stalker)
-                        Text("Stremio").tag(PlaylistSourceType.stremio)
                     }
                     .pickerStyle(.segmented)
                     .padding(.horizontal, TVSettingsMetrics.rowHPadding)
@@ -312,8 +286,6 @@ struct LoginView: View {
                             TVSettingsField(title: "MAC Address", placeholder: "00:1A:79:xx:xx:xx", text: $macAddress, contentType: nil)
                             TVSettingsField(title: "Username (optional)", placeholder: "Username", text: $username, contentType: .username)
                             TVSettingsField(title: "Password (optional)", placeholder: "Password", text: $password, isSecure: true, contentType: .password)
-                        case .stremio:
-                            TVSettingsField(title: "Manifest URL", placeholder: "e.g. https://example.com/", text: $stremioURL, contentType: .URL)
                         }
                     }
 
@@ -384,12 +356,6 @@ struct LoginView: View {
                 errorMessage = "Enter a playlist URL or choose a local file."
             case .stalker:
                 errorMessage = "Enter the portal URL to continue."
-            case .stremio:
-                if stremioURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    errorMessage = "Enter the manifest URL to continue."
-                } else if StremioURL.normalize(stremioURL) == nil {
-                    errorMessage = "Enter a valid manifest URL to continue."
-                }
             }
             return
         }
@@ -402,7 +368,6 @@ struct LoginView: View {
         case .xtream: loginXtream()
         case .m3u: addM3UPlaylist()
         case .stalker: addStalkerPlaylist()
-        case .stremio: addStremioPlaylist()
         }
     }
 
@@ -495,34 +460,6 @@ struct LoginView: View {
                 await persistAndFinish(playlist)
             } catch {
                 errorMessage = Self.verboseError(error, context: "Stalker portal \(portal)")
-                isLoading = false
-            }
-        }
-    }
-
-    private func addStremioPlaylist() {
-        isLoading = true
-        errorMessage = nil
-
-        let playlistName = trimmedName.isEmpty ? "My Addon" : trimmedName
-        let url = stremioURL.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        Task {
-            do {
-                var resolvedName = playlistName
-                try await withConnectionTimeout {
-                    let client = StremioClient()
-                    let manifest = try await client.fetchManifest(from: url)
-                    resolvedName = manifest.name
-                }
-                guard let normalized = StremioURL.normalize(url) else {
-                    throw StremioError.invalidURL
-                }
-                let playlist = Playlist(name: playlistName, stremioURL: normalized.absoluteString)
-                playlist.name = resolvedName
-                await persistAndFinish(playlist)
-            } catch {
-                errorMessage = Self.verboseError(error, context: "Stremio manifest \(url)")
                 isLoading = false
             }
         }

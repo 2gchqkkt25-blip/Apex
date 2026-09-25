@@ -44,7 +44,6 @@ enum SyncStep: Int, CaseIterable, Identifiable {
         case .xtream: xtreamSteps + [.epgGuide]
         case .m3u: m3uSteps + [.epgGuide]
         case .stalker: xtreamSteps + [.epgGuide]
-        case .stremio: [.playlistDownload, .playlistImport]
         }
     }
 

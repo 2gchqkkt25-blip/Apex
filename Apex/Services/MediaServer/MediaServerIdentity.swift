@@ -26,7 +26,7 @@ enum MediaServerIdentity {
 
     /// True when `categoryId` is a media-server library id (`{serverUUID}-library-…`).
     ///
-    /// IPTV / M3U / Stremio rows use `{playlistUUID}-vod-…` / `-series-…` and must
+    /// IPTV / M3U rows use `{playlistUUID}-vod-…` / `-series-…` and must
     /// not match. A group title that happens to contain "library" is still safe:
     /// the UUID has to sit immediately before `-library-`.
     static func isMediaServerCategoryID(_ categoryId: String?) -> Bool {

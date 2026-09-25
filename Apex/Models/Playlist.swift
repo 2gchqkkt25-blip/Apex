@@ -65,20 +65,12 @@ final class Playlist {
         self.macAddress = macAddress
     }
 
-    /// Creates a Stremio addon playlist. The manifest URL goes in `serverURL`.
-    /// Stremio addons are typically open and need no credentials.
-    convenience init(name: String, stremioURL: String) {
-        let normalized = StremioURL.normalize(stremioURL)?.absoluteString ?? stremioURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        self.init(name: name, serverURL: normalized, username: "", password: "")
-        sourceTypeRaw = PlaylistSourceType.stremio.rawValue
     }
-}
 
 enum PlaylistSourceType: String, Codable {
     case xtream
     case m3u
     case stalker
-    case stremio
 }
 
 enum SyncStatus: String, Codable {
@@ -100,9 +92,8 @@ extension Playlist {
 
     /// Whether content from this playlist can be downloaded for offline playback.
     /// Stalker portals hand out short-lived, per-session stream URLs, so there is
-    /// no stable URL to persist for offline use. Stremio streams are also resolved
-    /// at playback time.
+    /// no stable URL to persist for offline use.
     var supportsDownloads: Bool {
-        sourceType != .stalker && sourceType != .stremio
+        sourceType != .stalker
     }
 }

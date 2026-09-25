@@ -15,23 +15,18 @@ import SwiftUI
 enum PlaylistSelectionStore {
     /// `@AppStorage` key holding the selected playlist's `id.uuidString`.
     /// An empty value means "no explicit choice yet" — callers fall back to a
-    /// preferred catalog playlist (Xtream / M3U / Stalker before Stremio).
+    /// preferred catalog playlist (Xtream / M3U / Stalker).
     static let key = "apex.selectedPlaylistID"
 }
 
 extension [Playlist] {
     /// Lower is preferred when choosing a default after CloudKit restore or
     /// first launch with an empty `apex.selectedPlaylistID`.
-    ///
-    /// Stremio addons must not win the default slot ahead of Xtream/M3U/Stalker
-    /// — a fresh Apple TV install otherwise opens on Stremio while Live TV and
-    /// Movies look empty until the user manually selects (and syncs) Xtream.
     static func defaultSelectionPriority(of playlist: Playlist) -> Int {
         switch playlist.sourceType {
         case .xtream: 0
         case .m3u: 1
         case .stalker: 2
-        case .stremio: 3
         }
     }
 
@@ -45,8 +40,7 @@ extension [Playlist] {
         }
     }
 
-    /// Catalog providers first, then Stremio — used for auto-sync cover order
-    /// so Xtream populates before addon sync on a multi-playlist restore.
+    /// Catalog providers ordered alphabetically for auto-sync cover order.
     func orderedForAutoSync() -> [Playlist] {
         sorted { lhs, rhs in
             let left = Self.defaultSelectionPriority(of: lhs)

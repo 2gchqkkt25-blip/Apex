@@ -128,17 +128,12 @@ extension PlayableMedia {
 
     /// The playback URL for an on-demand item. For Stalker portals the stored
     /// `directURL` is a `create_link` command, wrapped in a placeholder the
-    /// player resolves at playback time. Stremio placeholders are similarly
-    /// resolved on-demand. Otherwise it is the m3u direct URL or a built Xtream
-    /// URL.
+    /// player resolves at playback time. Otherwise it is the m3u direct URL or
+    /// a built Xtream URL.
     private static func vodURL(directURL: String?, playlist: Playlist, build: () -> URL?) -> URL? {
         if playlist.sourceType == .stalker {
             guard let cmd = directURL else { return nil }
             return StalkerLink.placeholder(type: .vod, cmd: cmd)
-        }
-        if playlist.sourceType == .stremio {
-            guard let placeholder = directURL else { return nil }
-            return URL(string: "stremio://\(placeholder.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? placeholder)")
         }
         return directURL.flatMap(URL.init(string:)) ?? build()
     }
@@ -167,7 +162,7 @@ extension PlayableMedia {
         case .stalker:
             guard let cmd = episode.directSource, let placeholder = StalkerLink.placeholder(type: .vod, cmd: cmd) else { return nil }
             url = placeholder
-        case .m3u, .stremio:
+        case .m3u:
             guard let resolved = episode.directSource.flatMap(URL.init(string:)) else { return nil }
             url = resolved
         case .xtream:

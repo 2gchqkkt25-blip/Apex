@@ -257,7 +257,6 @@ struct MovieDetailView: View {
             case .xtream: "Xtream Codes"
             case .m3u: "M3U Playlist"
             case .stalker: "Stalker Portal"
-            case .stremio: "Stremio Addon"
             }
             rows.append(("Provider", "\(playlist.name) · \(sourceLabel)"))
         }

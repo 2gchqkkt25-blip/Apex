@@ -480,12 +480,11 @@ struct LiveTVView: View {
 
     private func handleChannelSelection(_ stream: LiveStream) {
         // Wi‑Fi corner preview: select a channel to audition it without leaving
-        // browse. Off in Settings, cellular, deferred Stalker/Stremio URLs, and
+        // browse. Off in Settings, cellular, deferred Stalker URLs, and
         // ExternalPlayback skip the float and go straight to fullscreen.
         guard let playlist = activePlaylist,
               let media = PlayableMedia.from(stream: stream, playlist: playlist) else { return }
         let needsResolve = StalkerLink.isPlaceholder(media.url)
-            || media.url.absoluteString.hasPrefix("stremio://")
         if previewEnabled,
            !needsResolve,
            NetworkMonitor.shared.shouldProceedWithHeavyNetworkWork(),

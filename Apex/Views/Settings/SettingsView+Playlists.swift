@@ -72,7 +72,7 @@ import SwiftUI
         /// playlist active (checkmark marks the current one); the pencil drills
         /// into its settings. The active id resolves through the same empty /
         /// deleted fallback the content tabs use (preferred catalog playlist
-        /// when none is stored — Xtream before Stremio).
+        /// when none is stored — Xtream preferred).
         private func tvPlaylistRow(_ playlist: Playlist) -> some View {
             let isActive = playlist.id.uuidString == effectivePlaylistID
             return HStack(spacing: 16) {

@@ -26,3 +26,18 @@ lefthook-local.yml
 # Claude Code skills (local-only)
 .claude/skills/
 .smbdelete*
+
+# Xcode temp/save documents
+(A Document Being Saved By Xcode*)/
+*.stringsdata
+DerivedData/
+.build/
+
+# Backup files
+*.bak
+
+# Audit/report artifacts not for repo
+AUDIT_REPORT.html
+Apex-Bug-Review.md
+15:
+180:

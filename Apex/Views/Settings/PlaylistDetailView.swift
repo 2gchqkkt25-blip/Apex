@@ -40,7 +40,6 @@ struct PlaylistDetailView: View {
         case .xtream: "Server"
         case .m3u: "M3U Playlist"
         case .stalker: "Stalker Portal"
-        case .stremio: "Stremio Addon"
         }
     }
 
@@ -50,7 +49,6 @@ struct PlaylistDetailView: View {
         case .xtream: "Server URL"
         case .m3u: "Playlist URL"
         case .stalker: "Portal URL"
-        case .stremio: "Manifest URL"
         }
     }
 
