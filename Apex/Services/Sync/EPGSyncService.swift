@@ -341,9 +341,11 @@ final class EPGSyncService {
             }
             Logger.database.info("EPG refresh finished (success: \(succeeded))")
         }
-        // Chain the heavy work after the UI-state task so `isSyncing = true`
-        // is committed before any background work begins.
-        _ = await syncTask.value
+        // The syncTask runs independently; we don't await it here because
+        // startSync is not async and the task's defer block handles cleanup
+        // and UI state resets on completion. The watchdog fix requires this
+        // work to run off the main actor, which means we can't block on it.
+        _ = syncTask
     }
 
     /// Races `body` against a timeout. Throws `CancellationError` if the timeout
