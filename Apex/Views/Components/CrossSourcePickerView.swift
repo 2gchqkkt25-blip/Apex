@@ -27,7 +27,13 @@ struct CrossSourcePickerView: View {
                 Button {
                     onSelect(item)
                 } label: {
-                    sourceRow(item)
+                    SourceRowView(
+                        item: item,
+                        currentID: currentID,
+                        playlists: playlists,
+                        mediaServers: mediaServers,
+                        themeManager: themeManager
+                    )
                 }
                 .buttonStyle(.plain)
             }
@@ -38,7 +44,7 @@ struct CrossSourcePickerView: View {
             #endif
             .navigationTitle("Choose Source")
             #if os(tvOS)
-                .navigationBarTitleDisplayMode(.inline)
+            .navigationBarTitleDisplayMode(.inline)
             #endif
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -47,23 +53,36 @@ struct CrossSourcePickerView: View {
             }
         }
     }
+}
 
-    // MARK: - Row
+// MARK: - Row View (extracted to avoid complex expression diagnostics)
 
-    private func sourceRow(_ item: HomeMediaItem) -> some View {
+private struct SourceRowView: View {
+    let item: HomeMediaItem
+    let currentID: String
+    let playlists: [Playlist]
+    let mediaServers: [MediaServer]
+    let themeManager: ThemeManager
+
+    var body: some View {
         HStack(spacing: 12) {
-            posterThumbnail(item)
+            PosterThumbnailView(item: item)
                 .frame(width: 48, height: 72)
                 .clipShape(RoundedRectangle(cornerRadius: 6))
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(sourceLabel(item))
+                Text(sourceLabel)
                     .font(.headline)
                     .foregroundStyle(themeManager.colors.primaryText)
 
                 HStack(spacing: 6) {
-                    sourceTypeBadge(item)
-                    if let quality = qualityHint(item) {
+                    SourceTypeBadgeView(
+                        item: item,
+                        playlists: playlists,
+                        mediaServers: mediaServers,
+                        themeManager: themeManager
+                    )
+                    if let quality = qualityHint {
                         Text(quality)
                             .font(.caption2)
                             .foregroundStyle(themeManager.colors.secondaryText)
@@ -82,33 +101,7 @@ struct CrossSourcePickerView: View {
         .padding(.vertical, 4)
     }
 
-    @ViewBuilder
-    private func posterThumbnail(_ item: HomeMediaItem) -> some View {
-        switch item {
-        case .movie(let movie):
-            CachedAsyncImage(url: movie.streamIcon.flatMap(URL.init(string:))) { phase in
-                if case .success(let image) = phase {
-                    image.resizable().aspectRatio(contentMode: .fill)
-                } else {
-                    Color.gray.opacity(0.3)
-                }
-            }
-        case .series(let series):
-            CachedAsyncImage(url: series.cover.flatMap(URL.init(string:))) { phase in
-                if case .success(let image) = phase {
-                    image.resizable().aspectRatio(contentMode: .fill)
-                } else {
-                    Color.gray.opacity(0.3)
-                }
-            }
-        default:
-            Color.gray.opacity(0.3)
-        }
-    }
-
-    // MARK: - Labels
-
-    private func sourceLabel(_ item: HomeMediaItem) -> String {
+    private var sourceLabel: String {
         let ownerID = ownerUUID(from: item.id)
         if let playlist = playlists.first(where: { $0.id.uuidString == ownerID }) {
             return playlist.name
@@ -119,29 +112,7 @@ struct CrossSourcePickerView: View {
         return "Unknown Source"
     }
 
-    @ViewBuilder
-    private func sourceTypeBadge(_ item: HomeMediaItem) -> some View {
-        let ownerID = ownerUUID(from: item.id)
-        if let playlist = playlists.first(where: { $0.id.uuidString == ownerID }) {
-            Text(playlist.sourceType.localizedName)
-                .font(.caption2.bold())
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .background(themeManager.colors.accent.opacity(0.2))
-                .clipShape(Capsule())
-                .foregroundStyle(themeManager.colors.accent)
-        } else if let server = mediaServers.first(where: { $0.id.uuidString == ownerID }) {
-            Text(server.kind.displayName)
-                .font(.caption2.bold())
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .background(Color.orange.opacity(0.2))
-                .clipShape(Capsule())
-                .foregroundStyle(.orange)
-        }
-    }
-
-    private func qualityHint(_ item: HomeMediaItem) -> String? {
+    private var qualityHint: String? {
         switch item {
         case .movie(let movie):
             if let duration = movie.durationSecs, duration > 0 {
@@ -157,17 +128,109 @@ struct CrossSourcePickerView: View {
             return nil
         }
     }
+}
 
-    /// Extracts the owner UUID prefix from a content id like `<uuid>-movie-<streamId>`.
-    private func ownerUUID(from contentID: String) -> String? {
-        let parts = contentID.components(separatedBy: "-movie-")
-        if parts.count >= 2 { return parts[0] }
-        let seriesParts = contentID.components(separatedBy: "-series-")
-        if seriesParts.count >= 2 { return seriesParts[0] }
-        let episodeParts = contentID.components(separatedBy: "-episode-")
-        if episodeParts.count >= 2 { return episodeParts[0] }
-        return nil
+// MARK: - Poster Thumbnail (extracted to isolate CachedAsyncImage usage)
+
+private struct PosterThumbnailView: View {
+    let item: HomeMediaItem
+
+    var body: some View {
+        Group {
+            switch item {
+            case .movie(let movie):
+                if let url = movie.streamIcon.flatMap(URL.init(string:)) {
+                    CachedAsyncImage(url: url) { phase in
+                        switch phase {
+                        case .success(let image):
+                            image.resizable().aspectRatio(contentMode: .fill)
+                        case .empty:
+                            Color.gray.opacity(0.3)
+                        case .failure:
+                            Color.gray.opacity(0.3)
+                        @unknown default:
+                            Color.gray.opacity(0.3)
+                        }
+                    }
+                } else {
+                    Color.gray.opacity(0.3)
+                }
+            case .series(let series):
+                if let url = series.cover.flatMap(URL.init(string:)) {
+                    CachedAsyncImage(url: url) { phase in
+                        switch phase {
+                        case .success(let image):
+                            image.resizable().aspectRatio(contentMode: .fill)
+                        case .empty:
+                            Color.gray.opacity(0.3)
+                        case .failure:
+                            Color.gray.opacity(0.3)
+                        @unknown default:
+                            Color.gray.opacity(0.3)
+                        }
+                    }
+                } else {
+                    Color.gray.opacity(0.3)
+                }
+            default:
+                Color.gray.opacity(0.3)
+            }
+        }
     }
+}
+
+// MARK: - Source Type Badge (extracted to simplify parent expression)
+
+private struct SourceTypeBadgeView: View {
+    let item: HomeMediaItem
+    let playlists: [Playlist]
+    let mediaServers: [MediaServer]
+    let themeManager: ThemeManager
+
+    var body: some View {
+        Group {
+            if let playlist = matchingPlaylist {
+                Text(playlist.sourceType.localizedName)
+                    .font(.caption2.bold())
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(themeManager.colors.accent.opacity(0.2))
+                    .clipShape(Capsule())
+                    .foregroundStyle(themeManager.colors.accent)
+            } else if let server = matchingServer {
+                Text(server.kind.displayName)
+                    .font(.caption2.bold())
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.orange.opacity(0.2))
+                    .clipShape(Capsule())
+                    .foregroundStyle(.orange)
+            }
+        }
+    }
+
+    private var matchingPlaylist: Playlist? {
+        guard let ownerID = ownerUUID(from: item.id) else { return nil }
+        return playlists.first(where: { $0.id.uuidString == ownerID })
+    }
+
+    private var matchingServer: MediaServer? {
+        guard let ownerID = ownerUUID(from: item.id) else { return nil }
+        return mediaServers.first(where: { $0.id.uuidString == ownerID })
+    }
+}
+
+// MARK: - Helpers
+
+/// Extracts the owner UUID prefix from a content id like `<uuid>-movie-<streamId>`.
+private func ownerUUID(from contentID: String) -> String? {
+    let parts = contentID.components(separatedBy: "-movie-")
+    if parts.count >= 2 { return parts[0] }
+    let seriesParts = contentID.components(separatedBy: "-series-")
+    if seriesParts.count >= 2 { return seriesParts[0] }
+    let episodeParts = contentID.components(separatedBy: "-episode-")
+    if episodeParts.count >= 2 { return episodeParts[0] }
+    return nil
 }
 
 private extension PlaylistSourceType {
