@@ -9,6 +9,21 @@
 
 import SwiftUI
 
+// MARK: - Row data (top-level to avoid nested-type inference issues)
+
+struct CrossSourceRowData: Identifiable {
+    let id: String
+    let item: HomeMediaItem
+    let displayName: String
+    let badgeLabel: String?
+    let isMediaServer: Bool
+    let qualityHint: String?
+    let posterURL: URL?
+    let isCurrent: Bool
+}
+
+// MARK: - Picker view
+
 struct CrossSourcePickerView: View {
     let items: [HomeMediaItem]
     let currentID: String
@@ -19,24 +34,11 @@ struct CrossSourcePickerView: View {
 
     @Environment(ThemeManager.self) private var themeManager
 
-    struct RowData: Identifiable {
-        let id: String
-        let item: HomeMediaItem
-        let displayName: String
-        let badgeLabel: String?
-        let isMediaServer: Bool
-        let qualityHint: String?
-        let posterURL: URL?
-        let isCurrent: Bool
-    }
-
-    @State private var rowData: [RowData] = []
-
     var body: some View {
         NavigationStack {
             ScrollView {
                 LazyVStack(spacing: 0) {
-                    ForEach(rowData) { row in
+                    ForEach(computeRows()) { row in
                         Button(action: { onSelect(row.item) }) {
                             HStack(spacing: 12) {
                                 PosterImage(url: row.posterURL)
@@ -90,13 +92,12 @@ struct CrossSourcePickerView: View {
                 }
             }
         }
-        .onAppear { updateRowData() }
     }
 
-    // MARK: - Data resolution (called imperatively, never from body)
+    // MARK: - Pure row computation (no @State, no closures in body)
 
-    private func updateRowData() {
-        var result: [RowData] = []
+    private func computeRows() -> [CrossSourceRowData] {
+        var result: [CrossSourceRowData] = []
         result.reserveCapacity(items.count)
         for item in items {
             let uuid = ownerUUID(for: item)
@@ -125,7 +126,7 @@ struct CrossSourcePickerView: View {
             let hint = qualityHint(for: item)
             let poster = posterURL(for: item)
             let name = pName ?? sName ?? "Unknown Source"
-            result.append(RowData(
+            result.append(CrossSourceRowData(
                 id: item.id,
                 item: item,
                 displayName: name,
@@ -136,7 +137,7 @@ struct CrossSourcePickerView: View {
                 isCurrent: item.id == currentID
             ))
         }
-        rowData = result
+        return result
     }
 
     private func ownerUUID(for item: HomeMediaItem) -> String? {
