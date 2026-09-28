@@ -158,14 +158,14 @@ struct CrossSourcePickerView: View {
 
     private func badgeLabel(for item: HomeMediaItem, uuid: String?) -> String? {
         guard let uuid else { return nil }
-        if let p = playlists.first(where: { $0.id.uuidString == uuid }) {
+        for p in playlists where p.id.uuidString == uuid {
             switch p.sourceType {
             case .xtream: return "Xtream"
             case .m3u: return "M3U"
             case .stalker: return "Stalker"
             }
         }
-        if let s = mediaServers.first(where: { $0.id.uuidString == uuid }) {
+        for s in mediaServers where s.id.uuidString == uuid {
             return s.kind.displayName
         }
         return nil
