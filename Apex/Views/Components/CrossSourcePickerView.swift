@@ -27,7 +27,7 @@ struct CrossSourcePickerView: View {
                 Button {
                     onSelect(item)
                 } label: {
-                    sourceRow(for: item)
+                    sourceRow(item)
                 }
                 .buttonStyle(.plain)
             }
@@ -50,21 +50,20 @@ struct CrossSourcePickerView: View {
 
     // MARK: - Row
 
-    @ViewBuilder
-    private func sourceRow(for item: HomeMediaItem) -> some View {
+    private func sourceRow(_ item: HomeMediaItem) -> some View {
         HStack(spacing: 12) {
-            posterThumbnail(for: item)
+            posterThumbnail(item)
                 .frame(width: 48, height: 72)
                 .clipShape(RoundedRectangle(cornerRadius: 6))
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(sourceLabel(for: item))
+                Text(sourceLabel(item))
                     .font(.headline)
                     .foregroundStyle(themeManager.colors.primaryText)
 
                 HStack(spacing: 6) {
-                    sourceTypeBadge(for: item)
-                    if let quality = qualityHint(for: item) {
+                    sourceTypeBadge(item)
+                    if let quality = qualityHint(item) {
                         Text(quality)
                             .font(.caption2)
                             .foregroundStyle(themeManager.colors.secondaryText)
@@ -84,23 +83,21 @@ struct CrossSourcePickerView: View {
     }
 
     @ViewBuilder
-    private func posterThumbnail(for item: HomeMediaItem) -> some View {
+    private func posterThumbnail(_ item: HomeMediaItem) -> some View {
         switch item {
         case .movie(let movie):
             CachedAsyncImage(url: movie.streamIcon.flatMap(URL.init(string:))) { phase in
-                switch phase {
-                case .success(let image):
+                if case .success(let image) = phase {
                     image.resizable().aspectRatio(contentMode: .fill)
-                default:
+                } else {
                     Color.gray.opacity(0.3)
                 }
             }
         case .series(let series):
             CachedAsyncImage(url: series.cover.flatMap(URL.init(string:))) { phase in
-                switch phase {
-                case .success(let image):
+                if case .success(let image) = phase {
                     image.resizable().aspectRatio(contentMode: .fill)
-                default:
+                } else {
                     Color.gray.opacity(0.3)
                 }
             }
@@ -111,7 +108,7 @@ struct CrossSourcePickerView: View {
 
     // MARK: - Labels
 
-    private func sourceLabel(for item: HomeMediaItem) -> String {
+    private func sourceLabel(_ item: HomeMediaItem) -> String {
         let ownerID = ownerUUID(from: item.id)
         if let playlist = playlists.first(where: { $0.id.uuidString == ownerID }) {
             return playlist.name
@@ -123,10 +120,10 @@ struct CrossSourcePickerView: View {
     }
 
     @ViewBuilder
-    private func sourceTypeBadge(for item: HomeMediaItem) -> some View {
+    private func sourceTypeBadge(_ item: HomeMediaItem) -> some View {
         let ownerID = ownerUUID(from: item.id)
         if let playlist = playlists.first(where: { $0.id.uuidString == ownerID }) {
-            Text(playlist.sourceType.displayName)
+            Text(playlist.sourceType.localizedName)
                 .font(.caption2.bold())
                 .padding(.horizontal, 6)
                 .padding(.vertical, 2)
@@ -144,7 +141,7 @@ struct CrossSourcePickerView: View {
         }
     }
 
-    private func qualityHint(for item: HomeMediaItem) -> String? {
+    private func qualityHint(_ item: HomeMediaItem) -> String? {
         switch item {
         case .movie(let movie):
             if let duration = movie.durationSecs, duration > 0 {
@@ -170,5 +167,15 @@ struct CrossSourcePickerView: View {
         let episodeParts = contentID.components(separatedBy: "-episode-")
         if episodeParts.count >= 2 { return episodeParts[0] }
         return nil
+    }
+}
+
+private extension PlaylistSourceType {
+    var localizedName: String {
+        switch self {
+        case .xtream: "Xtream"
+        case .m3u: "M3U"
+        case .stalker: "Stalker"
+        }
     }
 }
