@@ -29,6 +29,8 @@
         @State private var refreshToken: UUID = .init()
         @State private var isLoadingTMDB: Bool
         @State private var showYouTubeUnavailable = false
+        @State private var crossSourceItems: [HomeMediaItem] = []
+        @State private var showCrossSourcePicker = false
 
         private enum FocusTarget: Hashable {
             case play
@@ -104,7 +106,7 @@
                 guard playingMedia == nil else { return }
                 maybeAutoplay()
                 if hadCachedEpisodes {
-                    Task { await refreshEpisodesFromProvider() }
+                    await refreshEpisodesFromProvider()
                 }
                 // Cap enrichment at 15 s so a hung TMDB/OMDb call can't freeze
                 // the detail screen forever (tvOS network timeouts, rate limits).
@@ -119,6 +121,8 @@
                 }
                 guard playingMedia == nil else { return }
                 await SeriesEpisodeCatalog.mergeGuideEpisodes(into: series, context: modelContext)
+                refreshToken = UUID()
+                selectedSeason = determineDefaultSeason()
                 // Ratings are best-effort; run inline but don't let them block
                 // the rest of the setup if they hang.
                 await enrichSeriesRatingsIfNeeded(series, context: modelContext)
@@ -148,6 +152,8 @@
                 }
                 if series.tmdbEnrichedAt != nil {
                     await SeriesEpisodeCatalog.mergeGuideEpisodes(into: series, context: modelContext)
+                    refreshToken = UUID()
+                    selectedSeason = determineDefaultSeason()
                     await enrichSeriesRatingsIfNeeded(series, context: modelContext)
                     if !series.isMediaServerCatalogItem {
                         resolveSimilar()
@@ -196,6 +202,14 @@
             }
             .scrollClipDisabled()
             .defaultFocus($focus, .play)
+            .sheet(isPresented: $showCrossSourcePicker) {
+                CrossSourcePickerView(
+                    items: crossSourceItems,
+                    currentID: series.id,
+                    onSelect: playFromCrossSource,
+                    onCancel: { showCrossSourcePicker = false }
+                )
+            }
         }
 
         // MARK: - Hero
@@ -423,7 +437,8 @@
         }
 
         private var availableSeasons: [Int] {
-            Set(series.episodes.map(\.seasonNum)).sorted()
+            _ = refreshToken
+            return Set(series.episodes.map(\.seasonNum)).sorted()
         }
 
         private func determineDefaultSeason() -> Int {
@@ -442,9 +457,8 @@
         }
 
         private var seasonEpisodes: [Episode] {
-            series.episodes
-                .filter { $0.seasonNum == selectedSeason }
-                .sorted { $0.episodeNum < $1.episodeNum }
+            _ = refreshToken
+            return SeriesEpisodeCatalog.episodesForDisplay(series.episodes, season: selectedSeason)
         }
 
         /// The furthest partially-watched (not completed) episode in the
@@ -551,6 +565,7 @@
                 } catch {
                     Logger.network.error("Media server episode load failed: \(error.localizedDescription, privacy: .public)")
                 }
+                SeriesEpisodeCatalog.pruneShadowedGuideEpisodes(in: series, context: modelContext)
                 selectedSeason = determineDefaultSeason()
                 return
             }
@@ -568,6 +583,7 @@
             // updates reactively. Batched saves + yields keep the main thread
             // responsive even for series with hundreds of episodes (tvOS watchdog).
             await series.insertEpisodes(parsed, into: modelContext)
+            SeriesEpisodeCatalog.pruneShadowedGuideEpisodes(in: series, context: modelContext)
             selectedSeason = determineDefaultSeason()
         }
 
@@ -628,6 +644,14 @@
 
     private extension TVSeriesDetailView {
         func playEpisode(_ episode: Episode) {
+            // When the same series exists in multiple configured sources, show
+            // a source picker so the user can choose which provider to stream from.
+            let sources = OtherSources.resolveCrossSource(for: series, in: modelContext)
+            if sources.count > 1 {
+                crossSourceItems = sources
+                showCrossSourcePicker = true
+                return
+            }
             Logger.player.info("[SeriesPlay] User tapped S\(episode.seasonNum) E\(episode.episodeNum) '\(episode.title, privacy: .public)' id=\(episode.id, privacy: .public) episodeId=\(episode.episodeId, privacy: .public)")
             let media: PlayableMedia?
             if series.isMediaServerCatalogItem {
@@ -644,6 +668,31 @@
             Logger.player.info("[SeriesPlay] Built media url=\(media.url.absoluteString, privacy: .public) contentRef=\(String(describing: media.contentRef), privacy: .public)")
             if ExternalPlayback.open(media) { return }
             playingMedia = media
+        }
+
+        /// Plays an episode from the series selected in the cross-source picker.
+        func playFromCrossSource(_ item: HomeMediaItem) {
+            showCrossSourcePicker = false
+            switch item {
+            case .series(let s):
+                // Find the matching episode in the selected series by season/episode number
+                guard let currentEp = nextEpisode ?? seasonEpisodes.first,
+                      let matchEp = s.episodes.first(where: {
+                          $0.seasonNumber == currentEp.seasonNumber && $0.episodeNumber == currentEp.episodeNumber
+                      }) else { return }
+                if s.isMediaServerCatalogItem {
+                    guard let media = PlayableMedia.fromMediaServerEpisode(matchEp) else { return }
+                    if ExternalPlayback.open(media) { return }
+                    playingMedia = media
+                    return
+                }
+                guard let playlist = playlists.first(where: { s.id.hasPrefix($0.id.uuidString) }),
+                      let media = PlayableMedia.from(episode: matchEp, playlist: playlist) else { return }
+                if ExternalPlayback.open(media) { return }
+                playingMedia = media
+            default:
+                break
+            }
         }
 
         func maybeAutoplay() {
