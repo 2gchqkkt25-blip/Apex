@@ -669,14 +669,18 @@ private enum MediaServerSyncRunner {
             movie.plot = item.overview
             movie.genre = item.genres.joined(separator: ", ")
         }
+        // TMDB/IMDb IDs are tiny integers that unlock detail-screen enrichment;
+        // they must persist even when minimal/lite sync skips plot/genre/duration
+        // on tvOS. Without them, MediaServerDetailEnrichment falls back to text
+        // search which often fails for media-server titles.
+        if let tmdbId = item.providerTMDBId {
+            movie.tmdbId = tmdbId
+            movie.tmdbEnrichedAt = Date()
+        }
+        if let imdb = item.providerIMDBId { movie.imdbId = imdb }
         if !minimal {
             movie.releaseDate = item.productionYear.map(String.init)
             movie.durationSecs = item.runTimeTicks.map { Int($0 / 10_000_000) }
-            if let tmdbId = item.providerTMDBId {
-                movie.tmdbId = tmdbId
-                movie.tmdbEnrichedAt = Date()
-            }
-            if let imdb = item.providerIMDBId { movie.imdbId = imdb }
         }
         movie.directURL = "mediaserver:///\(server.uuidString)/\(item.id)/movie"
         movie.categoryId = categoryId
@@ -726,13 +730,17 @@ private enum MediaServerSyncRunner {
             series.plot = item.overview
             series.genre = item.genres.joined(separator: ", ")
         }
+        // TMDB/IMDb IDs are tiny integers that unlock detail-screen enrichment;
+        // they must persist even when minimal/lite sync skips plot/genre/duration
+        // on tvOS. Without them, MediaServerDetailEnrichment falls back to text
+        // search which often fails for media-server titles.
+        if let tmdbId = item.providerTMDBId {
+            series.tmdbId = tmdbId
+            series.tmdbEnrichedAt = Date()
+        }
+        if let imdb = item.providerIMDBId { series.imdbId = imdb }
         if !minimal {
             series.releaseDate = item.productionYear.map(String.init)
-            if let tmdbId = item.providerTMDBId {
-                series.tmdbId = tmdbId
-                series.tmdbEnrichedAt = Date()
-            }
-            if let imdb = item.providerIMDBId { series.imdbId = imdb }
         }
         series.categoryId = categoryId
         series.lastModified = syncStamp
