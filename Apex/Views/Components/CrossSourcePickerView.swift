@@ -62,9 +62,11 @@ struct CrossSourcePickerView: View {
 
     private func ownerUUID(for item: HomeMediaItem) -> String? {
         let id = item.id
-        if let range = id.range(of: "-movie-") { return String(id[id.startIndex..<range.lowerBound]) }
-        if let range = id.range(of: "-series-") { return String(id[id.startIndex..<range.lowerBound]) }
-        if let range = id.range(of: "-episode-") { return String(id[id.startIndex..<range.lowerBound]) }
+        let separators = ["-movie-", "-series-", "-episode-"]
+        for sep in separators {
+            let parts = id.components(separatedBy: sep)
+            if parts.count >= 2 { return parts[0] }
+        }
         return nil
     }
 
