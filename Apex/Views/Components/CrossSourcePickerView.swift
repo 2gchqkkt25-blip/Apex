@@ -4,8 +4,7 @@
 //
 //  A modal sheet that lets users choose which configured source (playlist or
 //  media server) to play a movie or series from when the same title exists
-//  in multiple places. Each row shows the source name, type badge, and
-//  quality/resolution hint when available.
+//  in multiple places.
 //
 
 import SwiftData
@@ -23,18 +22,29 @@ struct CrossSourcePickerView: View {
 
     var body: some View {
         NavigationStack {
-            List(items) { item in
-                Button {
-                    onSelect(item)
-                } label: {
-                    makeRow(for: item)
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    ForEach(items) { item in
+                        Button {
+                            onSelect(item)
+                        } label: {
+                            RowContent(
+                                item: item,
+                                currentID: currentID,
+                                playlists: playlists,
+                                mediaServers: mediaServers,
+                                colors: themeManager.colors
+                            )
+                        }
+                        .buttonStyle(.plain)
+
+                        Divider().padding(.leading, 72)
+                    }
                 }
-                .buttonStyle(.plain)
+                .padding(.vertical, 8)
             }
             #if os(macOS)
-            .listStyle(.inset)
-            #else
-            .listStyle(.insetGrouped)
+            .frame(minWidth: 400, minHeight: 300)
             #endif
             .navigationTitle("Choose Source")
             #if os(tvOS)
@@ -47,58 +57,59 @@ struct CrossSourcePickerView: View {
             }
         }
     }
+}
 
-    // MARK: - Row factory (returns AnyView to break expression tree)
+// MARK: - Row Content (standalone struct, no closures, no AnyView)
 
-    private func makeRow(for item: HomeMediaItem) -> AnyView {
-        let uuid = ownerUUID(for: item)
-        let pName = uuid.flatMap { u in playlists.first(where: { $0.id.uuidString == u })?.name }
-        let sName = uuid.flatMap { u in mediaServers.first(where: { $0.id.uuidString == u })?.name }
-        let isMS = uuid.map { u in mediaServers.contains(where: { $0.id.uuidString == u }) } ?? false
-        let label = sourceTypeLabel(for: item, uuid: uuid)
-        let hint = qualityHint(for: item)
-        let poster = posterURL(for: item)
-        let isCur = item.id == currentID
-        let colors = themeManager.colors
+private struct RowContent: View {
+    let item: HomeMediaItem
+    let currentID: String
+    let playlists: [Playlist]
+    let mediaServers: [MediaServer]
+    let colors: ThemeColors
 
-        return AnyView(
-            HStack(spacing: 12) {
-                PosterImage(url: poster)
-                    .frame(width: 48, height: 72)
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
+    var body: some View {
+        HStack(spacing: 12) {
+            PosterImage(url: posterURL)
+                .frame(width: 48, height: 72)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
 
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(pName ?? sName ?? "Unknown Source")
-                        .font(.headline)
-                        .foregroundStyle(colors.primaryText)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(displayName)
+                    .font(.headline)
+                    .foregroundStyle(colors.primaryText)
 
-                    HStack(spacing: 6) {
-                        if let l = label {
-                            Badge(label: l, isMediaServer: isMS, theme: colors)
-                        }
-                        if let q = hint {
-                            Text(q)
-                                .font(.caption2)
-                                .foregroundStyle(colors.secondaryText)
-                        }
+                HStack(spacing: 6) {
+                    if let badge = badgeLabel {
+                        BadgeView(
+                            label: badge,
+                            isMediaServer: isMediaServer,
+                            colors: colors
+                        )
+                    }
+                    if let hint = qualityHint {
+                        Text(hint)
+                            .font(.caption2)
+                            .foregroundStyle(colors.secondaryText)
                     }
                 }
-
-                Spacer()
-
-                if isCur {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(colors.accent)
-                        .font(.title3)
-                }
             }
-            .padding(.vertical, 4)
-        )
+
+            Spacer()
+
+            if item.id == currentID {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(colors.accent)
+                    .font(.title3)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
     }
 
-    // MARK: - Data helpers
+    // MARK: - Computed properties (simple, no nested expressions)
 
-    private func ownerUUID(for item: HomeMediaItem) -> String? {
+    private var ownerUUID: String? {
         switch item {
         case .movie(let m):
             let parts = m.id.components(separatedBy: "-movie-")
@@ -111,22 +122,38 @@ struct CrossSourcePickerView: View {
         }
     }
 
-    private func sourceTypeLabel(for item: HomeMediaItem, uuid: String?) -> String? {
-        guard let uuid else { return nil }
-        if let playlist = playlists.first(where: { $0.id.uuidString == uuid }) {
-            switch playlist.sourceType {
+    private var displayName: String {
+        guard let uuid = ownerUUID else { return "Unknown Source" }
+        if let p = playlists.first(where: { $0.id.uuidString == uuid }) {
+            return p.name
+        }
+        if let s = mediaServers.first(where: { $0.id.uuidString == uuid }) {
+            return s.name
+        }
+        return "Unknown Source"
+    }
+
+    private var isMediaServer: Bool {
+        guard let uuid = ownerUUID else { return false }
+        return mediaServers.contains(where: { $0.id.uuidString == uuid })
+    }
+
+    private var badgeLabel: String? {
+        guard let uuid = ownerUUID else { return nil }
+        if let p = playlists.first(where: { $0.id.uuidString == uuid }) {
+            switch p.sourceType {
             case .xtream: return "Xtream"
             case .m3u: return "M3U"
             case .stalker: return "Stalker"
             }
         }
-        if let server = mediaServers.first(where: { $0.id.uuidString == uuid }) {
-            return server.kind.displayName
+        if let s = mediaServers.first(where: { $0.id.uuidString == uuid }) {
+            return s.kind.displayName
         }
         return nil
     }
 
-    private func qualityHint(for item: HomeMediaItem) -> String? {
+    private var qualityHint: String? {
         switch item {
         case .movie(let m):
             guard let d = m.durationSecs, d > 0 else { return nil }
@@ -139,7 +166,7 @@ struct CrossSourcePickerView: View {
         }
     }
 
-    private func posterURL(for item: HomeMediaItem) -> URL? {
+    private var posterURL: URL? {
         switch item {
         case .movie(let m): return m.streamIcon.flatMap(URL.init(string:))
         case .series(let s): return s.cover.flatMap(URL.init(string:))
@@ -169,18 +196,18 @@ private struct PosterImage: View {
 
 // MARK: - Badge (trivial leaf view)
 
-private struct Badge: View {
+private struct BadgeView: View {
     let label: String
     let isMediaServer: Bool
-    let theme: ThemeColors
+    let colors: ThemeColors
 
     var body: some View {
         Text(label)
             .font(.caption2.bold())
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
-            .background(isMediaServer ? Color.orange.opacity(0.2) : theme.accent.opacity(0.2))
+            .background(isMediaServer ? Color.orange.opacity(0.2) : colors.accent.opacity(0.2))
             .clipShape(Capsule())
-            .foregroundStyle(isMediaServer ? .orange : theme.accent)
+            .foregroundStyle(isMediaServer ? .orange : colors.accent)
     }
 }
