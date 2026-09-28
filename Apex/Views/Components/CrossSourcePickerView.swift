@@ -1,12 +1,11 @@
 //
-//  CrossSourcePickerView.swift
-//  Apex
+// CrossSourcePickerView.swift
+// Apex
 //
-//  A modal sheet that lets users choose which configured source (playlist or
-//  media server) to play a movie or series from when the same title exists
-//  in multiple places.
+// A modal sheet that lets users choose which configured source (playlist or
+// media server) to play a movie or series from when the same title exists
+// in multiple places.
 //
-
 import SwiftData
 import SwiftUI
 
@@ -20,7 +19,7 @@ struct CrossSourcePickerView: View {
     @Query private var playlists: [Playlist]
     @Query private var mediaServers: [MediaServer]
 
-    private struct RowData: Identifiable {
+    struct RowData: Identifiable {
         let id: String
         let item: HomeMediaItem
         let displayName: String
@@ -31,7 +30,74 @@ struct CrossSourcePickerView: View {
         let isCurrent: Bool
     }
 
-    private var rowData: [RowData] {
+    @State private var rowData: [RowData] = []
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    ForEach(rowData) { row in
+                        Button(action: { onSelect(row.item) }) {
+                            HStack(spacing: 12) {
+                                PosterImage(url: row.posterURL)
+                                    .frame(width: 48, height: 72)
+                                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(row.displayName)
+                                        .font(.headline)
+                                        .foregroundStyle(themeManager.colors.primaryText)
+                                    HStack(spacing: 6) {
+                                        if let badge = row.badgeLabel {
+                                            BadgeView(
+                                                label: badge,
+                                                isMediaServer: row.isMediaServer,
+                                                colors: themeManager.colors
+                                            )
+                                        }
+                                        if let hint = row.qualityHint {
+                                            Text(hint)
+                                                .font(.caption2)
+                                                .foregroundStyle(themeManager.colors.secondaryText)
+                                        }
+                                    }
+                                }
+                                Spacer()
+                                if row.isCurrent {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundStyle(themeManager.colors.accent)
+                                        .font(.title3)
+                                }
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
+                        }
+                        .buttonStyle(.plain)
+                        Divider().padding(.leading, 72)
+                    }
+                }
+                .padding(.vertical, 8)
+            }
+            #if os(macOS)
+            .frame(minWidth: 400, minHeight: 300)
+            #endif
+            .navigationTitle("Choose Source")
+            #if os(tvOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel", action: onCancel)
+                }
+            }
+        }
+        .onAppear { updateRowData() }
+        .onChange(of: playlists.count) { updateRowData() }
+        .onChange(of: mediaServers.count) { updateRowData() }
+    }
+
+    // MARK: - Data resolution (called imperatively, never from body)
+
+    private func updateRowData() {
         var result: [RowData] = []
         result.reserveCapacity(items.count)
         for item in items {
@@ -51,14 +117,13 @@ struct CrossSourcePickerView: View {
                         break
                     }
                 } else {
-                    // Check if also a media server (shouldn't happen but be safe)
                     for s in mediaServers where s.id.uuidString == uuid {
                         isMS = true
                         break
                     }
                 }
             }
-            let badge = badgeLabel(for: item, uuid: uuid)
+            let badge = badgeLabel(uuid: uuid)
             let hint = qualityHint(for: item)
             let poster = posterURL(for: item)
             let name = pName ?? sName ?? "Unknown Source"
@@ -73,75 +138,8 @@ struct CrossSourcePickerView: View {
                 isCurrent: item.id == currentID
             ))
         }
-        return result
+        rowData = result
     }
-
-    var body: some View {
-        NavigationStack {
-            ScrollView {
-                LazyVStack(spacing: 0) {
-                    ForEach(rowData) { row in
-                        Button(action: { onSelect(row.item) }) {
-                            HStack(spacing: 12) {
-                                PosterImage(url: row.posterURL)
-                                    .frame(width: 48, height: 72)
-                                    .clipShape(RoundedRectangle(cornerRadius: 6))
-
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(row.displayName)
-                                        .font(.headline)
-                                        .foregroundStyle(themeManager.colors.primaryText)
-
-                                    HStack(spacing: 6) {
-                                        if let badge = row.badgeLabel {
-                                            BadgeView(
-                                                label: badge,
-                                                isMediaServer: row.isMediaServer,
-                                                colors: themeManager.colors
-                                            )
-                                        }
-                                        if let hint = row.qualityHint {
-                                            Text(hint)
-                                                .font(.caption2)
-                                                .foregroundStyle(themeManager.colors.secondaryText)
-                                        }
-                                    }
-                                }
-
-                                Spacer()
-
-                                if row.isCurrent {
-                                    Image(systemName: "checkmark.circle.fill")
-                                        .foregroundStyle(themeManager.colors.accent)
-                                        .font(.title3)
-                                }
-                            }
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 8)
-                        }
-                        .buttonStyle(.plain)
-
-                        Divider().padding(.leading, 72)
-                    }
-                }
-                .padding(.vertical, 8)
-            }
-            #if os(macOS)
-            .frame(minWidth: 400, minHeight: 300)
-            #endif
-            .navigationTitle("Choose Source")
-            #if os(tvOS)
-            .navigationBarTitleDisplayMode(.inline)
-            #endif
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel", action: onCancel)
-                }
-            }
-        }
-    }
-
-    // MARK: - Pure data helpers
 
     private func ownerUUID(for item: HomeMediaItem) -> String? {
         switch item {
@@ -156,7 +154,7 @@ struct CrossSourcePickerView: View {
         }
     }
 
-    private func badgeLabel(for item: HomeMediaItem, uuid: String?) -> String? {
+    private func badgeLabel(uuid: String?) -> String? {
         guard let uuid else { return nil }
         for p in playlists where p.id.uuidString == uuid {
             switch p.sourceType {
@@ -197,7 +195,6 @@ struct CrossSourcePickerView: View {
 
 private struct PosterImage: View {
     let url: URL?
-
     var body: some View {
         CachedAsyncImage(url: url) { phase in
             switch phase {
@@ -218,7 +215,6 @@ private struct BadgeView: View {
     let label: String
     let isMediaServer: Bool
     let colors: ThemeColors
-
     var body: some View {
         Text(label)
             .font(.caption2.bold())
