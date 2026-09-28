@@ -32,25 +32,48 @@ struct CrossSourcePickerView: View {
     }
 
     private var rowData: [RowData] {
-        items.map { item in
+        var result: [RowData] = []
+        result.reserveCapacity(items.count)
+        for item in items {
             let uuid = ownerUUID(for: item)
-            let pName = uuid.flatMap { u in playlists.first(where: { $0.id.uuidString == u })?.name }
-            let sName = uuid.flatMap { u in mediaServers.first(where: { $0.id.uuidString == u })?.name }
-            let isMS = uuid.map { u in mediaServers.contains(where: { $0.id.uuidString == u }) } ?? false
+            var pName: String? = nil
+            var sName: String? = nil
+            var isMS = false
+            if let uuid {
+                for p in playlists where p.id.uuidString == uuid {
+                    pName = p.name
+                    break
+                }
+                if pName == nil {
+                    for s in mediaServers where s.id.uuidString == uuid {
+                        sName = s.name
+                        isMS = true
+                        break
+                    }
+                } else {
+                    // Check if also a media server (shouldn't happen but be safe)
+                    for s in mediaServers where s.id.uuidString == uuid {
+                        isMS = true
+                        break
+                    }
+                }
+            }
             let badge = badgeLabel(for: item, uuid: uuid)
             let hint = qualityHint(for: item)
             let poster = posterURL(for: item)
-            return RowData(
+            let name = pName ?? sName ?? "Unknown Source"
+            result.append(RowData(
                 id: item.id,
                 item: item,
-                displayName: pName ?? sName ?? "Unknown Source",
+                displayName: name,
                 badgeLabel: badge,
                 isMediaServer: isMS,
                 qualityHint: hint,
                 posterURL: poster,
                 isCurrent: item.id == currentID
-            )
+            ))
         }
+        return result
     }
 
     var body: some View {
