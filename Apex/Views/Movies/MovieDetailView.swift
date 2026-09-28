@@ -195,6 +195,8 @@ struct MovieDetailView: View {
             CrossSourcePickerView(
                 items: crossSourceItems,
                 currentID: movie.id,
+                playlists: playlists,
+                mediaServers: mediaServers,
                 onSelect: playFromCrossSource,
                 onCancel: { showCrossSourcePicker = false }
             )

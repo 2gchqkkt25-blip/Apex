@@ -206,6 +206,8 @@
                 CrossSourcePickerView(
                     items: crossSourceItems,
                     currentID: series.id,
+                    playlists: playlists,
+                    mediaServers: mediaServers,
                     onSelect: playFromCrossSource,
                     onCancel: { showCrossSourcePicker = false }
                 )

@@ -1,23 +1,23 @@
 //
-// CrossSourcePickerView.swift
-// Apex
+//  CrossSourcePickerView.swift
+//  Apex
 //
-// A modal sheet that lets users choose which configured source (playlist or
-// media server) to play a movie or series from when the same title exists
-// in multiple places.
+//  A modal sheet that lets users choose which configured source (playlist or
+//  media server) to play a movie or series from when the same title exists
+//  in multiple places.
 //
-import SwiftData
+
 import SwiftUI
 
 struct CrossSourcePickerView: View {
     let items: [HomeMediaItem]
     let currentID: String
+    let playlists: [Playlist]
+    let mediaServers: [MediaServer]
     let onSelect: (HomeMediaItem) -> Void
     let onCancel: () -> Void
 
     @Environment(ThemeManager.self) private var themeManager
-    @Query private var playlists: [Playlist]
-    @Query private var mediaServers: [MediaServer]
 
     struct RowData: Identifiable {
         let id: String
@@ -91,8 +91,6 @@ struct CrossSourcePickerView: View {
             }
         }
         .onAppear { updateRowData() }
-        .onChange(of: playlists.count) { updateRowData() }
-        .onChange(of: mediaServers.count) { updateRowData() }
     }
 
     // MARK: - Data resolution (called imperatively, never from body)
