@@ -27,17 +27,7 @@ struct CrossSourcePickerView: View {
                 Button {
                     onSelect(item)
                 } label: {
-                    CrossSourceRow(
-                        item: item,
-                        isCurrent: item.id == currentID,
-                        playlistName: playlistName(for: item),
-                        serverName: serverName(for: item),
-                        sourceTypeLabel: sourceTypeLabel(for: item),
-                        isMediaServer: isMediaServerSource(for: item),
-                        qualityHint: qualityHint(for: item),
-                        posterURL: posterURL(for: item),
-                        theme: themeManager.colors
-                    )
+                    makeRow(for: item)
                 }
                 .buttonStyle(.plain)
             }
@@ -58,18 +48,62 @@ struct CrossSourcePickerView: View {
         }
     }
 
-    // MARK: - Data helpers (pure functions, no view building)
+    // MARK: - Row factory (returns AnyView to break expression tree)
+
+    private func makeRow(for item: HomeMediaItem) -> AnyView {
+        let uuid = ownerUUID(for: item)
+        let pName = uuid.flatMap { u in playlists.first(where: { $0.id.uuidString == u })?.name }
+        let sName = uuid.flatMap { u in mediaServers.first(where: { $0.id.uuidString == u })?.name }
+        let isMS = uuid.map { u in mediaServers.contains(where: { $0.id.uuidString == u }) } ?? false
+        let label = sourceTypeLabel(for: item, uuid: uuid)
+        let hint = qualityHint(for: item)
+        let poster = posterURL(for: item)
+        let isCur = item.id == currentID
+        let colors = themeManager.colors
+
+        return AnyView(
+            HStack(spacing: 12) {
+                PosterImage(url: poster)
+                    .frame(width: 48, height: 72)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(pName ?? sName ?? "Unknown Source")
+                        .font(.headline)
+                        .foregroundStyle(colors.primaryText)
+
+                    HStack(spacing: 6) {
+                        if let l = label {
+                            Badge(label: l, isMediaServer: isMS, theme: colors)
+                        }
+                        if let q = hint {
+                            Text(q)
+                                .font(.caption2)
+                                .foregroundStyle(colors.secondaryText)
+                        }
+                    }
+                }
+
+                Spacer()
+
+                if isCur {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(colors.accent)
+                        .font(.title3)
+                }
+            }
+            .padding(.vertical, 4)
+        )
+    }
+
+    // MARK: - Data helpers
 
     private func ownerUUID(for item: HomeMediaItem) -> String? {
-        // HomeMediaItem.id uses "movie-<uuid>" / "series-<uuid>" format,
-        // while raw content ids use "<uuid>-movie-<streamId>". Handle both.
         switch item {
         case .movie(let m):
-            // Movie.id is "<playlistUUID>-movie-<streamId>"
             let parts = m.id.components(separatedBy: "-movie-")
             return parts.count >= 2 ? parts[0] : nil
         case .series(let s):
-            // Series.id is "<playlistUUID>-series-<streamId>"
             let parts = s.id.components(separatedBy: "-series-")
             return parts.count >= 2 ? parts[0] : nil
         default:
@@ -77,23 +111,8 @@ struct CrossSourcePickerView: View {
         }
     }
 
-    private func playlistName(for item: HomeMediaItem) -> String? {
-        guard let uuid = ownerUUID(for: item) else { return nil }
-        return playlists.first(where: { $0.id.uuidString == uuid })?.name
-    }
-
-    private func serverName(for item: HomeMediaItem) -> String? {
-        guard let uuid = ownerUUID(for: item) else { return nil }
-        return mediaServers.first(where: { $0.id.uuidString == uuid })?.name
-    }
-
-    private func isMediaServerSource(for item: HomeMediaItem) -> Bool {
-        guard let uuid = ownerUUID(for: item) else { return false }
-        return mediaServers.contains(where: { $0.id.uuidString == uuid })
-    }
-
-    private func sourceTypeLabel(for item: HomeMediaItem) -> String? {
-        guard let uuid = ownerUUID(for: item) else { return nil }
+    private func sourceTypeLabel(for item: HomeMediaItem, uuid: String?) -> String? {
+        guard let uuid else { return nil }
         if let playlist = playlists.first(where: { $0.id.uuidString == uuid }) {
             switch playlist.sourceType {
             case .xtream: return "Xtream"
@@ -129,59 +148,7 @@ struct CrossSourcePickerView: View {
     }
 }
 
-// MARK: - Row (fully self-contained, no @Query or environment lookups)
-
-private struct CrossSourceRow: View {
-    let item: HomeMediaItem
-    let isCurrent: Bool
-    let playlistName: String?
-    let serverName: String?
-    let sourceTypeLabel: String?
-    let isMediaServer: Bool
-    let qualityHint: String?
-    let posterURL: URL?
-    let theme: ThemeColors
-
-    var body: some View {
-        HStack(spacing: 12) {
-            PosterImage(url: posterURL)
-                .frame(width: 48, height: 72)
-                .clipShape(RoundedRectangle(cornerRadius: 6))
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(displayName)
-                    .font(.headline)
-                    .foregroundStyle(theme.primaryText)
-
-                HStack(spacing: 6) {
-                    if let label = sourceTypeLabel {
-                        Badge(label: label, isMediaServer: isMediaServer, theme: theme)
-                    }
-                    if let q = qualityHint {
-                        Text(q)
-                            .font(.caption2)
-                            .foregroundStyle(theme.secondaryText)
-                    }
-                }
-            }
-
-            Spacer()
-
-            if isCurrent {
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundStyle(theme.accent)
-                    .font(.title3)
-            }
-        }
-        .padding(.vertical, 4)
-    }
-
-    private var displayName: String {
-        playlistName ?? serverName ?? "Unknown Source"
-    }
-}
-
-// MARK: - Poster (isolated CachedAsyncImage to prevent parent diagnostic failure)
+// MARK: - Poster (isolated CachedAsyncImage)
 
 private struct PosterImage: View {
     let url: URL?
