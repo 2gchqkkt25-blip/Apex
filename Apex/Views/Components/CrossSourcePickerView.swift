@@ -25,19 +25,7 @@ struct CrossSourcePickerView: View {
             ScrollView {
                 LazyVStack(spacing: 0) {
                     ForEach(items) { item in
-                        Button {
-                            onSelect(item)
-                        } label: {
-                            RowContent(
-                                item: item,
-                                currentID: currentID,
-                                playlists: playlists,
-                                mediaServers: mediaServers,
-                                colors: themeManager.colors
-                            )
-                        }
-                        .buttonStyle(.plain)
-
+                        rowButton(for: item)
                         Divider().padding(.leading, 72)
                     }
                 }
@@ -57,59 +45,63 @@ struct CrossSourcePickerView: View {
             }
         }
     }
-}
 
-// MARK: - Row Content (standalone struct, no closures, no AnyView)
+    // MARK: - Row button (broken out to reduce body complexity)
 
-private struct RowContent: View {
-    let item: HomeMediaItem
-    let currentID: String
-    let playlists: [Playlist]
-    let mediaServers: [MediaServer]
-    let colors: ThemeColors
+    @ViewBuilder
+    private func rowButton(for item: HomeMediaItem) -> some View {
+        let uuid = ownerUUID(for: item)
+        let pName = playlistName(uuid: uuid)
+        let sName = serverName(uuid: uuid)
+        let badge = badgeLabel(uuid: uuid)
+        let isMS = isMediaServer(uuid: uuid)
+        let hint = qualityHint(for: item)
+        let poster = posterURL(for: item)
+        let isCur = item.id == currentID
+        let c = themeManager.colors
 
-    var body: some View {
-        HStack(spacing: 12) {
-            PosterImage(url: posterURL)
-                .frame(width: 48, height: 72)
-                .clipShape(RoundedRectangle(cornerRadius: 6))
+        Button {
+            onSelect(item)
+        } label: {
+            HStack(spacing: 12) {
+                PosterImage(url: poster)
+                    .frame(width: 48, height: 72)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text(displayName)
-                    .font(.headline)
-                    .foregroundStyle(colors.primaryText)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(pName ?? sName ?? "Unknown Source")
+                        .font(.headline)
+                        .foregroundStyle(c.primaryText)
 
-                HStack(spacing: 6) {
-                    if let badge = badgeLabel {
-                        BadgeView(
-                            label: badge,
-                            isMediaServer: isMediaServer,
-                            colors: colors
-                        )
-                    }
-                    if let hint = qualityHint {
-                        Text(hint)
-                            .font(.caption2)
-                            .foregroundStyle(colors.secondaryText)
+                    HStack(spacing: 6) {
+                        if let b = badge {
+                            BadgeView(label: b, isMediaServer: isMS, colors: c)
+                        }
+                        if let h = hint {
+                            Text(h)
+                                .font(.caption2)
+                                .foregroundStyle(c.secondaryText)
+                        }
                     }
                 }
-            }
 
-            Spacer()
+                Spacer()
 
-            if item.id == currentID {
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundStyle(colors.accent)
-                    .font(.title3)
+                if isCur {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(c.accent)
+                        .font(.title3)
+                }
             }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
+        .buttonStyle(.plain)
     }
 
-    // MARK: - Computed properties (simple, no nested expressions)
+    // MARK: - Pure data helpers (no view building)
 
-    private var ownerUUID: String? {
+    private func ownerUUID(for item: HomeMediaItem) -> String? {
         switch item {
         case .movie(let m):
             let parts = m.id.components(separatedBy: "-movie-")
@@ -122,24 +114,23 @@ private struct RowContent: View {
         }
     }
 
-    private var displayName: String {
-        guard let uuid = ownerUUID else { return "Unknown Source" }
-        if let p = playlists.first(where: { $0.id.uuidString == uuid }) {
-            return p.name
-        }
-        if let s = mediaServers.first(where: { $0.id.uuidString == uuid }) {
-            return s.name
-        }
-        return "Unknown Source"
+    private func playlistName(uuid: String?) -> String? {
+        guard let uuid else { return nil }
+        return playlists.first(where: { $0.id.uuidString == uuid })?.name
     }
 
-    private var isMediaServer: Bool {
-        guard let uuid = ownerUUID else { return false }
+    private func serverName(uuid: String?) -> String? {
+        guard let uuid else { return nil }
+        return mediaServers.first(where: { $0.id.uuidString == uuid })?.name
+    }
+
+    private func isMediaServer(uuid: String?) -> Bool {
+        guard let uuid else { return false }
         return mediaServers.contains(where: { $0.id.uuidString == uuid })
     }
 
-    private var badgeLabel: String? {
-        guard let uuid = ownerUUID else { return nil }
+    private func badgeLabel(uuid: String?) -> String? {
+        guard let uuid else { return nil }
         if let p = playlists.first(where: { $0.id.uuidString == uuid }) {
             switch p.sourceType {
             case .xtream: return "Xtream"
@@ -153,7 +144,7 @@ private struct RowContent: View {
         return nil
     }
 
-    private var qualityHint: String? {
+    private func qualityHint(for item: HomeMediaItem) -> String? {
         switch item {
         case .movie(let m):
             guard let d = m.durationSecs, d > 0 else { return nil }
@@ -166,7 +157,7 @@ private struct RowContent: View {
         }
     }
 
-    private var posterURL: URL? {
+    private func posterURL(for item: HomeMediaItem) -> URL? {
         switch item {
         case .movie(let m): return m.streamIcon.flatMap(URL.init(string:))
         case .series(let s): return s.cover.flatMap(URL.init(string:))
