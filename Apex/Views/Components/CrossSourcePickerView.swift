@@ -20,31 +20,64 @@ struct CrossSourcePickerView: View {
     @Query private var playlists: [Playlist]
     @Query private var mediaServers: [MediaServer]
 
+    private struct RowData: Identifiable {
+        let id: String
+        let item: HomeMediaItem
+        let displayName: String
+        let badgeLabel: String?
+        let isMediaServer: Bool
+        let qualityHint: String?
+        let posterURL: URL?
+        let isCurrent: Bool
+    }
+
+    private var rowData: [RowData] {
+        items.map { item in
+            let uuid = ownerUUID(for: item)
+            let pName = uuid.flatMap { u in playlists.first(where: { $0.id.uuidString == u })?.name }
+            let sName = uuid.flatMap { u in mediaServers.first(where: { $0.id.uuidString == u })?.name }
+            let isMS = uuid.map { u in mediaServers.contains(where: { $0.id.uuidString == u }) } ?? false
+            let badge = badgeLabel(for: item, uuid: uuid)
+            let hint = qualityHint(for: item)
+            let poster = posterURL(for: item)
+            return RowData(
+                id: item.id,
+                item: item,
+                displayName: pName ?? sName ?? "Unknown Source",
+                badgeLabel: badge,
+                isMediaServer: isMS,
+                qualityHint: hint,
+                posterURL: poster,
+                isCurrent: item.id == currentID
+            )
+        }
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
                 LazyVStack(spacing: 0) {
-                    ForEach(items) { item in
-                        Button(action: { onSelect(item) }) {
+                    ForEach(rowData) { row in
+                        Button(action: { onSelect(row.item) }) {
                             HStack(spacing: 12) {
-                                PosterImage(url: posterURL(for: item))
+                                PosterImage(url: row.posterURL)
                                     .frame(width: 48, height: 72)
                                     .clipShape(RoundedRectangle(cornerRadius: 6))
 
                                 VStack(alignment: .leading, spacing: 4) {
-                                    Text(displayName(for: item))
+                                    Text(row.displayName)
                                         .font(.headline)
                                         .foregroundStyle(themeManager.colors.primaryText)
 
                                     HStack(spacing: 6) {
-                                        if let badge = badgeLabel(for: item) {
+                                        if let badge = row.badgeLabel {
                                             BadgeView(
                                                 label: badge,
-                                                isMediaServer: isMediaServer(for: item),
+                                                isMediaServer: row.isMediaServer,
                                                 colors: themeManager.colors
                                             )
                                         }
-                                        if let hint = qualityHint(for: item) {
+                                        if let hint = row.qualityHint {
                                             Text(hint)
                                                 .font(.caption2)
                                                 .foregroundStyle(themeManager.colors.secondaryText)
@@ -54,7 +87,7 @@ struct CrossSourcePickerView: View {
 
                                 Spacer()
 
-                                if item.id == currentID {
+                                if row.isCurrent {
                                     Image(systemName: "checkmark.circle.fill")
                                         .foregroundStyle(themeManager.colors.accent)
                                         .font(.title3)
@@ -85,31 +118,31 @@ struct CrossSourcePickerView: View {
         }
     }
 
-    // MARK: - Pure data helpers (no @ViewBuilder, no closures over self)
+    // MARK: - Pure data helpers
 
-    private func displayName(for item: HomeMediaItem) -> String {
-        guard let uuid = ownerUUID(for: item) else { return "Unknown Source" }
-        for p in playlists where p.id.uuidString == uuid { return p.name }
-        for s in mediaServers where s.id.uuidString == uuid { return s.name }
-        return "Unknown Source"
+    private func ownerUUID(for item: HomeMediaItem) -> String? {
+        switch item {
+        case .movie(let m):
+            let parts = m.id.components(separatedBy: "-movie-")
+            return parts.count >= 2 ? parts[0] : nil
+        case .series(let s):
+            let parts = s.id.components(separatedBy: "-series-")
+            return parts.count >= 2 ? parts[0] : nil
+        default:
+            return nil
+        }
     }
 
-    private func isMediaServer(for item: HomeMediaItem) -> Bool {
-        guard let uuid = ownerUUID(for: item) else { return false }
-        for s in mediaServers where s.id.uuidString == uuid { return true }
-        return false
-    }
-
-    private func badgeLabel(for item: HomeMediaItem) -> String? {
-        guard let uuid = ownerUUID(for: item) else { return nil }
-        for p in playlists where p.id.uuidString == uuid {
+    private func badgeLabel(for item: HomeMediaItem, uuid: String?) -> String? {
+        guard let uuid else { return nil }
+        if let p = playlists.first(where: { $0.id.uuidString == uuid }) {
             switch p.sourceType {
             case .xtream: return "Xtream"
             case .m3u: return "M3U"
             case .stalker: return "Stalker"
             }
         }
-        for s in mediaServers where s.id.uuidString == uuid {
+        if let s = mediaServers.first(where: { $0.id.uuidString == uuid }) {
             return s.kind.displayName
         }
         return nil
@@ -133,19 +166,6 @@ struct CrossSourcePickerView: View {
         case .movie(let m): return m.streamIcon.flatMap(URL.init(string:))
         case .series(let s): return s.cover.flatMap(URL.init(string:))
         default: return nil
-        }
-    }
-
-    private func ownerUUID(for item: HomeMediaItem) -> String? {
-        switch item {
-        case .movie(let m):
-            let parts = m.id.components(separatedBy: "-movie-")
-            return parts.count >= 2 ? parts[0] : nil
-        case .series(let s):
-            let parts = s.id.components(separatedBy: "-series-")
-            return parts.count >= 2 ? parts[0] : nil
-        default:
-            return nil
         }
     }
 }
