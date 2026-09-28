@@ -61,13 +61,20 @@ struct CrossSourcePickerView: View {
     // MARK: - Data helpers (pure functions, no view building)
 
     private func ownerUUID(for item: HomeMediaItem) -> String? {
-        let id = item.id
-        let separators = ["-movie-", "-series-", "-episode-"]
-        for sep in separators {
-            let parts = id.components(separatedBy: sep)
-            if parts.count >= 2 { return parts[0] }
+        // HomeMediaItem.id uses "movie-<uuid>" / "series-<uuid>" format,
+        // while raw content ids use "<uuid>-movie-<streamId>". Handle both.
+        switch item {
+        case .movie(let m):
+            // Movie.id is "<playlistUUID>-movie-<streamId>"
+            let parts = m.id.components(separatedBy: "-movie-")
+            return parts.count >= 2 ? parts[0] : nil
+        case .series(let s):
+            // Series.id is "<playlistUUID>-series-<streamId>"
+            let parts = s.id.components(separatedBy: "-series-")
+            return parts.count >= 2 ? parts[0] : nil
+        default:
+            return nil
         }
-        return nil
     }
 
     private func playlistName(for item: HomeMediaItem) -> String? {
