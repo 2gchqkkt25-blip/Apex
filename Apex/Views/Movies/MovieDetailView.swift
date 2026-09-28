@@ -447,6 +447,16 @@ struct MovieDetailView: View {
         showCrossSourcePicker = false
         switch item {
         case .movie(let m):
+            if m.isMediaServerCatalogItem {
+                guard let media = PlayableMedia.fromMediaServerMovie(m) else { return }
+                if ExternalPlayback.open(media) { return }
+                #if os(macOS)
+                    openWindow(id: "player", value: media)
+                #else
+                    playingMedia = media
+                #endif
+                return
+            }
             guard let playlist = playlists.first(where: { m.id.hasPrefix($0.id.uuidString) }),
                   let media = PlayableMedia.from(movie: m, playlist: playlist) else { return }
             if ExternalPlayback.open(media) { return }
