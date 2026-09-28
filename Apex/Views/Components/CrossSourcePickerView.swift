@@ -31,7 +31,11 @@ struct CrossSourcePickerView: View {
                 }
                 .buttonStyle(.plain)
             }
+            #if os(macOS)
+            .listStyle(.inset)
+            #else
             .listStyle(.insetGrouped)
+            #endif
             .navigationTitle("Choose Source")
             #if os(tvOS)
                 .navigationBarTitleDisplayMode(.inline)
@@ -49,7 +53,6 @@ struct CrossSourcePickerView: View {
     @ViewBuilder
     private func sourceRow(for item: HomeMediaItem) -> some View {
         HStack(spacing: 12) {
-            // Poster thumbnail
             posterThumbnail(for: item)
                 .frame(width: 48, height: 72)
                 .clipShape(RoundedRectangle(cornerRadius: 6))
@@ -84,16 +87,22 @@ struct CrossSourcePickerView: View {
     private func posterThumbnail(for item: HomeMediaItem) -> some View {
         switch item {
         case .movie(let movie):
-            CachedAsyncImage(url: movie.streamIcon.flatMap(URL.init(string:))) { image in
-                image.resizable().aspectRatio(contentMode: .fill)
-            } placeholder: {
-                Color.gray.opacity(0.3)
+            CachedAsyncImage(url: movie.streamIcon.flatMap(URL.init(string:))) { phase in
+                switch phase {
+                case .success(let image):
+                    image.resizable().aspectRatio(contentMode: .fill)
+                default:
+                    Color.gray.opacity(0.3)
+                }
             }
         case .series(let series):
-            CachedAsyncImage(url: series.cover.flatMap(URL.init(string:))) { image in
-                image.resizable().aspectRatio(contentMode: .fill)
-            } placeholder: {
-                Color.gray.opacity(0.3)
+            CachedAsyncImage(url: series.cover.flatMap(URL.init(string:))) { phase in
+                switch phase {
+                case .success(let image):
+                    image.resizable().aspectRatio(contentMode: .fill)
+                default:
+                    Color.gray.opacity(0.3)
+                }
             }
         default:
             Color.gray.opacity(0.3)
@@ -104,11 +113,9 @@ struct CrossSourcePickerView: View {
 
     private func sourceLabel(for item: HomeMediaItem) -> String {
         let ownerID = ownerUUID(from: item.id)
-        // Check playlists first
         if let playlist = playlists.first(where: { $0.id.uuidString == ownerID }) {
             return playlist.name
         }
-        // Then media servers
         if let server = mediaServers.first(where: { $0.id.uuidString == ownerID }) {
             return server.name
         }
@@ -163,27 +170,5 @@ struct CrossSourcePickerView: View {
         let episodeParts = contentID.components(separatedBy: "-episode-")
         if episodeParts.count >= 2 { return episodeParts[0] }
         return nil
-    }
-}
-
-// MARK: - Display name helpers
-
-private extension PlaylistSourceType {
-    var displayName: String {
-        switch self {
-        case .xtream: "Xtream"
-        case .m3u: "M3U"
-        case .stalker: "Stalker"
-        }
-    }
-}
-
-private extension MediaServerKind {
-    var displayName: String {
-        switch self {
-        case .jellyfin: "Jellyfin"
-        case .emby: "Emby"
-        case .plex: "Plex"
-        }
     }
 }
