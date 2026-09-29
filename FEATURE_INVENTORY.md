@@ -2,7 +2,7 @@
 
 > **Purpose:** Track what stays, what goes, and what changes during the Lume → Apex rebrand.
 >
-> **Last updated:** August 31, 2026 (unreleased media-server update)
+> **Last updated:** September 29, 2026 (Build 62)
 
 ---
 

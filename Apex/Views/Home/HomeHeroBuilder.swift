@@ -394,8 +394,13 @@ extension HomeHeroBuilder {
                 ]
             )
             movieDescriptor.fetchLimit = libraryFetchLimit
+            let enabledServerIDs = enabledMediaServerIDs(in: context)
             let movieIDs = SafeFetch.fetch(movieDescriptor, context: context)
-                .filter { $0.isMediaServerCatalogItem && !restriction.hides(categoryID: $0.categoryId) }
+                .filter {
+                    $0.isMediaServerCatalogItem
+                        && MediaServerIdentity.belongsToKnownMediaServer($0.id, serverIDs: enabledServerIDs)
+                        && !restriction.hides(categoryID: $0.categoryId)
+                }
                 .prefix(limit)
                 .map(\.id)
 
@@ -407,7 +412,11 @@ extension HomeHeroBuilder {
             )
             seriesDescriptor.fetchLimit = libraryFetchLimit
             let seriesIDs = SafeFetch.fetch(seriesDescriptor, context: context)
-                .filter { $0.isMediaServerCatalogItem && !restriction.hides(categoryID: $0.categoryId) }
+                .filter {
+                    $0.isMediaServerCatalogItem
+                        && MediaServerIdentity.belongsToKnownMediaServer($0.id, serverIDs: enabledServerIDs)
+                        && !restriction.hides(categoryID: $0.categoryId)
+                }
                 .sorted { libraryScore($0) > libraryScore($1) }
                 .prefix(limit)
                 .map(\.id)
@@ -666,6 +675,7 @@ extension HomeHeroBuilder {
     ) -> [TrendingCatalogMatch.HeroSlot] {
         var result: [TrendingCatalogMatch.HeroSlot] = []
         var usedIDs = Set<String>()
+        let enabledServerIDs = enabledMediaServerIDs(in: context)
 
         var movieDescriptor = FetchDescriptor<Movie>(
             sortBy: [
@@ -677,6 +687,7 @@ extension HomeHeroBuilder {
         let movies = SafeFetch.fetch(movieDescriptor, context: context)
             .filter { movie in
                 movie.isMediaServerCatalogItem
+                    && MediaServerIdentity.belongsToKnownMediaServer(movie.id, serverIDs: enabledServerIDs)
                     && !restriction.hides(categoryID: movie.categoryId)
                     && (movie.tmdbId != nil || movie.backdropPath != nil || movie.iconURL != nil)
             }
@@ -703,6 +714,7 @@ extension HomeHeroBuilder {
         let seriesList = SafeFetch.fetch(seriesDescriptor, context: context)
             .filter { series in
                 series.isMediaServerCatalogItem
+                    && MediaServerIdentity.belongsToKnownMediaServer(series.id, serverIDs: enabledServerIDs)
                     && !restriction.hides(categoryID: series.categoryId)
                     && (series.tmdbId != nil || series.backdropPath != nil || !(series.cover ?? "").isEmpty)
             }
@@ -721,5 +733,13 @@ extension HomeHeroBuilder {
         }
 
         return result
+    }
+
+    private static func enabledMediaServerIDs(in context: ModelContext) -> Set<String> {
+        Set(
+            ((try? context.fetch(FetchDescriptor<MediaServer>())) ?? [])
+                .filter(\.syncEnabled)
+                .map(\.id.uuidString)
+        )
     }
 }

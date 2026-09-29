@@ -4,6 +4,28 @@ All notable changes to Apex Stream Player.
 
 ---
 
+## Build 62 (1.2.0) — September 29, 2026
+
+### New
+
+- **Choose a source when a title is in more than one place** — Play opens a compact list when the same movie or series is on more than one enabled Xtream, M3U, or Stalker playlist, or on a Jellyfin, Emby, or Plex server that is turned on. With one playlist and no media server on, Play starts that copy immediately.
+- **AIOStreams versions list language, quality, and size** — A Jellyfin server that returns more than one stream shows each version in its own window. The default audio language in Settings → Media Servers is the track that plays, and matching versions are listed first.
+- **Media servers can be turned off** — Each saved server has an on/off switch. Off keeps the login and synced library, and leaves that server out of the Media tab, search, and playback until it is turned back on.
+- **Search includes media servers that are on** — A title on an enabled Jellyfin, Emby, or Plex server shows up next to the IPTV results.
+
+### Improvements
+
+- **Apple TV source lists are solid cards** — Choose a source, and the AIOStreams version list, sit in a smaller card instead of a large blurred panel.
+- **Apple TV language settings are menus** — Media-server audio language and subtitle language are each one row. The current language is on the row, and the rest open in a menu.
+- **macOS right-click stays available** — Right-click on a poster keeps offering Play and the other actions.
+- **Jellyfin titles keep their TMDB details** — Plot and artwork stay on media-server movies and series after sync.
+
+### Release
+
+- Build number **62** (1.2.0). The Apex app and Top Shelf extension are both build 62.
+
+---
+
 ## Build 61 (1.2.0) — September 24, 2026
 
 ### Bug Fixes

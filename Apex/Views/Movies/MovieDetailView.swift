@@ -27,13 +27,14 @@ struct MovieDetailView: View {
         @Environment(\.openWindow) private var openWindow
     #endif
     @Query private var playlists: [Playlist]
+    @Query(sort: \MediaServer.sortOrder) private var mediaServers: [MediaServer]
 
     @State private var playingMedia: PlayableMedia?
     @State private var similar: [HomeMediaItem] = []
     @State private var collectionMovies: [HomeMediaItem] = []
     @State private var otherSources: [HomeMediaItem] = []
-    @State private var crossSourceItems: [HomeMediaItem] = []
-    @State private var showCrossSourcePicker = false
+    @State private var crossSourcePrompt: CrossSourcePrompt?
+    @State private var crossSourceResume = true
     @State private var refreshToken: UUID = .init()
     @State private var isLoadingTMDB: Bool
     #if !os(tvOS)
@@ -191,16 +192,7 @@ struct MovieDetailView: View {
             .scrollIndicators(.hidden)
             .ignoresSafeArea(edges: .top)
         }
-        .sheet(isPresented: $showCrossSourcePicker) {
-            CrossSourcePickerView(
-                items: crossSourceItems,
-                currentID: movie.id,
-                playlists: playlists,
-                mediaServers: mediaServers,
-                onSelect: playFromCrossSource,
-                onCancel: { showCrossSourcePicker = false }
-            )
-        }
+        .crossSourcePicker(item: $crossSourcePrompt, onSelect: playFromCrossSource)
     }
 
     // MARK: - Sections
@@ -407,35 +399,28 @@ struct MovieDetailView: View {
     // MARK: - Actions
 
     private func startPlayback() {
-        // When the same movie exists in multiple configured sources (playlists
-        // or media servers), show a source picker so the user can choose which
-        // provider to stream from. Falls back to direct playback when only one
-        // source is available.
-        let sources = OtherSources.resolveCrossSource(for: movie, in: modelContext)
-        if sources.count > 1 {
-            crossSourceItems = sources
-            showCrossSourcePicker = true
-            return
-        }
-        guard let playlist = moviePlaylist,
-              let media = PlayableMedia.from(movie: movie, playlist: playlist) else { return }
-        if ExternalPlayback.open(media) { return }
-        #if os(macOS)
-            openWindow(id: "player", value: media)
-        #else
-            playingMedia = media
-        #endif
+        playResolved(resume: true)
     }
 
     private func startPlaybackFromBeginning() {
-        let sources = OtherSources.resolveCrossSource(for: movie, in: modelContext)
-        if sources.count > 1 {
-            crossSourceItems = sources
-            showCrossSourcePicker = true
+        playResolved(resume: false)
+    }
+
+    /// Opens the source list immediately from what is already saved. A media
+    /// server that is not in that list is filled in after the window is open.
+    private func playResolved(resume: Bool) {
+        if let prompt = OtherSources.playbackChoice(
+            for: movie,
+            playlists: playlists,
+            mediaServers: mediaServers,
+            in: modelContext
+        ) {
+            crossSourceResume = resume
+            crossSourcePrompt = prompt
             return
         }
         guard let playlist = moviePlaylist,
-              let media = PlayableMedia.from(movie: movie, playlist: playlist, resumeFromProgress: false) else { return }
+              let media = PlayableMedia.from(movie: movie, playlist: playlist, resumeFromProgress: resume) else { return }
         if ExternalPlayback.open(media) { return }
         #if os(macOS)
             openWindow(id: "player", value: media)
@@ -446,11 +431,11 @@ struct MovieDetailView: View {
 
     /// Plays the movie from the source selected in the cross-source picker.
     private func playFromCrossSource(_ item: HomeMediaItem) {
-        showCrossSourcePicker = false
+        crossSourcePrompt = nil
         switch item {
         case .movie(let m):
             if m.isMediaServerCatalogItem {
-                guard let media = PlayableMedia.fromMediaServerMovie(m) else { return }
+                guard let media = PlayableMedia.fromMediaServerMovie(m, resumeFromProgress: crossSourceResume) else { return }
                 if ExternalPlayback.open(media) { return }
                 #if os(macOS)
                     openWindow(id: "player", value: media)
@@ -460,7 +445,7 @@ struct MovieDetailView: View {
                 return
             }
             guard let playlist = playlists.first(where: { m.id.hasPrefix($0.id.uuidString) }),
-                  let media = PlayableMedia.from(movie: m, playlist: playlist) else { return }
+                  let media = PlayableMedia.from(movie: m, playlist: playlist, resumeFromProgress: crossSourceResume) else { return }
             if ExternalPlayback.open(media) { return }
             #if os(macOS)
                 openWindow(id: "player", value: media)

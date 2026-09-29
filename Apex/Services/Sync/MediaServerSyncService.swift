@@ -22,7 +22,7 @@ final class MediaServerSyncService {
     private(set) var progressFraction: Double = 0
 
     func sync(server: MediaServer, container: ModelContainer) async throws {
-        guard !isSyncing else { return }
+        guard server.syncEnabled, !isSyncing else { return }
 
         let snapshot = MediaServerSyncSnapshot(server: server)
         let serverID = server.id
@@ -663,19 +663,20 @@ private enum MediaServerSyncRunner {
         movie.name = item.name
         if let poster { movie.streamIcon = poster }
         if MediaServerCatalogLimits.liteMetadataDuringSync {
-            movie.plot = nil
-            movie.genre = nil
+            // A later sync must not wipe artwork text the detail screen already stored.
+            if movie.tmdbEnrichedAt == nil {
+                movie.plot = nil
+                movie.genre = nil
+            }
         } else if !minimal {
             movie.plot = item.overview
             movie.genre = item.genres.joined(separator: ", ")
         }
-        // TMDB/IMDb IDs are tiny integers that unlock detail-screen enrichment;
-        // they must persist even when minimal/lite sync skips plot/genre/duration
-        // on tvOS. Without them, MediaServerDetailEnrichment falls back to text
-        // search which often fails for media-server titles.
+        // Keep the provider id so the detail screen can fetch artwork, cast,
+        // and ratings. Do not stamp tmdbEnrichedAt here — that means the full
+        // TMDB payload has been applied, and setting it now skips that fetch.
         if let tmdbId = item.providerTMDBId {
             movie.tmdbId = tmdbId
-            movie.tmdbEnrichedAt = Date()
         }
         if let imdb = item.providerIMDBId { movie.imdbId = imdb }
         if !minimal {
@@ -724,19 +725,19 @@ private enum MediaServerSyncRunner {
         series.name = item.name
         if let poster { series.cover = poster }
         if MediaServerCatalogLimits.liteMetadataDuringSync {
-            series.plot = nil
-            series.genre = nil
+            if series.tmdbEnrichedAt == nil {
+                series.plot = nil
+                series.genre = nil
+            }
         } else if !minimal {
             series.plot = item.overview
             series.genre = item.genres.joined(separator: ", ")
         }
-        // TMDB/IMDb IDs are tiny integers that unlock detail-screen enrichment;
-        // they must persist even when minimal/lite sync skips plot/genre/duration
-        // on tvOS. Without them, MediaServerDetailEnrichment falls back to text
-        // search which often fails for media-server titles.
+        // Keep the provider id so the detail screen can fetch artwork, cast,
+        // and ratings. Do not stamp tmdbEnrichedAt here — that means the full
+        // TMDB payload has been applied, and setting it now skips that fetch.
         if let tmdbId = item.providerTMDBId {
             series.tmdbId = tmdbId
-            series.tmdbEnrichedAt = Date()
         }
         if let imdb = item.providerIMDBId { series.imdbId = imdb }
         if !minimal {

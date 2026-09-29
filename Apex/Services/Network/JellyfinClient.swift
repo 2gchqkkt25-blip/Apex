@@ -38,6 +38,43 @@ nonisolated final class JellyfinClient: MediaServerClient, @unchecked Sendable {
         return (tmdb, imdb)
     }
 
+    /// AIOStreams packs the catalog id into the Jellyfin item id (mark `0xA1`).
+    /// List rows sometimes omit `ProviderIds`, and the packed id is the same TMDB or IMDb value.
+    nonisolated static func packedProviderIDs(itemID: String) -> (tmdb: Int?, imdb: String?) {
+        let hex = itemID.replacingOccurrences(of: "-", with: "").lowercased()
+        guard hex.count == 32, let bytes = hexBytes(hex), bytes.count == 16, bytes[0] == 0xA1 else {
+            return (nil, nil)
+        }
+        let idType = Int(bytes[1] & 0x0F)
+        var numeric: UInt64 = 0
+        for byte in bytes[3 ..< 9] {
+            numeric = (numeric << 8) | UInt64(byte)
+        }
+        guard numeric > 0, numeric <= UInt64(Int.max) else { return (nil, nil) }
+        let value = Int(numeric)
+        switch idType {
+        case 1:
+            return (nil, String(format: "tt%07d", value))
+        case 2:
+            return (value, nil)
+        default:
+            return (nil, nil)
+        }
+    }
+
+    private nonisolated static func hexBytes(_ hex: String) -> [UInt8]? {
+        var bytes: [UInt8] = []
+        bytes.reserveCapacity(hex.count / 2)
+        var index = hex.startIndex
+        while index < hex.endIndex {
+            let next = hex.index(index, offsetBy: 2, limitedBy: hex.endIndex) ?? hex.endIndex
+            guard next <= hex.endIndex, let byte = UInt8(hex[index ..< next], radix: 16) else { return nil }
+            bytes.append(byte)
+            index = next
+        }
+        return bytes
+    }
+
     private static let defaultDeviceID: String = {
         if let stored = UserDefaults.standard.string(forKey: "apex.jellyfin.deviceId") {
             return stored
@@ -110,6 +147,36 @@ nonisolated final class JellyfinClient: MediaServerClient, @unchecked Sendable {
         )
     }
 
+    func searchItems(
+        baseURL: URL,
+        userId: String,
+        token: String,
+        query: String,
+        limit: Int
+    ) async throws -> [MediaServerItem] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count >= 2 else { return [] }
+        var components = URLComponents(
+            url: baseURL.appendingPathComponent("Users/\(userId)/Items"),
+            resolvingAgainstBaseURL: false
+        )!
+        components.queryItems = [
+            URLQueryItem(name: "SearchTerm", value: trimmed),
+            URLQueryItem(name: "Recursive", value: "true"),
+            URLQueryItem(name: "IncludeItemTypes", value: "Movie,Series"),
+            URLQueryItem(name: "Fields", value: "Overview,Genres,UserData,RunTimeTicks,ProductionYear,ImageTags,ProviderIds"),
+            URLQueryItem(name: "Limit", value: String(max(limit, 1))),
+            URLQueryItem(name: "EnableTotalRecordCount", value: "false")
+        ]
+        guard let url = components.url else { throw MediaServerError.invalidURL }
+        let data = try await get(url, token: token)
+        let decoded = try JSONDecoder().decode(JellyfinItemsResponse.self, from: data)
+        return decoded.items.map { $0.asMediaItem() }.filter { item in
+            let type = item.type.lowercased()
+            return type == "movie" || type == "series"
+        }
+    }
+
     func itemDetails(baseURL: URL, userId: String, token: String, itemId: String) async throws -> MediaServerItem {
         var components = URLComponents(
             url: baseURL.appendingPathComponent("Users/\(userId)/Items/\(itemId)"),
@@ -180,13 +247,46 @@ nonisolated final class JellyfinClient: MediaServerClient, @unchecked Sendable {
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let data = try await perform(request)
-        let decoded = try JSONDecoder().decode(JellyfinPlaybackInfoResponse.self, from: data)
+        var decoded = try JSONDecoder().decode(JellyfinPlaybackInfoResponse.self, from: data)
+        // AIOStreams answers with "Load versions" until a refresh actually asks the addons.
+        if decoded.mediaSources.allSatisfy(Self.isVersionPlaceholder), !decoded.mediaSources.isEmpty {
+            var retry = body
+            retry["Refresh"] = true
+            request.httpBody = try JSONSerialization.data(withJSONObject: retry)
+            let refreshed = try await perform(request)
+            decoded = try JSONDecoder().decode(JellyfinPlaybackInfoResponse.self, from: refreshed)
+        }
         let playSessionId = decoded.playSessionId ?? clientPlaySessionId
         var streams: [MediaServerStreamInfo] = []
         let mediaSourceId = decoded.mediaSources.first?.id
 
         for source in decoded.mediaSources {
+            if Self.isVersionPlaceholder(source) { continue }
             let meta = Self.streamMetadata(from: source)
+            let hints = Self.audioHints(from: source)
+            let details = Self.versionDetails(from: source, hints: hints)
+            let label = source.name?.trimmingCharacters(in: .whitespacesAndNewlines)
+            // AIOStreams puts each addon result on Path and does not transcode.
+            // Playing that URL is the version; a synthetic HLS URL is not a source.
+            if let remote = Self.remotePlayURL(source.path) {
+                streams.append(Self.makeStreamInfo(
+                    url: remote,
+                    method: .directPlay,
+                    container: source.container,
+                    metadata: meta,
+                    label: label,
+                    sourceID: source.id,
+                    audioTracks: hints, meta: details,
+                    videoBitrate: source.bitrate
+                ))
+                continue
+            }
+            let path = source.path?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            // Unresolved AIOStreams notices have no file and cannot transcode.
+            if path.isEmpty, source.supportsTranscoding == false {
+                continue
+            }
+            let allowsTranscode = source.supportsTranscoding != false
             if source.supportsDirectPlay == true,
                let direct = buildDirectURL(
                    baseURL: baseURL,
@@ -201,7 +301,10 @@ nonisolated final class JellyfinClient: MediaServerClient, @unchecked Sendable {
                     url: direct,
                     method: .directPlay,
                     container: source.container,
-                    metadata: meta
+                    metadata: meta,
+                    label: label,
+                    sourceID: source.id,
+                    audioTracks: hints, meta: details
                 ))
             }
             if let directStream = source.directStreamUrl,
@@ -212,7 +315,10 @@ nonisolated final class JellyfinClient: MediaServerClient, @unchecked Sendable {
                     url: withAPIKey(raw, token: token),
                     method: .directStream,
                     container: source.container,
-                    metadata: meta
+                    metadata: meta,
+                    label: label,
+                    sourceID: source.id,
+                    audioTracks: hints, meta: details
                 ))
             } else if source.supportsDirectStream == true,
                       let streamURL = buildDirectStreamURL(
@@ -228,9 +334,13 @@ nonisolated final class JellyfinClient: MediaServerClient, @unchecked Sendable {
                     url: streamURL,
                     method: .directStream,
                     container: source.container,
-                    metadata: meta
+                    metadata: meta,
+                    label: label,
+                    sourceID: source.id,
+                    audioTracks: hints, meta: details
                 ))
             }
+            guard allowsTranscode else { continue }
             if let transcodePath = source.transcodingUrl, !transcodePath.isEmpty {
                 let raw = URL(string: transcodePath, relativeTo: baseURL)?.absoluteURL
                     ?? baseURL.appendingPathComponent(transcodePath.trimmingCharacters(in: CharacterSet(charactersIn: "/")))
@@ -238,7 +348,10 @@ nonisolated final class JellyfinClient: MediaServerClient, @unchecked Sendable {
                     url: withAPIKey(raw, token: token),
                     method: .transcode,
                     container: source.container,
-                    metadata: meta
+                    metadata: meta,
+                    label: label,
+                    sourceID: source.id,
+                    audioTracks: hints, meta: details
                 ))
             }
             if let hls = buildHLSTranscodeURL(
@@ -255,7 +368,10 @@ nonisolated final class JellyfinClient: MediaServerClient, @unchecked Sendable {
                     container: "m3u8",
                     metadata: meta,
                     videoCodec: "h264",
-                    audioCodec: "aac"
+                    audioCodec: "aac",
+                    label: label,
+                    sourceID: source.id,
+                    audioTracks: hints, meta: details
                 ))
             }
             if let liveHLS = buildLiveHLSURL(
@@ -272,12 +388,20 @@ nonisolated final class JellyfinClient: MediaServerClient, @unchecked Sendable {
                     container: "m3u8",
                     metadata: meta,
                     videoCodec: "h264",
-                    audioCodec: "aac"
+                    audioCodec: "aac",
+                    label: label,
+                    sourceID: source.id,
+                    audioTracks: hints, meta: details
                 ))
             }
         }
 
         if streams.isEmpty {
+            let hadOnlyPlaceholders = !decoded.mediaSources.isEmpty
+                && decoded.mediaSources.allSatisfy(Self.isVersionPlaceholder)
+            if hadOnlyPlaceholders {
+                throw MediaServerError.noStreams
+            }
             let fallbackMeta = decoded.mediaSources.first.map { Self.streamMetadata(from: $0) }
             if let fallback = buildDirectURL(
                 baseURL: baseURL,
@@ -305,8 +429,15 @@ nonisolated final class JellyfinClient: MediaServerClient, @unchecked Sendable {
 
         guard !streams.isEmpty else { throw MediaServerError.noStreams }
         // HLS + api_key first — AVPlayer cannot send Jellyfin auth headers on direct file URLs.
-        let ordered = streams.sorted { lhs, rhs in
-            streamPriority(lhs) < streamPriority(rhs)
+        // Keep each source's rank. Sorting the whole list would put every HLS URL
+        // ahead of a higher-ranked AIOStreams version. Within one source, HLS still wins.
+        var ordered: [MediaServerStreamInfo] = []
+        var seen = Set<String>()
+        for stream in streams {
+            let key = stream.sourceID ?? stream.url.absoluteString
+            guard seen.insert(key).inserted else { continue }
+            let group = streams.filter { ($0.sourceID ?? $0.url.absoluteString) == key }
+            ordered.append(contentsOf: group.sorted { streamPriority($0) < streamPriority($1) })
         }
         return MediaServerPlaybackResult(streams: ordered)
     }
@@ -381,13 +512,40 @@ nonisolated final class JellyfinClient: MediaServerClient, @unchecked Sendable {
         )
     }
 
+    /// AIOStreams uses a placeholder row ("Load versions") until PlaybackInfo resolves real addon streams.
+    private static func isVersionPlaceholder(_ source: JellyfinMediaSource) -> Bool {
+        if source.type?.caseInsensitiveCompare("Placeholder") == .orderedSame { return true }
+        let name = source.name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        switch name.lowercased() {
+        case "load versions", "no streams found", "streams resolve on play":
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// Absolute http(s) Path values are the stream itself (AIOStreams). A disk path is not.
+    private static func remotePlayURL(_ path: String?) -> URL? {
+        guard let path, let url = URL(string: path),
+              let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https",
+              url.host != nil
+        else { return nil }
+        return url
+    }
+
     private static func makeStreamInfo(
         url: URL,
         method: MediaServerPlaybackMethod,
         container: String?,
         metadata: StreamMetadata?,
         videoCodec: String? = nil,
-        audioCodec: String? = nil
+        audioCodec: String? = nil,
+        label: String? = nil,
+        sourceID: String? = nil,
+        audioTracks: [MediaServerAudioHint] = [],
+        meta: StreamVersionMeta = StreamVersionMeta(),
+        videoBitrate: Int? = nil
     ) -> MediaServerStreamInfo {
         MediaServerStreamInfo(
             url: url,
@@ -398,8 +556,50 @@ nonisolated final class JellyfinClient: MediaServerClient, @unchecked Sendable {
             width: metadata?.width,
             height: metadata?.height,
             frameRate: metadata?.frameRate,
-            videoBitrate: metadata?.videoBitrate
+            videoBitrate: videoBitrate ?? metadata?.videoBitrate,
+            label: label.flatMap { $0.isEmpty ? nil : $0 },
+            sourceID: sourceID,
+            audioTracks: audioTracks,
+            meta: meta
         )
+    }
+
+    /// Languages, size, and addon name shown on each stream-version row.
+    private static func versionDetails(from source: JellyfinMediaSource, hints: [MediaServerAudioHint]) -> StreamVersionMeta {
+        let release = source.aiostreams
+        let advertised = (release?.languages ?? []).filter { !$0.isEmpty && $0.caseInsensitiveCompare("Unknown") != .orderedSame }
+        let fromHints = hints.map(\.label).filter { label in
+            MediaServerAudioLanguage.allCases.contains { $0.matches(label) }
+        }
+        let audioTags = (release?.audioTags ?? []).filter { $0.caseInsensitiveCompare("Unknown") != .orderedSame }
+        var audio = audioTags.joined(separator: " ")
+        if let channels = release?.audioChannels, !channels.isEmpty, channels.caseInsensitiveCompare("Unknown") != .orderedSame {
+            audio = audio.isEmpty ? channels : "\(audio) \(channels)"
+        }
+        let resolution = [release?.resolution, release?.quality]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { !$0.isEmpty && $0.caseInsensitiveCompare("Unknown") != .orderedSame }
+        return StreamVersionMeta(
+            languages: advertised.isEmpty ? fromHints : advertised,
+            resolution: resolution,
+            byteSize: release?.size,
+            addon: release?.addon,
+            audio: audio.isEmpty ? nil : audio,
+            filename: release?.filename,
+            blurb: release?.summary
+        )
+    }
+
+    private static func audioHints(from source: JellyfinMediaSource) -> [MediaServerAudioHint] {
+        let audios = source.mediaStreams?.filter { $0.type == "Audio" } ?? []
+        return audios.enumerated().map { offset, stream in
+            let parts = [stream.language, stream.displayTitle].compactMap { raw -> String? in
+                guard let raw else { return nil }
+                let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                return trimmed.isEmpty ? nil : trimmed
+            }
+            return MediaServerAudioHint(index: offset, label: parts.joined(separator: " "))
+        }
     }
 
     private func authHeader(token: String?) -> String {

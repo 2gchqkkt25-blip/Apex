@@ -59,6 +59,7 @@ struct FullScreenPlayerView: View {
     @State private var resolveError: String?
 
     @State private var showStreamPicker = false
+    @State private var streamChoices: [StreamVersionChoice] = []
 
     /// The episode queued to play after `activeMedia`, resolved whenever the
     /// active stream changes. Drives both the in-player Next Episode button and
@@ -451,6 +452,13 @@ struct FullScreenPlayerView: View {
             } else {
                 engineView(for: media)
             }
+        } else if showStreamPicker, !streamChoices.isEmpty {
+            StreamVersionPickerView(
+                title: activeMedia.title,
+                choices: streamChoices,
+                onSelect: selectStreamVersion,
+                onClose: closePlayer
+            )
         } else if resolveError != nil {
             // Stalker `create_link` failed — surface the failure with a retry
             // rather than spinning forever.
@@ -535,14 +543,19 @@ struct FullScreenPlayerView: View {
         } else if MediaPlaybackResolver.isPlaceholder(url) {
             resolvedMedia = nil
             resolveError = nil
+            showStreamPicker = false
+            streamChoices = []
             do {
-                let resolved = try await withTimeout(seconds: 45) {
-                    try await MediaPlaybackResolver.resolve(activeMedia, container: modelContext.container)
+                // AIOStreams queries every addon before it can name the versions.
+                let start = try await withTimeout(seconds: 90) {
+                    try await MediaPlaybackResolver.start(activeMedia, container: modelContext.container)
                 }
-                resolvedMedia = resolved
-                if isMediaServerPlayback(resolved) {
-                    enginePriority = Self.enginePriorityForMediaServer(resolved)
-                    engineAttempt = 0
+                switch start {
+                case let .play(resolved):
+                    beginPlayback(resolved)
+                case let .choose(choices):
+                    streamChoices = choices
+                    showStreamPicker = true
                 }
             } catch {
                 resolveError = error.localizedDescription
@@ -551,11 +564,26 @@ struct FullScreenPlayerView: View {
         }
     }
 
+    private func selectStreamVersion(_ choice: StreamVersionChoice) {
+        showStreamPicker = false
+        streamChoices = []
+        beginPlayback(choice.media)
+    }
+
+    private func beginPlayback(_ resolved: PlayableMedia) {
+        resolvedMedia = resolved
+        if isMediaServerPlayback(resolved) {
+            enginePriority = Self.enginePriorityForMediaServer(resolved)
+            engineAttempt = 0
+        }
+    }
+
     private func retryResolve() {
         engineAttempt = 0
         mediaServerDirectPlayFallbackAttempted = false
         isRetryingMediaServerDirectPlay = false
         showStreamPicker = false
+        streamChoices = []
         Task { await resolveActiveMedia() }
     }
 

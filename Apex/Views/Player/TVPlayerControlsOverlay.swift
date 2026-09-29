@@ -69,6 +69,9 @@
         @State var scrubResetTask: Task<Void, Never>?
         /// Seeks to the latest swipe target once the remote stops repeating.
         @State var scrubSeekTask: Task<Void, Never>?
+        /// True once focus has landed on a control. A nil focus before that is
+        /// just the overlay mounting, not an open audio or subtitle menu.
+        @State private var sawOverlayFocus = false
 
         enum TabKind: Hashable { case episodes, recent, guide, info }
         @State var openTab: TabKind?
@@ -130,9 +133,22 @@
                     focus = media.isLive ? .transport : .scrubber
                 }
             }
-            .onChange(of: focus) {
-                // Moving between controls counts as activity — keep them up.
-                onResetHideTimer()
+            .onChange(of: focus) { _, newFocus in
+                // Audio and subtitle menus take focus out of this overlay.
+                // Hold the controls only after a control actually had focus,
+                // then hide again once it comes back. Treating the initial
+                // empty focus as an open menu kept the chrome up and stole
+                // the Menu button from playback.
+                if newFocus != nil { sawOverlayFocus = true }
+                let menuOpen = sawOverlayFocus && newFocus == nil && openTab == nil && !isScrubbing
+                if menuOpen {
+                    onPanelOpenChange(true)
+                } else if openTab == nil, !isScrubbing {
+                    onPanelOpenChange(false)
+                    onResetHideTimer()
+                } else {
+                    onResetHideTimer()
+                }
             }
         }
 
@@ -393,7 +409,6 @@
             let tracks = coordinator.audioTrackOptions
             if tracks.count > 1 {
                 Menu {
-                    PlayerMenuHold { onPanelOpenChange($0) }
                     ForEach(tracks) { track in
                         Button {
                             coordinator.selectAudioTrack(id: track.id)
@@ -421,7 +436,6 @@
             let downloadedTitle = tracks.isEmpty ? externalSubtitles?.title : nil
             if !tracks.isEmpty || downloadedTitle != nil {
                 Menu {
-                    PlayerMenuHold { onPanelOpenChange($0) }
                     if tracks.isEmpty, let downloadedTitle, let externalSubtitles {
                         Button {
                             externalSubtitles.isEnabled = false
@@ -596,17 +610,3 @@
     }
 
 #endif
-
-/// Holds the player controls open for as long as a track menu is on screen.
-/// The controls otherwise hide after a few seconds and take the menu with them.
-struct PlayerMenuHold: View {
-    var onChange: (Bool) -> Void
-
-    var body: some View {
-        Color.clear
-            .frame(width: 0, height: 0)
-            .accessibilityHidden(true)
-            .onAppear { onChange(true) }
-            .onDisappear { onChange(false) }
-    }
-}

@@ -1,3 +1,4 @@
+import AVFoundation
 import KSPlayer
 import OSLog
 import QuartzCore
@@ -11,6 +12,38 @@ extension KSPlayerEngineView {
     func reportPlaybackEndIfNeeded(_ state: KSPlayerState) {
         guard state == .playedToTheEnd, !media.isLive else { return }
         onPlaybackEnded?(media.id)
+    }
+
+    /// Selects the Settings → Media Servers language once the demuxer lists audio tracks.
+    func applyPreferredAudioIfNeeded() {
+        guard appliedAudioMediaID != media.id else { return }
+        guard let language = media.streamContext?.preferredAudioLanguage else {
+            appliedAudioMediaID = media.id
+            return
+        }
+        guard let player = coordinator.playerLayer?.player else { return }
+        let tracks = player.tracks(mediaType: .audio)
+        guard !tracks.isEmpty else { return }
+        let labels = tracks.map { track in
+            [track.name, track.languageCode, track.language]
+                .compactMap { $0 }
+                .filter { !$0.isEmpty }
+                .joined(separator: " ")
+        }
+        switch PreferredAudioTrack.decision(
+            matching: language,
+            labels: labels,
+            hints: media.streamContext?.audioTracks ?? []
+        ) {
+        case .wait:
+            return
+        case .unavailable:
+            appliedAudioMediaID = media.id
+        case .select(let index):
+            appliedAudioMediaID = media.id
+            guard tracks.indices.contains(index), !tracks[index].isEnabled else { return }
+            player.select(track: tracks[index])
+        }
     }
 
     // MARK: - Loading state

@@ -26,6 +26,7 @@ struct SeriesDetailView: View {
         @Environment(\.openWindow) private var openWindow
     #endif
     @Query private var playlists: [Playlist]
+    @Query(sort: \MediaServer.sortOrder) private var mediaServers: [MediaServer]
 
     @State private var selectedSeason: Int = 1
     /// The series' distinct season numbers, cached so the body (season menu,
@@ -37,8 +38,9 @@ struct SeriesDetailView: View {
     @State private var playingMedia: PlayableMedia?
     @State private var similar: [HomeMediaItem] = []
     @State private var otherSources: [HomeMediaItem] = []
-    @State private var crossSourceItems: [HomeMediaItem] = []
-    @State private var showCrossSourcePicker = false
+    @State private var crossSourcePrompt: CrossSourcePrompt?
+    /// Season, episode, and whether to resume, captured when the picker opens.
+    @State private var pendingCrossSourcePlay: (season: Int, episode: Int, resume: Bool)?
     @State private var refreshToken: UUID = .init()
     @State private var isLoadingTMDB: Bool
     #if !os(tvOS)
@@ -194,16 +196,7 @@ struct SeriesDetailView: View {
                 }
             #endif
         }
-        .sheet(isPresented: $showCrossSourcePicker) {
-            CrossSourcePickerView(
-                items: crossSourceItems,
-                currentID: series.id,
-                playlists: playlists,
-                mediaServers: mediaServers,
-                onSelect: playFromCrossSource,
-                onCancel: { showCrossSourcePicker = false }
-            )
-        }
+        .crossSourcePicker(item: $crossSourcePrompt, onSelect: playFromCrossSource)
     }
 
     // MARK: - Sections
@@ -594,33 +587,26 @@ private extension SeriesDetailView {
 
 private extension SeriesDetailView {
     func playEpisode(_ episode: Episode) {
-        // When the same series exists in multiple configured sources, show
-        // a source picker so the user can choose which provider to stream from.
-        let sources = OtherSources.resolveCrossSource(for: series, in: modelContext)
-        if sources.count > 1 {
-            crossSourceItems = sources
-            showCrossSourcePicker = true
-            return
-        }
-        guard let playlist = seriesPlaylist,
-              let media = PlayableMedia.from(episode: episode, playlist: playlist) else { return }
-        if ExternalPlayback.open(media) { return }
-        #if os(macOS)
-            openWindow(id: "player", value: media)
-        #else
-            playingMedia = media
-        #endif
+        playEpisode(episode, resume: true)
     }
 
     func playEpisodeFromBeginning(_ episode: Episode) {
-        let sources = OtherSources.resolveCrossSource(for: series, in: modelContext)
-        if sources.count > 1 {
-            crossSourceItems = sources
-            showCrossSourcePicker = true
+        playEpisode(episode, resume: false)
+    }
+
+    func playEpisode(_ episode: Episode, resume: Bool) {
+        if let prompt = OtherSources.playbackChoice(
+            for: series,
+            playlists: playlists,
+            mediaServers: mediaServers,
+            in: modelContext
+        ) {
+            pendingCrossSourcePlay = (episode.seasonNum, episode.episodeNum, resume)
+            crossSourcePrompt = prompt
             return
         }
         guard let playlist = seriesPlaylist,
-              let media = PlayableMedia.from(episode: episode, playlist: playlist, resumeFromProgress: false) else { return }
+              let media = PlayableMedia.from(episode: episode, playlist: playlist, resumeFromProgress: resume) else { return }
         if ExternalPlayback.open(media) { return }
         #if os(macOS)
             openWindow(id: "player", value: media)
@@ -631,30 +617,37 @@ private extension SeriesDetailView {
 
     /// Plays an episode from the series selected in the cross-source picker.
     func playFromCrossSource(_ item: HomeMediaItem) {
-        showCrossSourcePicker = false
-        switch item {
-        case .series(let s):
-            // Find the matching episode in the selected series by season/episode number
-            guard let currentEp = nextEpisode ?? seasonEpisodes.first,
-                  let matchEp = s.episodes.first(where: {
-                      $0.seasonNumber == currentEp.seasonNumber && $0.episodeNumber == currentEp.episodeNumber
-                  }) else { return }
-            if s.isMediaServerCatalogItem {
-                guard let media = PlayableMedia.fromMediaServerEpisode(matchEp) else { return }
-                if ExternalPlayback.open(media) { return }
-                playingMedia = media
-                return
+        crossSourcePrompt = nil
+        let request = pendingCrossSourcePlay
+        guard case .series(let chosen) = item else { return }
+        let season = request?.season ?? nextEpisode?.seasonNum ?? seasonEpisodes.first?.seasonNum
+        let episodeNum = request?.episode ?? nextEpisode?.episodeNum ?? seasonEpisodes.first?.episodeNum
+        let resume = request?.resume ?? true
+        guard let season, let episodeNum else { return }
+        Task { @MainActor in
+            guard let match = await SeriesEpisodeCatalog.matchingProviderEpisode(
+                season: season,
+                episode: episodeNum,
+                in: chosen,
+                context: modelContext,
+                playlists: playlists,
+                mediaServers: mediaServers
+            ) else { return }
+            let media: PlayableMedia?
+            if chosen.isMediaServerCatalogItem {
+                media = PlayableMedia.fromMediaServerEpisode(match, resumeFromProgress: resume)
+            } else if let playlist = playlists.first(where: { chosen.id.hasPrefix($0.id.uuidString) }) {
+                media = PlayableMedia.from(episode: match, playlist: playlist, resumeFromProgress: resume)
+            } else {
+                media = nil
             }
-            guard let playlist = playlists.first(where: { s.id.hasPrefix($0.id.uuidString) }),
-                  let media = PlayableMedia.from(episode: matchEp, playlist: playlist) else { return }
+            guard let media else { return }
             if ExternalPlayback.open(media) { return }
             #if os(macOS)
                 openWindow(id: "player", value: media)
             #else
                 playingMedia = media
             #endif
-        default:
-            break
         }
     }
 

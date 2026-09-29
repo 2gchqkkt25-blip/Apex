@@ -13,77 +13,64 @@ enum MediaServerDetailEnrichment {
     @MainActor
     static func enrichMovieIfNeeded(_ movie: Movie, context: ModelContext) async {
         let container = context.container
-        let movieID = movie.persistentModelID
 
         // Resolve TMDB ID on main actor (needs model access), save deferred
         guard let tmdbId = await resolveMovieTMDBId(movie, context: context) else { return }
 
-        if let enrichedAt = movie.tmdbEnrichedAt,
-           Date().timeIntervalSince(enrichedAt) < 14 * 24 * 3600
-        {
+        if hasFreshTMDBDetails(enrichedAt: movie.tmdbEnrichedAt, backdropPath: movie.backdropPath, logoPath: movie.logoPath, tagline: movie.tagline, castCount: movie.castMembers.count) {
             await enrichMovieRatingsIfNeeded(movie, context: context)
             return
         }
 
-        // Fetch TMDB details off-main to avoid blocking UI
+        // Fetch off the main actor, then apply on the view's own model. A background
+        // save does not update the title already on screen, so artwork and cast
+        // stay blank until the screen is opened again.
         let manager = ContentSyncManager(modelContainer: container)
         guard let details = try? await manager.fetchTMDBMovieDetails(tmdbId: tmdbId) else { return }
-
-        // Apply details and save on background context to avoid main-thread stalls
-        await Task.detached(priority: .userInitiated) {
-            let bgContext = ModelContext(container)
-            bgContext.autosaveEnabled = false
-            let descriptor = FetchDescriptor<Movie>(predicate: #Predicate { $0.persistentModelID == movieID })
-            guard let bgMovie = try? bgContext.fetch(descriptor).first else {
-                Logger.database.error("enrichMovieIfNeeded: could not re-fetch movie \(movieID.hashValue) on background context")
-                return
-            }
-            applyMovieDetails(details, to: bgMovie, context: bgContext)
-            do {
-                try bgContext.save()
-            } catch {
-                Logger.database.error("enrichMovieIfNeeded background save failed: \(error.localizedDescription)")
-            }
-        }.value
-
-        // Refresh main-context model so SwiftUI picks up changes
-        context.processPendingChanges()
+        applyMovieDetails(details, to: movie, context: context)
+        do {
+            try context.save()
+        } catch {
+            Logger.database.error("enrichMovieIfNeeded save failed: \(error.localizedDescription)")
+        }
         await enrichMovieRatingsIfNeeded(movie, context: context)
     }
 
     @MainActor
     static func enrichSeriesIfNeeded(_ series: Series, context: ModelContext) async {
         let container = context.container
-        let seriesID = series.persistentModelID
 
         guard let tmdbId = await resolveSeriesTMDBId(series, context: context) else { return }
 
-        if let enrichedAt = series.tmdbEnrichedAt,
-           Date().timeIntervalSince(enrichedAt) < 14 * 24 * 3600
-        {
+        if hasFreshTMDBDetails(enrichedAt: series.tmdbEnrichedAt, backdropPath: series.backdropPath, logoPath: series.logoPath, tagline: series.tagline, castCount: series.castMembers.count) {
+            await enrichSeriesRatingsIfNeeded(series, context: context)
             return
         }
 
         let manager = ContentSyncManager(modelContainer: container)
         guard let details = try? await manager.fetchTMDBTVDetails(tmdbId: tmdbId) else { return }
+        applySeriesDetails(details, to: series, context: context)
+        do {
+            try context.save()
+        } catch {
+            Logger.database.error("enrichSeriesIfNeeded save failed: \(error.localizedDescription)")
+        }
+        await enrichSeriesRatingsIfNeeded(series, context: context)
+    }
 
-        await Task.detached(priority: .userInitiated) {
-            let bgContext = ModelContext(container)
-            bgContext.autosaveEnabled = false
-            let descriptor = FetchDescriptor<Series>(predicate: #Predicate { $0.persistentModelID == seriesID })
-            guard let bgSeries = try? bgContext.fetch(descriptor).first else {
-                Logger.database.error("enrichSeriesIfNeeded: could not re-fetch series \(seriesID.hashValue) on background context")
-                return
-            }
-            applySeriesDetails(details, to: bgSeries, context: bgContext)
-            do {
-                try bgContext.save()
-            } catch {
-                Logger.database.error("enrichSeriesIfNeeded background save failed: \(error.localizedDescription)")
-            }
-        }.value
-
-        context.processPendingChanges()
+    /// A recent stamp alone is not enough. Jellyfin sync used to set
+    /// `tmdbEnrichedAt` when it stored the id, before any artwork or cast
+    /// was fetched, and the detail screen then skipped TMDB entirely.
+    private static func hasFreshTMDBDetails(
+        enrichedAt: Date?,
+        backdropPath: String?,
+        logoPath: String?,
+        tagline: String?,
+        castCount: Int
+    ) -> Bool {
+        guard let enrichedAt, Date().timeIntervalSince(enrichedAt) < 14 * 24 * 3600 else { return false }
+        let hasTagline = !(tagline ?? "").isEmpty
+        return backdropPath != nil || logoPath != nil || hasTagline || castCount > 0
     }
 
     @MainActor

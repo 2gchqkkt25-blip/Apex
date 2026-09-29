@@ -281,6 +281,7 @@ import SwiftUI
         private var secondaryControls: some View {
             HStack(spacing: 4) {
                 if media.isLive { guideButton }
+                audioTrackMenu
                 subtitleMenu
                 if !media.isLive { playbackRateMenu }
                 contentModeButton
@@ -325,6 +326,27 @@ import SwiftUI
             }
             .buttonStyle(.plain)
             .accessibilityLabel(isFavorite ? "In Favorites" : "Favorite")
+        }
+
+        @ViewBuilder
+        private var audioTrackMenu: some View {
+            let tracks = coordinator.playerLayer?.player.tracks(mediaType: .audio) ?? []
+            if tracks.count > 1 {
+                Menu {
+                    ForEach(Array(tracks.enumerated()), id: \.offset) { _, track in
+                        Button {
+                            coordinator.playerLayer?.player.select(track: track)
+                            onResetHideTimer()
+                        } label: {
+                            checkmarkLabel(track.name, checked: track.isEnabled)
+                        }
+                    }
+                } label: {
+                    pillGlyph("waveform")
+                }
+                .menuIndicator(.hidden)
+                .accessibilityLabel("Audio")
+            }
         }
 
         @ViewBuilder

@@ -1129,9 +1129,11 @@ private struct EPGProgramStrip: View {
                         onShowDetails(cell)
                     }
                 #else
-                    .contextMenu {
-                        Button("Show Details") { onShowDetails(cell) }
-                    }
+                    .apexContextMenu([
+                        .button(String(localized: "Show Details"), systemImage: "info.circle") {
+                            onShowDetails(cell)
+                        }
+                    ])
                 #endif
                 .accessibilityLabel(Text(cell.title))
                 .accessibilityHint(Text("\(cell.start, format: .dateTime.hour().minute()) to \(cell.end, format: .dateTime.hour().minute()) on \(row.name)"))

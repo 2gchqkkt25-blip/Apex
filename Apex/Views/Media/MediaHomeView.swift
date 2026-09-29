@@ -43,9 +43,9 @@ struct MediaHomeView: View {
                     emptyState
                 } else if activeServer == nil {
                     ContentUnavailableView(
-                        "No Server Selected",
-                        systemImage: "server.rack",
-                        description: Text("Choose a media server in Settings")
+                        "Media Servers Are Off",
+                        systemImage: "power",
+                        description: Text("Turn a server on in Settings to browse its library. Your login and synced titles stay saved.")
                     )
                 } else {
                     libraryContent
@@ -205,7 +205,7 @@ struct MediaHomeView: View {
 
                 HStack(spacing: 12) {
                     Menu {
-                        ForEach(servers) { server in
+                        ForEach(servers.filter(\.syncEnabled)) { server in
                             Button {
                                 selectServer(server)
                             } label: {
@@ -365,10 +365,10 @@ struct MediaHomeView: View {
 
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
-        if servers.count > 1, activeServer != nil {
+        if servers.filter(\.syncEnabled).count > 1, activeServer != nil {
             ToolbarItem(placement: .principal) {
                 Menu {
-                    ForEach(servers) { server in
+                    ForEach(servers.filter(\.syncEnabled)) { server in
                         Button {
                             selectServer(server)
                         } label: {

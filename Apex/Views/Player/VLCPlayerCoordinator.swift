@@ -155,6 +155,7 @@ final class VLCPlayerCoordinator: NSObject, ObservableObject {
         didReportPlaybackEnd = false
         lastTextTrackCount = 0
         lastAudioTrackCount = 0
+        rememberPreferredAudio(from: media)
         startStartupWatchdog()
         mediaPlayer.delegate = self
 
@@ -223,6 +224,7 @@ final class VLCPlayerCoordinator: NSObject, ObservableObject {
         didReportPlaybackEnd = false
         lastTextTrackCount = 0
         lastAudioTrackCount = 0
+        rememberPreferredAudio(from: media)
         startStartupWatchdog()
 
         let vlcMedia = VLCMedia(url: media.url)
@@ -581,6 +583,7 @@ final class VLCPlayerCoordinator: NSObject, ObservableObject {
     }
 
     func selectAudioTrack(_ track: VLCMediaPlayer.Track) {
+        didApplyPreferredAudio = true
         track.isSelectedExclusively = true
         objectWillChange.send()
     }
@@ -609,7 +612,42 @@ final class VLCPlayerCoordinator: NSObject, ObservableObject {
                 onEmbeddedSubtitlesAvailable?()
             }
         }
+        applyPreferredAudioIfNeeded()
         objectWillChange.send()
+    }
+
+    private var preferredAudioLanguage: String?
+    private var preferredAudioHints: [MediaServerAudioHint] = []
+    private var didApplyPreferredAudio = false
+
+    private func rememberPreferredAudio(from media: PlayableMedia) {
+        preferredAudioLanguage = media.streamContext?.preferredAudioLanguage
+        preferredAudioHints = media.streamContext?.audioTracks ?? []
+        didApplyPreferredAudio = false
+    }
+
+    private func applyPreferredAudioIfNeeded() {
+        guard !didApplyPreferredAudio else { return }
+        guard preferredAudioLanguage != nil else {
+            didApplyPreferredAudio = true
+            return
+        }
+        let tracks = mediaPlayer.audioTracks
+        guard !tracks.isEmpty else { return }
+        switch PreferredAudioTrack.decision(
+            matching: preferredAudioLanguage,
+            labels: tracks.map(\.trackName),
+            hints: preferredAudioHints
+        ) {
+        case .wait:
+            return
+        case .unavailable:
+            didApplyPreferredAudio = true
+        case .select(let index):
+            didApplyPreferredAudio = true
+            guard tracks.indices.contains(index), !tracks[index].isSelectedExclusively else { return }
+            tracks[index].isSelectedExclusively = true
+        }
     }
 }
 

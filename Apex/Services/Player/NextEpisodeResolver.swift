@@ -26,9 +26,11 @@ enum NextEpisodeResolver {
         guard let current = try? context.fetch(descriptor).first,
               let series = EpisodeSeriesResolver.series(for: current, in: context) else { return nil }
 
-        let ordered = series.episodes.sorted {
-            ($0.seasonNum, $0.episodeNum) < ($1.seasonNum, $1.episodeNum)
-        }
+        let ordered = series.episodes
+            .filter(\.isProviderEpisode)
+            .sorted {
+                ($0.seasonNum, $0.episodeNum) < ($1.seasonNum, $1.episodeNum)
+            }
         guard let index = ordered.firstIndex(where: { $0.id == current.id }),
               index + 1 < ordered.count else { return nil }
 

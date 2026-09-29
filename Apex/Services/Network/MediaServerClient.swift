@@ -16,6 +16,7 @@ nonisolated enum MediaServerError: LocalizedError, Sendable {
     case noStreams
     case plexPinExpired
     case plexNoServers
+    case disabled
 
     var errorDescription: String? {
         switch self {
@@ -25,6 +26,7 @@ nonisolated enum MediaServerError: LocalizedError, Sendable {
         case .connectionTimeout: "Could not reach your Plex server on the local network. Make sure Apple TV and Plex are on the same Wi‑Fi and that local network access is allowed for Apex in Settings → Privacy."
         case .notFound: "Item not found on the server."
         case .noStreams: "No playable stream available for this title."
+        case .disabled: "This media server is turned off. Turn it on in Settings to play from it."
         case .plexPinExpired: "Plex sign-in timed out. Try again."
         case .plexNoServers: "No Plex servers found for this account."
         }
@@ -45,6 +47,13 @@ nonisolated protocol MediaServerClient: Sendable {
         startIndex: Int,
         limit: Int
     ) async throws -> MediaServerItemsPage
+    func searchItems(
+        baseURL: URL,
+        userId: String,
+        token: String,
+        query: String,
+        limit: Int
+    ) async throws -> [MediaServerItem]
     func itemDetails(baseURL: URL, userId: String, token: String, itemId: String) async throws -> MediaServerItem
     func seasons(baseURL: URL, userId: String, token: String, seriesId: String) async throws -> [MediaServerItem]
     func episodes(baseURL: URL, userId: String, token: String, seriesId: String, seasonId: String) async throws -> [MediaServerItem]

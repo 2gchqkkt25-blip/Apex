@@ -20,13 +20,19 @@ struct MediaMovieDetailView: View {
     #if os(macOS)
         @Environment(\.openWindow) private var openWindow
     #endif
+    @Query private var playlists: [Playlist]
+    @Query(sort: \MediaServer.sortOrder) private var mediaServers: [MediaServer]
     @State private var playingMedia: PlayableMedia?
     @State private var isLoadingDetails = true
+    @State private var detailToken = UUID()
+    @State private var crossSourcePrompt: CrossSourcePrompt?
+    @State private var crossSourceResume = true
 
     var body: some View {
         GeometryReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: DetailMetrics.sectionSpacing) {
+                    let _ = detailToken
                     DetailHero(
                         title: movie.name,
                         backdropURL: TMDBClient.backdropURL(movie.backdropPath),
@@ -117,9 +123,11 @@ struct MediaMovieDetailView: View {
                 FullScreenPlayerView(media: media)
             }
         #endif
+        .crossSourcePicker(item: $crossSourcePrompt, onSelect: playFromCrossSource)
         .task(id: movie.id) {
             isLoadingDetails = true
             await MediaServerDetailEnrichment.enrichMovieIfNeeded(movie, context: modelContext)
+            detailToken = UUID()
             isLoadingDetails = false
         }
     }
@@ -151,7 +159,41 @@ struct MediaMovieDetailView: View {
     }
 
     private func startPlayback(fromBeginning: Bool = false) {
-        guard let media = PlayableMedia.fromMediaServerMovie(movie, resumeFromProgress: !fromBeginning) else { return }
+        playResolved(resume: !fromBeginning)
+    }
+
+    private func playResolved(resume: Bool) {
+        if let prompt = OtherSources.playbackChoice(
+            for: movie,
+            playlists: playlists,
+            mediaServers: mediaServers,
+            in: modelContext
+        ) {
+            crossSourceResume = resume
+            crossSourcePrompt = prompt
+            return
+        }
+        guard let media = PlayableMedia.fromMediaServerMovie(movie, resumeFromProgress: resume) else { return }
+        open(media)
+    }
+
+    private func playFromCrossSource(_ item: HomeMediaItem) {
+        crossSourcePrompt = nil
+        guard case let .movie(chosen) = item else { return }
+        let media: PlayableMedia?
+        if chosen.isMediaServerCatalogItem {
+            media = PlayableMedia.fromMediaServerMovie(chosen, resumeFromProgress: crossSourceResume)
+        } else if let playlist = playlists.first(where: { chosen.id.hasPrefix($0.id.uuidString) }) {
+            media = PlayableMedia.from(movie: chosen, playlist: playlist, resumeFromProgress: crossSourceResume)
+        } else {
+            media = nil
+        }
+        guard let media else { return }
+        open(media)
+    }
+
+    private func open(_ media: PlayableMedia) {
+        if ExternalPlayback.open(media) { return }
         #if os(macOS)
             openWindow(id: "player", value: media)
         #else

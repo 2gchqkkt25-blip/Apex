@@ -318,7 +318,10 @@
         var onMarkFollowingUnwatched: () -> Void = {}
 
         var body: some View {
-            Button(action: onPlay) {
+            Button(action: {
+                guard episode.isProviderEpisode else { return }
+                onPlay()
+            }) {
                 VStack(alignment: .leading, spacing: 14) {
                     still
                     VStack(alignment: .leading, spacing: 6) {
@@ -410,11 +413,24 @@
         }
 
         private var metaLine: String? {
-            let parts = [
+            var parts = [
                 DetailFormat.date(from: episode.airDate),
                 DetailFormat.minutes(episode.durationSecs)
             ].compactMap(\.self)
+            if !episode.isProviderEpisode {
+                parts.insert(availabilityLabel, at: 0)
+            }
             return parts.isEmpty ? nil : parts.joined(separator: "  ·  ")
+        }
+
+        private var availabilityLabel: String {
+            let formatter = DateFormatter()
+            formatter.dateFormat = "yyyy-MM-dd"
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            guard let raw = episode.airDate, let parsed = formatter.date(from: raw) else {
+                return "Not available"
+            }
+            return parsed > Date() ? "Upcoming" : "Not available"
         }
 
         private var resumeFraction: Double? {

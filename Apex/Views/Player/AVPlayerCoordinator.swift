@@ -171,6 +171,7 @@ final class AVPlayerCoordinator: NSObject, ObservableObject {
         trackLoadTask?.cancel()
 
         currentMedia = media
+        didApplyPreferredAudio = false
         isLive = media.isLive
         startTime = media.startTime
         needsResume = !media.isLive && media.startTime > 1
@@ -348,7 +349,39 @@ final class AVPlayerCoordinator: NSObject, ObservableObject {
     func selectAudioTrack(id: String) {
         guard let audioGroup, let index = Int(id), audioOptions.indices.contains(index) else { return }
         item?.select(audioOptions[index], in: audioGroup)
+        didApplyPreferredAudio = true
         refreshTrackSelection()
+    }
+
+    private var didApplyPreferredAudio = false
+
+    private func applyPreferredAudioIfNeeded() {
+        guard !didApplyPreferredAudio else { return }
+        let language = currentMedia?.streamContext?.preferredAudioLanguage
+        guard language != nil else {
+            didApplyPreferredAudio = true
+            return
+        }
+        guard let audioGroup, !audioOptions.isEmpty else { return }
+        let labels = audioOptions.map { option in
+            [option.displayName, option.extendedLanguageTag, option.locale?.identifier]
+                .compactMap { $0 }
+                .joined(separator: " ")
+        }
+        switch PreferredAudioTrack.decision(
+            matching: language,
+            labels: labels,
+            hints: currentMedia?.streamContext?.audioTracks ?? []
+        ) {
+        case .wait:
+            return
+        case .unavailable:
+            didApplyPreferredAudio = true
+        case .select(let index):
+            didApplyPreferredAudio = true
+            guard audioOptions.indices.contains(index) else { return }
+            item?.select(audioOptions[index], in: audioGroup)
+        }
     }
 
     /// `nil` disables subtitles ("Off").
@@ -373,6 +406,7 @@ final class AVPlayerCoordinator: NSObject, ObservableObject {
                 legibleGroup = legible
                 audioOptions = audio?.options ?? []
                 legibleOptions = legible?.options ?? []
+                applyPreferredAudioIfNeeded()
                 refreshTrackSelection()
             }
         }

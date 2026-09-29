@@ -69,6 +69,71 @@ nonisolated enum ContentIndexText {
         return (name.isEmpty ? rawName : name, year)
     }
 
+    /// Letters and digits only, after provider tags are stripped.
+    /// "S.W.A.T." and "SWAT" share a key, so search and the source picker can match them.
+    static func matchKey(for rawName: String) -> String {
+        let title = searchQuery(for: rawName).title
+        return String(title.lowercased().filter { $0.isLetter || $0.isNumber })
+    }
+
+    /// Extra spellings of one query. "swat" also looks for "S.W.A.T." and "S W A T".
+    static func searchNeedles(for query: String) -> [String] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count >= 2 else { return [] }
+        var needles = [trimmed]
+        let compact = String(trimmed.filter { $0.isLetter || $0.isNumber })
+        if compact.count >= 3, compact.caseInsensitiveCompare(trimmed) != .orderedSame {
+            needles.append(compact)
+        }
+        if compact.count >= 3, compact.count <= 8, !trimmed.contains(where: \.isWhitespace) {
+            needles.append(compact.map { String($0) }.joined(separator: "."))
+            needles.append(compact.map { String($0) }.joined(separator: " "))
+        }
+        let spaced = trimmed.replacingOccurrences(of: "-", with: " ")
+        if spaced.caseInsensitiveCompare(trimmed) != .orderedSame {
+            needles.append(spaced)
+        }
+        var seen = Set<String>()
+        return needles.filter { seen.insert($0.lowercased()).inserted }
+    }
+
+    /// Spellings used to find the same movie or series on another playlist or media server.
+    /// Includes the filename form (`Toy.Story.5`) and the title without a leading "The".
+    static func sourceNeedles(for rawName: String) -> [String] {
+        let query = searchQuery(for: rawName)
+        var needles = searchNeedles(for: query.title)
+        let stripped = stripLeadingArticle(query.title)
+        if stripped.caseInsensitiveCompare(query.title) != .orderedSame {
+            needles.append(contentsOf: searchNeedles(for: stripped))
+        }
+        for title in [query.title, stripped] {
+            let dotted = title.replacingOccurrences(of: " ", with: ".")
+            if dotted.count >= 3, dotted.caseInsensitiveCompare(title) != .orderedSame {
+                needles.append(dotted)
+            }
+        }
+        var seen = Set<String>()
+        return needles.filter { needle in
+            needle.count >= 2 && seen.insert(needle.lowercased()).inserted
+        }
+    }
+
+    /// "The Matrix" and "Matrix" are the same title. A leading "A" or "An" is removed the same way.
+    static func stripLeadingArticle(_ title: String) -> String {
+        let lower = title.lowercased()
+        for article in ["the ", "a ", "an "] where lower.hasPrefix(article) {
+            let rest = title.dropFirst(article.count).trimmingCharacters(in: .whitespacesAndNewlines)
+            if rest.count >= 2 { return String(rest) }
+        }
+        return title
+    }
+
+    /// Letters and digits after tags, punctuation, and a leading article are removed.
+    static func comparableKey(for rawName: String) -> String {
+        let title = stripLeadingArticle(searchQuery(for: rawName).title)
+        return String(title.lowercased().filter { $0.isLetter || $0.isNumber })
+    }
+
     // MARK: - Embedding document
 
     /// The facts about a title that make up its embedding document.

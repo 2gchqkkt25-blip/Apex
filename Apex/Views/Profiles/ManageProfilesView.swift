@@ -158,16 +158,7 @@ struct ManageProfilesView: View {
             }
         }
         .buttonStyle(.plain)
-        .contextMenu {
-            Button { editingProfile = profile } label: { Label("Edit", systemImage: "pencil") }
-            if profiles.count > 1 {
-                Button(role: .destructive) {
-                    profilePendingDeletion = profile
-                } label: {
-                    Label("Delete", systemImage: "trash")
-                }
-            }
-        }
+        .apexContextMenu(profileActions(profile))
         #if !os(tvOS)
         .swipeActions(edge: .trailing) {
             if profiles.count > 1 {
@@ -185,5 +176,19 @@ struct ManageProfilesView: View {
             .tint(ThemeManager.shared.colors.accent)
         }
         #endif
+    }
+
+    private func profileActions(_ profile: UserProfile) -> [ApexContextAction] {
+        var actions = [
+            ApexContextAction.button(String(localized: "Edit"), systemImage: "pencil") {
+                editingProfile = profile
+            }
+        ]
+        if profiles.count > 1 {
+            actions.append(.button(String(localized: "Delete"), systemImage: "trash", isDestructive: true) {
+                profilePendingDeletion = profile
+            })
+        }
+        return actions
     }
 }

@@ -20,10 +20,15 @@ struct MediaSeriesDetailView: View {
     #if os(macOS)
         @Environment(\.openWindow) private var openWindow
     #endif
+    @Query private var playlists: [Playlist]
+    @Query(sort: \MediaServer.sortOrder) private var mediaServers: [MediaServer]
     @State private var playingMedia: PlayableMedia?
     @State private var isLoadingEpisodes = false
     @State private var isLoadingDetails = true
+    @State private var detailToken = UUID()
     @State private var loadError: String?
+    @State private var crossSourcePrompt: CrossSourcePrompt?
+    @State private var pendingCrossSourcePlay: (season: Int, episode: Int, resume: Bool)?
 
     private var episodes: [Episode] {
         series.episodes.sorted {
@@ -36,6 +41,7 @@ struct MediaSeriesDetailView: View {
         GeometryReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: DetailMetrics.sectionSpacing) {
+                    let _ = detailToken
                     DetailHero(
                         title: series.name,
                         backdropURL: TMDBClient.backdropURL(series.backdropPath),
@@ -147,9 +153,11 @@ struct MediaSeriesDetailView: View {
         #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
         #endif
+        .crossSourcePicker(item: $crossSourcePrompt, onSelect: playFromCrossSource)
         .task(id: series.id) {
             isLoadingDetails = true
             await MediaServerDetailEnrichment.enrichSeriesIfNeeded(series, context: modelContext)
+            detailToken = UUID()
             isLoadingDetails = false
         }
         .task(id: series.id) {
@@ -181,7 +189,54 @@ struct MediaSeriesDetailView: View {
     }
 
     private func startPlayback(for episode: Episode) {
+        playResolved(episode)
+    }
+
+    private func playResolved(_ episode: Episode) {
+        if let prompt = OtherSources.playbackChoice(
+            for: series,
+            playlists: playlists,
+            mediaServers: mediaServers,
+            in: modelContext
+        ) {
+            pendingCrossSourcePlay = (episode.seasonNum, episode.episodeNum, true)
+            crossSourcePrompt = prompt
+            return
+        }
         guard let media = PlayableMedia.fromMediaServerEpisode(episode) else { return }
+        open(media)
+    }
+
+    private func playFromCrossSource(_ item: HomeMediaItem) {
+        crossSourcePrompt = nil
+        guard case let .series(chosen) = item else { return }
+        let request = pendingCrossSourcePlay
+        guard let season = request?.season, let episodeNum = request?.episode else { return }
+        let resume = request?.resume ?? true
+        Task { @MainActor in
+            guard let match = await SeriesEpisodeCatalog.matchingProviderEpisode(
+                season: season,
+                episode: episodeNum,
+                in: chosen,
+                context: modelContext,
+                playlists: playlists,
+                mediaServers: mediaServers
+            ) else { return }
+            let media: PlayableMedia?
+            if chosen.isMediaServerCatalogItem {
+                media = PlayableMedia.fromMediaServerEpisode(match, resumeFromProgress: resume)
+            } else if let playlist = playlists.first(where: { chosen.id.hasPrefix($0.id.uuidString) }) {
+                media = PlayableMedia.from(episode: match, playlist: playlist, resumeFromProgress: resume)
+            } else {
+                media = nil
+            }
+            guard let media else { return }
+            open(media)
+        }
+    }
+
+    private func open(_ media: PlayableMedia) {
+        if ExternalPlayback.open(media) { return }
         #if os(macOS)
             openWindow(id: "player", value: media)
         #else

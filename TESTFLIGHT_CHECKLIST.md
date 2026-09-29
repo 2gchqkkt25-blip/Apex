@@ -1,6 +1,38 @@
-# TestFlight Checklist — Build 61
+# TestFlight Checklist — Build 62
 
 ## What to Test (paste in App Store Connect → TestFlight → What to Test)
+
+```
+Build 62 (1.2.0)
+
+Apex is an IPTV player—users add their own Xtream or M3U playlist. No content is bundled.
+
+1. With one playlist and no media server turned on, Play should start immediately. With two playlists that both have the title, or with a media server turned on, Play should open Choose a source.
+2. On a Jellyfin or AIOStreams title with more than one stream, the version list should show language, quality, and size. Settings → Media Servers → Language should be the audio that plays.
+3. Turn a media server off in Settings. It should leave the Media tab, search, and playback, and the login should still be there when you turn it back on.
+4. Search for a title that is on an enabled media server. It should appear with the IPTV results.
+5. On Apple TV, Choose a source and the stream list should be compact cards. Settings → Media Servers → Language and Settings → Subtitles → Language should each be one row that opens a menu.
+
+Contact: support@streaminfinitytv.com
+```
+
+## Build 62 Focused Checklist
+
+- [ ] One enabled playlist and no media server on: Play starts without Choose a source
+- [ ] Two enabled playlists that both have the title: Choose a source lists both
+- [ ] A media server that is turned on is offered when it has the title
+- [ ] A turned-off media server is not offered, and turning it back on restores it without adding it again
+- [ ] AIOStreams versions show language, quality, and size, and the Settings language is preferred
+- [ ] Search returns titles from enabled media servers
+- [ ] Apple TV source and version lists are compact solid cards
+- [ ] Apple TV audio language and subtitle language are each a single menu row
+- [ ] macOS right-click on a poster still offers Play
+
+**Release metadata:** Apex app and Top Shelf extension are both Build **62** (version 1.2.0).
+
+---
+
+## Build 61 (previous)
 
 ```
 Build 61 (1.2.0)

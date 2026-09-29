@@ -85,6 +85,10 @@ enum SeriesEpisodeCatalog {
         let seasons = (try? await TMDBClient.shared.tvSeasonNumbers(tmdbId)) ?? []
         guard !seasons.isEmpty else { return }
 
+        // Drop guide rows that duplicate a provider episode before adding more.
+        // A refresh can land while the season fetch is in flight; those slots
+        // are checked again at insert time.
+        pruneShadowedGuideEpisodes(in: series, context: context)
         let known = Set(series.episodes.map { "\($0.seasonNum)-\($0.episodeNum)" })
         var missing: [TMDBSeasonEpisode] = []
         await withTaskGroup(of: [TMDBSeasonEpisode].self) { group in
@@ -101,6 +105,10 @@ enum SeriesEpisodeCatalog {
         }
         let fallbackArtwork = seriesArtwork(series)
         for episode in missing {
+            let slotTaken = series.episodes.contains {
+                $0.seasonNum == episode.seasonNumber && $0.episodeNum == episode.episodeNumber
+            }
+            if slotTaken { continue }
             let rowID = "\(series.id)-tmdb-\(episode.seasonNumber)-\(episode.episodeNumber)"
             guard !series.episodes.contains(where: { $0.id == rowID }) else { continue }
             let row = Episode(
@@ -109,17 +117,20 @@ enum SeriesEpisodeCatalog {
                 title: episode.name,
                 containerExtension: "",
                 seasonNum: episode.seasonNumber,
-                episodeNum: episode.episodeNumber,
-                series: series
+                episodeNum: episode.episodeNumber
             )
             row.plot = episode.overview
             row.airDate = episode.airDate
             row.durationSecs = episode.runtimeMinutes.map { $0 * 60 }
             row.movieImage = episode.stillURL ?? fallbackArtwork
             row.rating = episode.rating
+            row.series = series
             context.insert(row)
-            series.episodes.append(row)
+            if !series.episodes.contains(where: { $0.id == row.id }) {
+                series.episodes.append(row)
+            }
         }
+        pruneShadowedGuideEpisodes(in: series, context: context)
         // Episodes already saved before artwork fallback have a blank still.
         // TMDB often has no episode image until it airs; the series backdrop
         // or poster fills that box.
@@ -129,6 +140,87 @@ enum SeriesEpisodeCatalog {
             }
         }
         try? context.save()
+    }
+
+    /// One card per episode number. The provider row wins when TMDB also
+    /// filled that slot, so the season list never shows the same episode twice.
+    static func episodesForDisplay(_ episodes: [Episode], season: Int) -> [Episode] {
+        var chosen: [Int: Episode] = [:]
+        for episode in episodes where episode.seasonNum == season {
+            guard let current = chosen[episode.episodeNum] else {
+                chosen[episode.episodeNum] = episode
+                continue
+            }
+            if !current.isProviderEpisode && episode.isProviderEpisode {
+                chosen[episode.episodeNum] = episode
+            }
+        }
+        return chosen.values.sorted { $0.episodeNum < $1.episodeNum }
+    }
+
+    /// Removes TMDB guide rows that occupy a slot the provider can already
+    /// play, and collapses repeated guide rows for the same slot.
+    @MainActor
+    static func pruneShadowedGuideEpisodes(in series: Series, context: ModelContext) {
+        let providerSlots = Set(
+            series.episodes.filter(\.isProviderEpisode).map { "\($0.seasonNum)-\($0.episodeNum)" }
+        )
+        var seenGuide: Set<String> = []
+        let doomed = series.episodes.filter { episode in
+            guard !episode.isProviderEpisode else { return false }
+            let slot = "\(episode.seasonNum)-\(episode.episodeNum)"
+            if providerSlots.contains(slot) { return true }
+            return !seenGuide.insert(slot).inserted
+        }
+        guard !doomed.isEmpty else { return }
+        for episode in doomed {
+            series.episodes.removeAll { $0.id == episode.id }
+            context.delete(episode)
+        }
+        try? context.save()
+    }
+
+    /// The provider episode at `season`/`episode` on `series`, loading the
+    /// season from the playlist or media server when it is not in the store yet.
+    @MainActor
+    static func matchingProviderEpisode(
+        season: Int,
+        episode: Int,
+        in series: Series,
+        context: ModelContext,
+        playlists: [Playlist],
+        mediaServers: [MediaServer]
+    ) async -> Episode? {
+        func match() -> Episode? {
+            series.episodes.first {
+                $0.isProviderEpisode && $0.seasonNum == season && $0.episodeNum == episode
+            }
+        }
+        if let found = match() { return found }
+        if series.episodes.isEmpty {
+            SeriesResume.attachStoredEpisodes(to: series, in: context)
+        }
+        if let found = match() { return found }
+
+        if series.isMediaServerCatalogItem {
+            guard let server = mediaServers.first(where: {
+                MediaServerIdentity.belongsToServer(catalogID: series.id, serverUUID: $0.id)
+            }) else { return nil }
+            try? await MediaServerSyncService.shared.loadEpisodes(
+                for: series,
+                server: server,
+                container: context.container
+            )
+        } else if let playlist = playlists.first(where: { series.id.hasPrefix($0.id.uuidString) }) {
+            let manager = ContentSyncManager(modelContainer: context.container)
+            let parsed = await (try? manager.fetchEpisodes(
+                seriesId: series.seriesId,
+                seriesElementId: series.id,
+                playlist: playlist
+            )) ?? []
+            await series.insertEpisodes(parsed, into: context)
+        }
+        return match()
     }
 
     private static func seriesArtwork(_ series: Series) -> String? {

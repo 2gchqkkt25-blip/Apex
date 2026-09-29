@@ -29,6 +29,20 @@ final class ExternalSubtitleSession {
     }
 }
 
+/// Holds the player controls open for as long as a track menu is on screen.
+/// The controls otherwise hide after a few seconds and take the menu with them.
+struct PlayerMenuHold: View {
+    var onChange: (Bool) -> Void
+
+    var body: some View {
+        Color.clear
+            .frame(width: 0, height: 0)
+            .accessibilityHidden(true)
+            .onAppear { onChange(true) }
+            .onDisappear { onChange(false) }
+    }
+}
+
 /// Parses and renders an SRT subtitle file, displaying cues based on playback time.
 struct ExternalSubtitleOverlay: View {
     let subtitleURL: URL

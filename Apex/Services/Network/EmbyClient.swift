@@ -43,6 +43,16 @@ nonisolated final class EmbyClient: MediaServerClient, @unchecked Sendable {
         )
     }
 
+    func searchItems(
+        baseURL: URL,
+        userId: String,
+        token: String,
+        query: String,
+        limit: Int
+    ) async throws -> [MediaServerItem] {
+        try await jellyfin.searchItems(baseURL: baseURL, userId: userId, token: token, query: query, limit: limit)
+    }
+
     func itemDetails(baseURL: URL, userId: String, token: String, itemId: String) async throws -> MediaServerItem {
         try await jellyfin.itemDetails(baseURL: baseURL, userId: userId, token: token, itemId: itemId)
     }

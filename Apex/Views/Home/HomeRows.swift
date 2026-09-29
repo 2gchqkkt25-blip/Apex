@@ -70,6 +70,7 @@ private struct HomeItemCell: View {
                     .matchedTransitionSourceIfAvailable(id: movie.id, in: animationNamespace)
                 }
                 .posterCardButtonStyle()
+                .catalogContextMenu(movie: movie)
             case let .series(series):
                 NavigationLink(value: series) {
                     HomePosterCard(
@@ -82,6 +83,7 @@ private struct HomeItemCell: View {
                     .matchedTransitionSourceIfAvailable(id: series.id, in: animationNamespace)
                 }
                 .posterCardButtonStyle()
+                .catalogContextMenu(series: series)
             case let .live(stream):
                 Button {
                     onPlayLive(stream)
@@ -89,6 +91,7 @@ private struct HomeItemCell: View {
                     HomePosterCard(title: item.title, imageURL: item.imageURL, isLive: true)
                 }
                 .posterCardButtonStyle()
+                .catalogContextMenu()
             }
         }
         .recentlyWatchedRemoveMenu(onRemove.map { action in { action(item) } })
@@ -152,22 +155,12 @@ extension View {
     /// iOS/tvOS, right-click on macOS).
     @ViewBuilder
     func recommendationVoteMenu(_ vote: ((RecommendationVote) -> Void)?) -> some View {
-        if let vote {
-            contextMenu {
-                Button {
-                    vote(.upvote)
-                } label: {
-                    Label("More Like This", systemImage: "hand.thumbsup")
-                }
-                Button(role: .destructive) {
-                    vote(.downvote)
-                } label: {
-                    Label("Not Interested", systemImage: "hand.thumbsdown")
-                }
-            }
-        } else {
-            self
-        }
+        appendingContextActions(vote.map { vote in
+            [
+                .button(String(localized: "More Like This"), systemImage: "hand.thumbsup") { vote(.upvote) },
+                .button(String(localized: "Not Interested"), systemImage: "hand.thumbsdown", isDestructive: true) { vote(.downvote) }
+            ]
+        } ?? [])
     }
 }
 

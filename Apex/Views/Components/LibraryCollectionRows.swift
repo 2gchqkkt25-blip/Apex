@@ -468,15 +468,9 @@ extension View {
     /// macOS — the standard cross-platform secondary-action gesture.
     @ViewBuilder
     func recentlyWatchedRemoveMenu(_ remove: (() -> Void)?) -> some View {
-        if let remove {
-            contextMenu {
-                Button(role: .destructive, action: remove) {
-                    Label("Remove from Recently Watched", systemImage: "clock.badge.xmark")
-                }
-            }
-        } else {
-            self
-        }
+        appendingContextActions(remove.map { remove in
+            [.button(String(localized: "Remove from Recently Watched"), systemImage: "clock.badge.xmark", isDestructive: true, perform: remove)]
+        } ?? [])
     }
 }
 

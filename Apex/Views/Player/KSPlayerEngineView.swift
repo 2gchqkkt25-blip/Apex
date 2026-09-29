@@ -61,6 +61,8 @@ struct KSPlayerEngineView: View {
     /// playback was paused and needed a press. The controls stay suppressed and
     /// a loading indicator shows until the stream first reaches `.bufferFinished`.
     @State var hasStartedPlayback = false
+    /// Set once the preferred media-server audio track has been applied for `media`.
+    @State var appliedAudioMediaID: String?
     @State var startupStartedAt = ProcessInfo.processInfo.systemUptime
     /// True while the engine is preparing or (re)buffering, so the spinner shows
     /// both on first open and on a mid-stream stall.
@@ -196,6 +198,7 @@ struct KSPlayerEngineView: View {
                             engine.syncState(state)
                             handleState(state)
                             reportPlaybackEndIfNeeded(state)
+                            applyPreferredAudioIfNeeded()
                         }
                     }
                     .onPlay { current, total in
@@ -212,6 +215,7 @@ struct KSPlayerEngineView: View {
                             }
                             notePlaybackProgress(current)
                             noteClockDrift()
+                            applyPreferredAudioIfNeeded()
                             // syncState (onStateChanged) already refreshes this
                             // on every transition; only chase it from the
                             // per-tick play callback until it first lands, so
@@ -408,6 +412,7 @@ struct KSPlayerEngineView: View {
                             updateLoadingState(state)
                             handleState(state)
                             reportPlaybackEndIfNeeded(state)
+                            applyPreferredAudioIfNeeded()
                         }
                     }
                     .onPlay { current, total in
@@ -418,6 +423,7 @@ struct KSPlayerEngineView: View {
                             }
                             notePlaybackProgress(current)
                             noteClockDrift()
+                            applyPreferredAudioIfNeeded()
                         }
                     }
                     .playerVideoPinnedToTopWhileGuideOpen(

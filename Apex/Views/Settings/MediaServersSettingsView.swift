@@ -12,6 +12,7 @@ struct MediaServersSettingsView: View {
     @Query(sort: \MediaServer.sortOrder) private var servers: [MediaServer]
 
     @AppStorage(MediaServerSelectionStore.key) private var selectedServerID: String = ""
+    @AppStorage(MediaServerAudioLanguage.storageKey) private var preferredAudioLanguage = MediaServerAudioLanguage.english.rawValue
     @State private var showingConnect: MediaServerKind?
     @State private var syncService = MediaServerSyncService.shared
     @State private var errorMessage: String?
@@ -40,6 +41,38 @@ struct MediaServersSettingsView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 8) {
+                    TVSettingsSectionLabel("Default Audio Language")
+                    Menu {
+                        ForEach(MediaServerAudioLanguage.allCases) { language in
+                            Button {
+                                preferredAudioLanguage = language.rawValue
+                            } label: {
+                                if preferredAudioLanguage == language.rawValue {
+                                    Label(language.title, systemImage: "checkmark")
+                                } else {
+                                    Text(language.title)
+                                }
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: 16) {
+                            Text("Language")
+                            Spacer(minLength: 0)
+                            Text(preferredAudioLanguageTitle)
+                            Image(systemName: "chevron.up.chevron.down")
+                                .font(.system(size: 18, weight: .semibold))
+                        }
+                    }
+                    .menuIndicator(.hidden)
+                    .buttonStyle(TVSettingsRowButtonStyle())
+                    Text("When a Jellyfin or AIOStreams title has more than one language, Apex plays this one. Matching versions are listed first.")
+                        .font(.system(size: 20))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, TVSettingsMetrics.rowHPadding)
+                        .padding(.top, 6)
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
                     TVSettingsSectionLabel("Connected")
                     if servers.isEmpty {
                         Text("No media servers yet. Add one below to start syncing your library.")
@@ -51,6 +84,7 @@ struct MediaServersSettingsView: View {
                         ForEach(servers) { server in
                             HStack(spacing: 16) {
                                 Button {
+                                    guard server.syncEnabled else { return }
                                     selectedServerID = server.id.uuidString
                                 } label: {
                                     HStack(spacing: 16) {
@@ -58,12 +92,12 @@ struct MediaServersSettingsView: View {
                                             .font(.system(size: 22))
                                         VStack(alignment: .leading, spacing: 2) {
                                             Text(server.name)
-                                            Text(server.kind.displayName)
+                                            Text(server.syncEnabled ? server.kind.displayName : "Off")
                                                 .font(.system(size: 20))
                                                 .foregroundStyle(.secondary)
                                         }
                                         Spacer(minLength: 0)
-                                        if server.id.uuidString == selectedServerID {
+                                        if server.syncEnabled, server.id.uuidString == selectedServerID {
                                             Image(systemName: "checkmark")
                                                 .font(.system(size: 22, weight: .semibold))
                                                 .foregroundStyle(.tint)
@@ -71,6 +105,16 @@ struct MediaServersSettingsView: View {
                                     }
                                 }
                                 .buttonStyle(TVSettingsRowButtonStyle())
+                                .disabled(!server.syncEnabled)
+
+                                Button {
+                                    setServerEnabled(server, enabled: !server.syncEnabled)
+                                } label: {
+                                    Text(server.syncEnabled ? "On" : "Off")
+                                        .font(.system(size: 22, weight: .semibold))
+                                }
+                                .buttonStyle(TVContentIconButtonStyle())
+                                .accessibilityLabel(server.syncEnabled ? "Turn off \(server.name)" : "Turn on \(server.name)")
 
                                 Button {
                                     onEditServer?(server)
@@ -82,7 +126,7 @@ struct MediaServersSettingsView: View {
                             }
                         }
                     }
-                    Text("The checkmark marks the default server shown first in the Media tab.")
+                    Text("Turn a server off to hide its library without deleting it. The checkmark marks the default server shown first in the Media tab.")
                         .font(.system(size: 20))
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, TVSettingsMetrics.rowHPadding)
@@ -129,6 +173,11 @@ struct MediaServersSettingsView: View {
                 Text(errorMessage ?? "")
             }
         }
+
+        private var preferredAudioLanguageTitle: String {
+            MediaServerAudioLanguage(rawValue: preferredAudioLanguage)?.title
+                ?? MediaServerAudioLanguage.english.title
+        }
     #endif
 
     private var listBody: some View {
@@ -144,6 +193,16 @@ struct MediaServersSettingsView: View {
                 .padding(.vertical, 4)
             }
 
+            Section {
+                Picker("Default audio language", selection: $preferredAudioLanguage) {
+                    ForEach(MediaServerAudioLanguage.allCases) { language in
+                        Text(language.title).tag(language.rawValue)
+                    }
+                }
+            } footer: {
+                Text("When a Jellyfin or AIOStreams title has more than one language, Apex plays this one. Matching versions are listed first.")
+            }
+
             if servers.isEmpty {
                 Section {
                     ContentUnavailableView(
@@ -156,10 +215,15 @@ struct MediaServersSettingsView: View {
             } else {
                 Section {
                     ForEach(servers) { server in
-                        NavigationLink {
-                            MediaServerDetailSettingsView(server: server)
-                        } label: {
-                            MediaServerRow(server: server, isDefault: server.id.uuidString == selectedServerID)
+                        HStack(spacing: 12) {
+                            NavigationLink {
+                                MediaServerDetailSettingsView(server: server)
+                            } label: {
+                                MediaServerRow(server: server, isDefault: server.syncEnabled && server.id.uuidString == selectedServerID)
+                            }
+                            Toggle("Enabled", isOn: enabledBinding(for: server))
+                                .labelsHidden()
+                                .accessibilityLabel("\(server.name) enabled")
                         }
                         #if !os(tvOS)
                         .swipeActions {
@@ -174,7 +238,7 @@ struct MediaServersSettingsView: View {
                 } header: {
                     Text("Connected")
                 } footer: {
-                    Text("The default server is shown first in the Media tab when you have more than one.")
+                    Text("Turn a server off to hide its library and leave it out of search and playback. The connection and synced titles stay saved. The default server is shown first in the Media tab.")
                 }
             }
 
@@ -219,6 +283,24 @@ struct MediaServersSettingsView: View {
         } message: {
             Text(errorMessage ?? "")
         }
+    }
+
+    private func enabledBinding(for server: MediaServer) -> Binding<Bool> {
+        Binding(
+            get: { server.syncEnabled },
+            set: { setServerEnabled(server, enabled: $0) }
+        )
+    }
+
+    private func setServerEnabled(_ server: MediaServer, enabled: Bool) {
+        server.syncEnabled = enabled
+        if !enabled, selectedServerID == server.id.uuidString {
+            selectedServerID = servers.first { $0.id != server.id && $0.syncEnabled }?.id.uuidString ?? ""
+        } else if enabled, selectedServerID.isEmpty {
+            selectedServerID = server.id.uuidString
+        }
+        try? modelContext.save()
+        cloudSync?.reconcile(reason: .queued)
     }
 
     private func syncServer(_ server: MediaServer) async {
@@ -269,6 +351,13 @@ private struct MediaServerRow: View {
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
                             .background(.tint.opacity(0.15), in: Capsule())
+                    }
+                    if !server.syncEnabled {
+                        Text("Off")
+                            .font(.caption2.weight(.semibold))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(.secondary.opacity(0.15), in: Capsule())
                     }
                 }
                 Text(server.kind.displayName)
@@ -337,6 +426,18 @@ struct MediaServerDetailSettingsView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     TVSettingsSectionLabel("Sync")
                     Button {
+                        setEnabled(!server.syncEnabled)
+                    } label: {
+                        HStack(spacing: 16) {
+                            Text("Enabled")
+                            Spacer(minLength: 0)
+                            Text(server.syncEnabled ? "On" : "Off")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .buttonStyle(TVSettingsRowButtonStyle())
+
+                    Button {
                         selectedServerID = server.id.uuidString
                     } label: {
                         HStack(spacing: 16) {
@@ -349,7 +450,7 @@ struct MediaServerDetailSettingsView: View {
                         }
                     }
                     .buttonStyle(TVSettingsRowButtonStyle())
-                    .disabled(selectedServerID == server.id.uuidString)
+                    .disabled(!server.syncEnabled || selectedServerID == server.id.uuidString)
 
                     Button {
                         Task { await syncNow() }
@@ -369,7 +470,7 @@ struct MediaServerDetailSettingsView: View {
                         }
                     }
                     .buttonStyle(TVSettingsRowButtonStyle())
-                    .disabled(syncService.isSyncing)
+                    .disabled(!server.syncEnabled || syncService.isSyncing)
                 }
 
                 Button {
@@ -413,6 +514,12 @@ struct MediaServerDetailSettingsView: View {
                 .padding(.vertical, 4)
             }
 
+            Section {
+                Toggle("Enabled", isOn: enabledBinding)
+            } footer: {
+                Text("Turn this server off to hide its library and leave it out of search and playback. The connection and synced titles stay saved, so you can turn it back on without adding it again.")
+            }
+
             Section("Display name") {
                 TextField("Name", text: $server.name)
             }
@@ -454,14 +561,14 @@ struct MediaServerDetailSettingsView: View {
                 Button("Set as Default") {
                     selectedServerID = server.id.uuidString
                 }
-                .disabled(selectedServerID == server.id.uuidString)
+                .disabled(!server.syncEnabled || selectedServerID == server.id.uuidString)
 
                 Button {
                     Task { await syncNow() }
                 } label: {
                     Label("Sync Now", systemImage: "arrow.triangle.2.circlepath")
                 }
-                .disabled(syncService.isSyncing)
+                .disabled(!server.syncEnabled || syncService.isSyncing)
 
                 if let last = server.lastSyncDate {
                     LabeledContent("Last sync") {
@@ -514,6 +621,24 @@ struct MediaServerDetailSettingsView: View {
         } message: {
             Text(errorMessage ?? "")
         }
+    }
+
+    private var enabledBinding: Binding<Bool> {
+        Binding(
+            get: { server.syncEnabled },
+            set: { setEnabled($0) }
+        )
+    }
+
+    private func setEnabled(_ enabled: Bool) {
+        server.syncEnabled = enabled
+        if !enabled, selectedServerID == server.id.uuidString {
+            selectedServerID = ""
+        } else if enabled, selectedServerID.isEmpty {
+            selectedServerID = server.id.uuidString
+        }
+        try? modelContext.save()
+        cloudSync?.reconcile(reason: .queued)
     }
 
     private func syncNow() async {

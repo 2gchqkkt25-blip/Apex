@@ -100,6 +100,16 @@ struct ContentIndexTextTests {
         #expect(ContentIndexText.year(fromReleaseDate: "unknown") == nil)
     }
 
+    @Test func `source matching ignores articles and dotted filenames`() {
+        #expect(ContentIndexText.comparableKey(for: "The Matrix") == ContentIndexText.comparableKey(for: "Matrix"))
+        #expect(
+            ContentIndexText.comparableKey(for: "Toy.Story.5.2026.1080p")
+                == ContentIndexText.comparableKey(for: "Toy Story 5")
+        )
+        let needles = ContentIndexText.sourceNeedles(for: "The Toy Story 5")
+        #expect(needles.contains { $0.caseInsensitiveCompare("Toy.Story.5") == .orderedSame })
+    }
+
     // MARK: - Embedding blob coding
 
     @Test func `vector blob roundtrips`() {

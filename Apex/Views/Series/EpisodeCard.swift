@@ -54,47 +54,7 @@ struct EpisodeCard: View {
         }
         .buttonStyle(.plain)
         .disabled(!episode.isProviderEpisode)
-        .contextMenu {
-            if episode.isProviderEpisode {
-            if let playFromStart = onPlayFromBeginning, episode.watchProgress > 1 {
-                Button {
-                    playFromStart()
-                } label: {
-                    Label("Play from Beginning", systemImage: "gobackward")
-                }
-                Divider()
-            }
-            EpisodeWatchedMenu(
-                episode: episode,
-                onToggleWatched: onToggleWatched,
-                onMarkPreviousWatched: onMarkPreviousWatched,
-                onMarkFollowingUnwatched: onMarkFollowingUnwatched
-            )
-            #if !os(tvOS)
-                Divider()
-                if episode.downloadStatus == .completed {
-                    Button(role: .destructive) {
-                        onDeleteDownload?()
-                    } label: {
-                        Label("Remove Download", systemImage: "trash")
-                    }
-                } else if downloadProgress == nil {
-                    Button {
-                        onDownload?()
-                    } label: {
-                        Label("Download Episode", systemImage: "arrow.down.circle")
-                    }
-                    .disabled(onDownload == nil)
-                } else {
-                    Button(role: .destructive) {
-                        onDeleteDownload?()
-                    } label: {
-                        Label("Cancel Download", systemImage: "xmark.circle")
-                    }
-                }
-            #endif
-            }
-        }
+        .apexContextMenu(episodeActions)
     }
 
     private var thumbnail: some View {
@@ -172,6 +132,47 @@ struct EpisodeCard: View {
             .background(.black.opacity(0.55), in: Circle())
         }
     #endif
+
+    private var episodeActions: [ApexContextAction] {
+        guard episode.isProviderEpisode else { return [] }
+        var actions: [ApexContextAction] = []
+        if let playFromStart = onPlayFromBeginning, episode.watchProgress > 1 {
+            actions.append(.button(String(localized: "Play from Beginning"), systemImage: "gobackward", perform: playFromStart))
+            actions.append(.divider)
+        }
+        actions.append(.button(
+            episode.isWatched ? String(localized: "Mark as Unwatched") : String(localized: "Mark as Watched"),
+            systemImage: episode.isWatched ? "eye.slash" : "checkmark.circle",
+            perform: onToggleWatched
+        ))
+        if episode.hasEarlierEpisodes {
+            actions.append(.button(String(localized: "Mark All Previous as Watched"), systemImage: "checkmark.circle.fill", perform: onMarkPreviousWatched))
+        }
+        if episode.hasLaterWatchedEpisodes {
+            actions.append(.button(String(localized: "Mark All Following as Unwatched"), systemImage: "arrow.counterclockwise.circle", perform: onMarkFollowingUnwatched))
+        }
+        #if !os(tvOS)
+            actions.append(.divider)
+            if episode.downloadStatus == .completed {
+                actions.append(.button(String(localized: "Remove Download"), systemImage: "trash", isDestructive: true) {
+                    onDeleteDownload?()
+                })
+            } else if downloadProgress == nil {
+                actions.append(.button(
+                    String(localized: "Download Episode"),
+                    systemImage: "arrow.down.circle",
+                    isEnabled: onDownload != nil
+                ) {
+                    onDownload?()
+                })
+            } else {
+                actions.append(.button(String(localized: "Cancel Download"), systemImage: "xmark.circle", isDestructive: true) {
+                    onDeleteDownload?()
+                })
+            }
+        #endif
+        return actions
+    }
 
     private var placeholderTitle: String {
         if !episode.title.isEmpty { return episode.title }

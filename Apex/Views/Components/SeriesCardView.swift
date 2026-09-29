@@ -60,6 +60,7 @@ struct SeriesCardView: View {
         .task(id: needsPosterRating ? series.id : nil) {
             await loadPosterRatingIfNeeded()
         }
+        .catalogContextMenu(series: series)
     }
 
     private var needsPosterRating: Bool {

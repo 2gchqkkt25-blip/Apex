@@ -204,6 +204,10 @@ struct OpenSubtitlesSettingsView: View {
             ("FF69B4", .pink)
         ]
 
+        private var subtitleLanguageTitle: String {
+            OpenSubtitlesSettings.languages.first { $0.code == language }?.name ?? "English"
+        }
+
         private var tvBody: some View {
             VStack(alignment: .leading, spacing: 28) {
                 TVSettingsSectionLabel("Subtitles")
@@ -223,23 +227,29 @@ struct OpenSubtitlesSettingsView: View {
                 if isEnabled {
                     TVSettingsField(title: "API Key", placeholder: "Enter your API key", text: $wyzieApiKey, isSecure: true, contentType: .password)
 
-                    VStack(spacing: 2) {
-                        ForEach(OpenSubtitlesSettings.languages.prefix(10), id: \.code) { lang in
+                    Menu {
+                        ForEach(OpenSubtitlesSettings.languages, id: \.code) { lang in
                             Button {
                                 language = lang.code
                             } label: {
-                                HStack {
+                                if language == lang.code {
+                                    Label(lang.name, systemImage: "checkmark")
+                                } else {
                                     Text(lang.name)
-                                    Spacer()
-                                    if language == lang.code {
-                                        Image(systemName: "checkmark")
-                                            .font(.system(size: 20, weight: .semibold))
-                                    }
                                 }
                             }
-                            .buttonStyle(TVSettingsRowButtonStyle())
+                        }
+                    } label: {
+                        HStack(spacing: 16) {
+                            Text("Language")
+                            Spacer(minLength: 0)
+                            Text(subtitleLanguageTitle)
+                            Image(systemName: "chevron.up.chevron.down")
+                                .font(.system(size: 18, weight: .semibold))
                         }
                     }
+                    .menuIndicator(.hidden)
+                    .buttonStyle(TVSettingsRowButtonStyle())
 
                     Text("Get a free key at store.wyzie.io/redeem — just verify with your email. 1,000 requests per day.")
                         .font(.system(size: 20))

@@ -43,10 +43,9 @@
         /// Episodes of the given episode's season, ordered by episode number —
         /// the content of the in-player episode rail.
         static func seasonEpisodes(for episode: Episode) -> [Episode] {
-            guard let series = episode.series else { return [episode] }
-            return series.episodes
-                .filter { $0.seasonNum == episode.seasonNum }
-                .sorted { $0.episodeNum < $1.episodeNum }
+            guard let series = episode.series else { return episode.isProviderEpisode ? [episode] : [] }
+            return SeriesEpisodeCatalog.episodesForDisplay(series.episodes, season: episode.seasonNum)
+                .filter(\.isProviderEpisode)
         }
 
         /// The playlist that owns a series, mirroring the detail screen's logic

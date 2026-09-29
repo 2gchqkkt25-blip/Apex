@@ -139,6 +139,7 @@ extension PlayableMedia {
     }
 
     static func from(episode: Episode, playlist: Playlist, client: XtreamClient = XtreamClient(), resumeFromProgress: Bool = true) -> PlayableMedia? {
+        guard episode.isProviderEpisode else { return nil }
         let startTime = resumeFromProgress ? episode.watchProgress : 0
         // Prefer local file for offline/downloaded playback
         if let path = episode.localFileURL,
@@ -273,6 +274,7 @@ extension PlayableMedia {
     }
 
     static func fromMediaServerEpisode(_ episode: Episode, resumeFromProgress: Bool = true) -> PlayableMedia? {
+        guard episode.isProviderEpisode else { return nil }
         guard let direct = episode.directSource,
               direct.hasPrefix("mediaserver://"),
               let url = URL(string: direct)

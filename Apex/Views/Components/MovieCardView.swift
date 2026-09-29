@@ -60,6 +60,7 @@ struct MovieCardView: View {
         .task(id: needsPosterRating ? movie.id : nil) {
             await loadPosterRatingIfNeeded()
         }
+        .catalogContextMenu(movie: movie)
     }
 
     private var needsPosterRating: Bool {

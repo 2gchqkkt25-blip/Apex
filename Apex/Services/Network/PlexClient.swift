@@ -329,6 +329,32 @@ nonisolated final class PlexClient: MediaServerClient, @unchecked Sendable {
         return MediaServerItemsPage(items: items, totalCount: total)
     }
 
+    func searchItems(
+        baseURL: URL,
+        userId: String,
+        token: String,
+        query: String,
+        limit: Int
+    ) async throws -> [MediaServerItem] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count >= 2 else { return [] }
+        var components = URLComponents(
+            url: baseURL.appendingPathComponent("search"),
+            resolvingAgainstBaseURL: false
+        )!
+        components.queryItems = [
+            URLQueryItem(name: "query", value: trimmed),
+            URLQueryItem(name: "limit", value: String(max(limit, 1)))
+        ]
+        guard let url = components.url else { throw MediaServerError.invalidURL }
+        let data = try await plexGET(url, token: token)
+        let decoded = try JSONDecoder().decode(PlexLibrarySections.self, from: data)
+        return (decoded.mediaContainer.metadata ?? []).compactMap { mapPlexMetadata($0) }.filter { item in
+            let type = item.type.lowercased()
+            return type == "movie" || type == "series" || type == "show"
+        }
+    }
+
     func itemDetails(baseURL: URL, userId: String, token: String, itemId: String) async throws -> MediaServerItem {
         let url = baseURL.appendingPathComponent("library/metadata/\(itemId)")
         let data = try await plexGET(url, token: token)
