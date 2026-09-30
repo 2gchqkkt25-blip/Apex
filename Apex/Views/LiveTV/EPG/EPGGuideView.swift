@@ -742,10 +742,12 @@ private struct EPGGrid: View {
         } action: { _, new in
             let horizontal = max(0, new.x)
             let vertical = max(0, new.y)
-            if sync.horizontalOffset != horizontal {
+            // Ignore sub-point jitter. Vertical focus scrolling otherwise
+            // republishes the horizontal axis and redraws every programme title.
+            if abs(sync.horizontalOffset - horizontal) >= 1 {
                 sync.horizontalOffset = horizontal
             }
-            if sync.verticalOffset != vertical {
+            if abs(sync.verticalOffset - vertical) >= 1 {
                 sync.verticalOffset = vertical
             }
         }
@@ -792,7 +794,9 @@ private struct EPGRows: View {
         /// "now", so the next channel focuses what is airing there rather than
         /// the block that happens to sit under a longer box.
         @State private var verticalAnchor = Date()
-        @State private var focusedRowID: String?
+        /// Row identity for the vertical-focus redirect. A class so writing it
+        /// does not rebuild every channel row.
+        @State private var focusMemory = EPGFocusMemory()
         @FocusState private var focusedCellID: String?
     #endif
 
@@ -833,9 +837,9 @@ private struct EPGRows: View {
             }
             .onChange(of: focusedCellID) { _, id in
                 guard let id, let match = locatedCell(id) else { return }
-                if focusedRowID != match.row.id {
-                    let enteredFromAnotherRow = focusedRowID != nil
-                    focusedRowID = match.row.id
+                let enteredFromAnotherRow = focusMemory.rowID != nil && focusMemory.rowID != match.row.id
+                if focusMemory.rowID != match.row.id {
+                    focusMemory.rowID = match.row.id
                     if enteredFromAnotherRow,
                        let desired = match.row.cells.first(where: { $0.start <= verticalAnchor && verticalAnchor < $0.end }),
                        desired.id != id
@@ -844,8 +848,13 @@ private struct EPGRows: View {
                         return
                     }
                 }
-                let current = Date()
-                verticalAnchor = match.cell.isLive(at: current) ? current : match.cell.start
+                // Leave the anchor alone when this programme already covers it.
+                // Replacing it with Date() on every live cell rebuilt every
+                // row's focus slices and made vertical movement hitch.
+                if verticalAnchor < match.cell.start || verticalAnchor >= match.cell.end {
+                    let current = Date()
+                    verticalAnchor = match.cell.isLive(at: current) ? current : match.cell.start
+                }
             }
         #endif
         .overlay(alignment: .topLeading) {
@@ -864,7 +873,7 @@ private struct EPGRows: View {
         private func focusCurrentProgramme() {
             let current = Date()
             verticalAnchor = current
-            guard let rowID = focusedRowID,
+            guard let rowID = focusMemory.rowID,
                   let row = rows.first(where: { $0.id == rowID }),
                   let live = row.cells.first(where: { $0.isLive(at: current) })
             else { return }
@@ -958,12 +967,163 @@ private struct EPGRows: View {
     }
 #endif
 
+#if os(tvOS)
+    /// Remembers which channel row focus came from without publishing a view update.
+    private final class EPGFocusMemory {
+        var rowID: String?
+    }
+
+    /// Draws one programme. Equatable rendering means a focus move updates only
+    /// the old and new programme blocks instead of repainting every visible
+    /// block in the guide.
+    private struct EPGFocusedProgrammeBlock: View, Equatable {
+        let cell: EPGProgramCell
+        let metrics: EPGMetrics
+        let now: Date
+        let isFocused: Bool
+        var timelineOrigin: CGFloat
+
+        static func == (lhs: EPGFocusedProgrammeBlock, rhs: EPGFocusedProgrammeBlock) -> Bool {
+            lhs.cell == rhs.cell
+                && lhs.isFocused == rhs.isFocused
+                && lhs.now == rhs.now
+                && lhs.timelineOrigin == rhs.timelineOrigin
+        }
+
+        var body: some View {
+            EPGProgramBlockView(
+                cell: cell,
+                metrics: metrics,
+                now: now,
+                isFocused: isFocused,
+                // Sticky title movement is useful with touch/pointer dragging,
+                // but on tvOS it made every visible programme observe every
+                // frame of the focus engine's horizontal scroll animation.
+                // The focused block is already kept visible by the focus engine.
+                scrollSync: nil,
+                timelineOrigin: timelineOrigin
+            )
+            .scaleEffect(isFocused ? 1.04 : 1)
+            .animation(.easeOut(duration: 0.12), value: isFocused)
+        }
+    }
+
+    /// Focus slice for one programme. The hold-menu watcher exists only while
+    /// this cell is focused.
+    private struct EPGFocusedHoldButton: View {
+        let cell: EPGProgramCell
+        let isFavorite: Bool
+        let sliceWidth: CGFloat
+        let rowHeight: CGFloat
+        let title: String
+        let showDetails: Bool
+        let trackHold: Bool
+        let onPlay: () -> Void
+        let onFavorite: () -> Void
+        let onDetails: () -> Void
+
+        var body: some View {
+            EPGChannelHoldButton(
+                cellID: cell.id,
+                isFavorite: isFavorite,
+                sliceWidth: sliceWidth,
+                rowHeight: rowHeight,
+                title: title,
+                showDetails: showDetails,
+                trackHold: trackHold,
+                onPlay: onPlay,
+                onFavorite: onFavorite,
+                onDetails: onDetails
+            )
+            .equatable()
+        }
+    }
+#endif
+
+/// Long-press menu for a guide cell. Equality ignores the action closures so a
+/// focus move in the parent grid does not rebuild the menu. tvOS dismisses a
+/// context menu as soon as its source view is recreated.
+private struct EPGChannelHoldButton: View, Equatable {
+    let cellID: String
+    let isFavorite: Bool
+    let sliceWidth: CGFloat
+    let rowHeight: CGFloat
+    let title: String
+    let showDetails: Bool
+    /// Only the focused cell watches Select. Attaching that watcher to every
+    /// programme in the grid hitches tvOS scrolling.
+    var trackHold = false
+    let onPlay: () -> Void
+    let onFavorite: () -> Void
+    let onDetails: () -> Void
+
+    static func == (lhs: EPGChannelHoldButton, rhs: EPGChannelHoldButton) -> Bool {
+        lhs.cellID == rhs.cellID
+            && lhs.isFavorite == rhs.isFavorite
+            && lhs.sliceWidth == rhs.sliceWidth
+            && lhs.rowHeight == rhs.rowHeight
+            && lhs.title == rhs.title
+            && lhs.showDetails == rhs.showDetails
+            && lhs.trackHold == rhs.trackHold
+    }
+
+    var body: some View {
+        Button {
+            #if os(tvOS)
+                if TVRemoteHold.consume() { return }
+            #endif
+            onPlay()
+        } label: {
+            let tile = Color.clear
+                .frame(width: sliceWidth, height: rowHeight)
+            if trackHold {
+                tile.apexContextMenu(actions)
+            } else {
+                tile
+            }
+        }
+        .buttonStyle(EPGClearFocusButtonStyle(trackHold: trackHold))
+        .focusEffectDisabled()
+        .frame(width: sliceWidth, height: rowHeight)
+        .accessibilityLabel(Text(title))
+    }
+
+    private var actions: [ApexContextAction] {
+        var items = [
+            ApexContextAction.button(
+                isFavorite
+                    ? String(localized: "Remove from Favorites")
+                    : String(localized: "Add to Favorites"),
+                systemImage: isFavorite ? "heart.slash" : "heart",
+                perform: onFavorite
+            )
+        ]
+        if showDetails {
+            items.append(.button(
+                String(localized: "Show Details"),
+                systemImage: "info.circle",
+                perform: onDetails
+            ))
+        }
+        return items
+    }
+}
+
 /// Focus target with no system highlight. The programme block draws the
 /// selection; the default tvOS button style was adding a second white box.
 private struct EPGClearFocusButtonStyle: ButtonStyle {
+    var trackHold = false
+
+    @ViewBuilder
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .focusEffectDisabled()
+        if trackHold {
+            configuration.label
+                .focusEffectDisabled()
+                .trackingTVHoldPress(configuration.isPressed)
+        } else {
+            configuration.label
+                .focusEffectDisabled()
+        }
     }
 }
 
@@ -992,9 +1152,10 @@ private struct EPGProgramTimelineLayout: Layout {
 
 // MARK: - Programme strip
 
-/// A single channel's row of programme blocks. Programmes are buttons; gaps are
-/// inert. A quick click plays the channel; programme details open via long-press
-/// on tvOS or context menu on iOS/macOS.
+/// A single channel's row of programme blocks. On tvOS each programme keeps a
+/// short focus target on the shared time, so left and right step between
+/// shows and up and down stay on that time. iOS and macOS keep a button on
+/// every programme.
 private struct EPGProgramStrip: View {
     let row: EPGChannelRow
     let timeline: EPGTimeline
@@ -1015,6 +1176,8 @@ private struct EPGProgramStrip: View {
     let onPlay: (EPGProgramCell) -> Void
     let onShowDetails: (EPGProgramCell) -> Void
 
+    @Environment(\.modelContext) private var modelContext
+
     var body: some View {
         // Place every block from its timestamp. `.offset` only moves the
         // drawing; tvOS focus still sees every button stacked at x = 0 and
@@ -1024,6 +1187,27 @@ private struct EPGProgramStrip: View {
             programmeCells
         }
         .frame(width: contentWidth, height: metrics.rowHeight, alignment: .topLeading)
+    }
+
+    private func toggleChannelFavorite() {
+        row.stream.isFavorite.toggle()
+        try? modelContext.save()
+    }
+
+    private func channelActions(showDetails: Bool, details: @escaping () -> Void) -> [ApexContextAction] {
+        var actions = [
+            ApexContextAction.button(
+                row.stream.isFavorite
+                    ? String(localized: "Remove from Favorites")
+                    : String(localized: "Add to Favorites"),
+                systemImage: row.stream.isFavorite ? "heart.slash" : "heart",
+                perform: toggleChannelFavorite
+            )
+        ]
+        if showDetails {
+            actions.append(.button(String(localized: "Show Details"), systemImage: "info.circle", perform: details))
+        }
+        return actions
     }
 
     private var layoutOrigins: [CGFloat] {
@@ -1054,35 +1238,32 @@ private struct EPGProgramStrip: View {
     private var programmeCells: some View {
         #if os(tvOS)
             ForEach(row.cells) { cell in
-                EPGProgramBlockView(
+                EPGFocusedProgrammeBlock(
                     cell: cell,
                     metrics: metrics,
                     now: now,
                     isFocused: focusedCellID.wrappedValue == cell.id,
-                    scrollSync: scrollSync,
                     timelineOrigin: timeline.x(for: cell.start)
                 )
+                .equatable()
                 .allowsHitTesting(false)
-                .scaleEffect(focusedCellID.wrappedValue == cell.id ? 1.04 : 1)
-                .animation(.easeOut(duration: 0.18), value: focusedCellID.wrappedValue == cell.id)
             }
             ForEach(row.cells) { cell in
                 let slice = focusSlice(for: cell)
                 let sliceWidth = timeline.width(from: slice.start, to: slice.end)
-                Button {
-                    onPlay(cell)
-                } label: {
-                    Color.clear
-                        .frame(width: sliceWidth, height: metrics.rowHeight)
-                }
-                .buttonStyle(EPGClearFocusButtonStyle())
-                .focusEffectDisabled()
-                .frame(width: sliceWidth, height: metrics.rowHeight)
+                EPGFocusedHoldButton(
+                    cell: cell,
+                    isFavorite: row.stream.isFavorite,
+                    sliceWidth: sliceWidth,
+                    rowHeight: metrics.rowHeight,
+                    title: cell.isGap ? row.name : cell.title,
+                    showDetails: !cell.isGap,
+                    trackHold: focusedCellID.wrappedValue == cell.id,
+                    onPlay: { onPlay(cell) },
+                    onFavorite: toggleChannelFavorite,
+                    onDetails: { onShowDetails(cell) }
+                )
                 .focused(focusedCellID, equals: cell.id)
-                .onLongPressGesture(minimumDuration: 0.4) {
-                    if !cell.isGap { onShowDetails(cell) }
-                }
-                .accessibilityLabel(Text(cell.isGap ? row.name : cell.title))
             }
         #else
             programmeButtons
@@ -1108,6 +1289,7 @@ private struct EPGProgramStrip: View {
                     timelineOrigin: timeline.x(for: cell.start)
                 ))
                 .frame(width: cell.width, height: metrics.rowHeight, alignment: .leading)
+                .apexContextMenu(channelActions(showDetails: false, details: {}))
                 .accessibilityLabel(Text(row.name))
                 .accessibilityHint(Text("No programme information"))
             } else {
@@ -1124,17 +1306,7 @@ private struct EPGProgramStrip: View {
                     timelineOrigin: timeline.x(for: cell.start)
                 ))
                 .frame(width: cell.width, height: metrics.rowHeight, alignment: .leading)
-                #if os(tvOS)
-                    .onLongPressGesture(minimumDuration: 0.4) {
-                        onShowDetails(cell)
-                    }
-                #else
-                    .apexContextMenu([
-                        .button(String(localized: "Show Details"), systemImage: "info.circle") {
-                            onShowDetails(cell)
-                        }
-                    ])
-                #endif
+                .apexContextMenu(channelActions(showDetails: true, details: { onShowDetails(cell) }))
                 .accessibilityLabel(Text(cell.title))
                 .accessibilityHint(Text("\(cell.start, format: .dateTime.hour().minute()) to \(cell.end, format: .dateTime.hour().minute()) on \(row.name)"))
                 .accessibilityAction(named: Text("Show Details")) { onShowDetails(cell) }

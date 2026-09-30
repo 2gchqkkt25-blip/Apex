@@ -210,6 +210,14 @@ struct EPGChannelCell: View {
                 in: RoundedRectangle(cornerRadius: 14, style: .continuous)
             )
             .clipped()
+            .overlay(alignment: .topTrailing) {
+                if row.stream.isFavorite {
+                    Image(systemName: "heart.fill")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(.red)
+                        .padding(6)
+                }
+            }
         #else
             .frame(width: metrics.channelColumnWidth, height: metrics.rowHeight, alignment: .leading)
                 .background(.background)

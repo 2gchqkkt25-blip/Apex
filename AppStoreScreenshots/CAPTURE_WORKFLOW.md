@@ -1,4 +1,4 @@
-# Apex Screenshot Capture Workflow — Build 62
+# Apex Screenshot Capture Workflow — Build 63
 
 ## Pre-Capture Setup (Do This Once)
 

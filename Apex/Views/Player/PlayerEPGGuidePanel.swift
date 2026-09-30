@@ -265,27 +265,15 @@ struct PlayerEPGGuidePanel: View {
             .focusSection()
         #endif
         .onAppear {
-            // Always re-anchor to "now" when the guide overlay appears.
-            // The player can run for hours; guarding with a one-shot flag
-            // would leave the timeline pinned at the original open time
-            // instead of wall-clock time after returning from playback or
-            // reopening the overlay. The 60-second timer keeps `now` fresh
-            // while visible, but only this handler resets the scroll target
-            // on each appearance across all platforms.
             didScrollToNow = true
-            now = Date()
-            scrollPosition.scrollTo(x: nowScrollTarget)
-            #if os(tvOS)
-                moveFocusIntoProgrammeGrid()
-            #endif
+            revealCurrentChannel()
+            scheduleReveal()
         }
         .onChange(of: channels.map(\.id)) {
             didScrollToNow = false
-            scrollPosition.scrollTo(x: nowScrollTarget)
+            revealCurrentChannel()
             didScrollToNow = true
-            #if os(tvOS)
-                moveFocusIntoProgrammeGrid()
-            #endif
+            scheduleReveal()
         }
     }
 
@@ -315,6 +303,32 @@ struct PlayerEPGGuidePanel: View {
     private var currentChannelID: String? {
         if case let .live(id) = media.contentRef { return id }
         return nil
+    }
+
+    /// Puts the playing channel at the top of the guide and the timeline on now.
+    /// The grid often appears before the channel list is laid out, so the first
+    /// scroll is clamped to the top. A second pass lands once the rows exist.
+    private func scheduleReveal() {
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(80))
+            revealCurrentChannel()
+            #if os(tvOS)
+                moveFocusIntoProgrammeGrid()
+            #endif
+        }
+    }
+
+    private func revealCurrentChannel() {
+        now = Date()
+        let point = CGPoint(x: nowScrollTarget, y: currentChannelScrollY)
+        scrollPosition.scrollTo(point: point)
+        channelColumnPosition.scrollTo(y: point.y)
+    }
+
+    private var currentChannelScrollY: CGFloat {
+        guard let id = currentChannelID,
+              let index = rows.firstIndex(where: { $0.stream.id == id }) else { return 0 }
+        return CGFloat(index) * (metrics.rowHeight + metrics.rowSpacing)
     }
 
     private func select(_ stream: LiveStream) {

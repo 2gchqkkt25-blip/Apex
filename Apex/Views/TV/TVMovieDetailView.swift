@@ -224,13 +224,13 @@
             ) {
                 VStack(spacing: 16) {
                     TVPlayButton(
-                        title: movie.watchProgress > 1 ? "Resume" : "Play",
+                        title: canResume ? "Resume" : "Play",
                         isEnabled: canPlayMovie,
                         action: startPlayback
                     )
                     .focused($focus, equals: .play)
 
-                    if movie.watchProgress > 1 {
+                    if canResume {
                         TVPlayButton(
                             title: "Start from Beginning",
                             systemImage: "gobackward",
@@ -550,11 +550,16 @@
             movie.addedToWatchlistDate = movie.isFavorite ? Date() : nil
         }
 
+        private var canResume: Bool {
+            movie.watchProgress > 1 && !movie.isWatched
+        }
+
         private func toggleWatched() {
             movie.isWatched.toggle()
             if movie.isWatched {
                 movie.watchProgress = Double(movie.durationSecs ?? 0)
             }
+            try? modelContext.save()
             TraktService.shared.syncWatched(movie: movie, watched: movie.isWatched)
         }
     }

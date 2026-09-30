@@ -68,9 +68,9 @@ private struct HomeItemCell: View {
                         isFavorite: movie.isFavorite
                     )
                     .matchedTransitionSourceIfAvailable(id: movie.id, in: animationNamespace)
+                    .catalogContextMenu(movie: movie)
                 }
                 .posterCardButtonStyle()
-                .catalogContextMenu(movie: movie)
             case let .series(series):
                 NavigationLink(value: series) {
                     HomePosterCard(
@@ -81,17 +81,17 @@ private struct HomeItemCell: View {
                         isFavorite: series.isFavorite
                     )
                     .matchedTransitionSourceIfAvailable(id: series.id, in: animationNamespace)
+                    .catalogContextMenu(series: series)
                 }
                 .posterCardButtonStyle()
-                .catalogContextMenu(series: series)
             case let .live(stream):
                 Button {
                     onPlayLive(stream)
                 } label: {
                     HomePosterCard(title: item.title, imageURL: item.imageURL, isLive: true)
+                        .catalogContextMenu()
                 }
                 .posterCardButtonStyle()
-                .catalogContextMenu()
             }
         }
         .recentlyWatchedRemoveMenu(onRemove.map { action in { action(item) } })

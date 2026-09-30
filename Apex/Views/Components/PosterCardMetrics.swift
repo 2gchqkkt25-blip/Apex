@@ -119,7 +119,7 @@ struct ApexContextAction: Identifiable {
         perform: @escaping () -> Void
     ) -> ApexContextAction {
         ApexContextAction(
-            id: UUID().uuidString,
+            id: title,
             title: title,
             systemImage: systemImage,
             isDestructive: isDestructive,
@@ -129,7 +129,7 @@ struct ApexContextAction: Identifiable {
     }
 
     static var divider: ApexContextAction {
-        ApexContextAction(id: UUID().uuidString, title: "", systemImage: "", isDivider: true)
+        ApexContextAction(id: "divider", title: "", systemImage: "", isDivider: true)
     }
 }
 
@@ -160,6 +160,11 @@ extension View {
                     MacContextMenuCatcher(actions: actions)
                         .allowsHitTesting(false)
                 }
+            #elseif os(tvOS)
+                // The system context menu on Apple TV draws, but focus never
+                // enters it on a scrolling rail. A hold of Select opens a
+                // small menu beside the focused item instead.
+                modifier(TVHoldMenuModifier(actions: actions))
             #else
                 contextMenu {
                     ForEach(actions) { action in
@@ -189,6 +194,371 @@ private struct AppendContextActionsModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         content.environment(\.extraContextActions, existing + extra)
+    }
+}
+
+#if os(tvOS)
+    import Combine
+    import UIKit
+
+    /// Set while Select is held long enough to open the options card, so the
+    /// click that ends the hold does not also play the focused item.
+    enum TVRemoteHold {
+        private static var suppressNextClick = false
+
+        static func arm() {
+            suppressNextClick = true
+        }
+
+        static func disarm() {
+            suppressNextClick = false
+        }
+
+        static func consume() -> Bool {
+            if suppressNextClick {
+                suppressNextClick = false
+                return true
+            }
+            return false
+        }
+    }
+
+    /// Published from inside a focused poster or guide cell. The button style
+    /// reads it, because a gesture on the cell never sees the remote's Select hold.
+    final class TVHoldMenuTarget: Equatable {
+        var actions: [ApexContextAction] = []
+
+        static func == (lhs: TVHoldMenuTarget, rhs: TVHoldMenuTarget) -> Bool {
+            lhs === rhs
+        }
+    }
+
+    /// Window frame of the focused poster or guide cell, so the mini menu can
+    /// sit beside it instead of covering the screen.
+    final class TVHoldAnchorBox {
+        var frame: CGRect = .zero
+    }
+
+    struct TVHoldMenuPreferenceKey: PreferenceKey {
+        static var defaultValue: TVHoldMenuTarget?
+        static func reduce(value: inout TVHoldMenuTarget?, nextValue: () -> TVHoldMenuTarget?) {
+            value = nextValue() ?? value
+        }
+    }
+
+    /// Hold Select to open the compact options menu. The button style watches
+    /// `isPressed` (the remote) and calls `present`.
+    private struct TVHoldMenuModifier: ViewModifier {
+        let actions: [ApexContextAction]
+        @State private var target = TVHoldMenuTarget()
+
+        func body(content: Content) -> some View {
+            let _ = (target.actions = actions)
+            content.preference(key: TVHoldMenuPreferenceKey.self, value: target)
+        }
+    }
+
+    /// Watches the remote press on a poster or guide button and opens that
+    /// cell's options after a short hold. A quick click is left to the button.
+    struct TVHoldPressTracker: ViewModifier {
+        var isPressed: Bool
+        @State private var target: TVHoldMenuTarget?
+        @State private var holdTask: Task<Void, Never>?
+        @State private var suppressClick = false
+        @State private var anchor = TVHoldAnchorBox()
+
+        func body(content: Content) -> some View {
+            content
+                .onPreferenceChange(TVHoldMenuPreferenceKey.self) { target = $0 }
+                .onChange(of: isPressed) { _, pressed in
+                    holdTask?.cancel()
+                    if pressed {
+                        holdTask = Task { @MainActor in
+                            try? await Task.sleep(for: .milliseconds(450))
+                            guard !Task.isCancelled, let target, !target.actions.isEmpty else { return }
+                            TVRemoteHold.arm()
+                            suppressClick = true
+                            TVHoldMenuPresenter.present(actions: target.actions, anchor: anchor.frame)
+                        }
+                    } else {
+                        TVHoldMenuPresenter.noteRelease()
+                        Task { @MainActor in
+                            try? await Task.sleep(for: .milliseconds(200))
+                            suppressClick = false
+                        }
+                    }
+                }
+                .background { TVHoldClickSuppressor(suppress: suppressClick, anchor: anchor) }
+        }
+    }
+
+    private struct TVHoldMenuCard: View {
+        let actions: [ApexContextAction]
+        let anchor: CGRect
+        @ObservedObject var session: TVHoldSession
+        var onChoose: (ApexContextAction) -> Void
+        var onCancel: () -> Void
+        @FocusState private var focusedID: String?
+
+        private var panelHeight: CGFloat {
+            CGFloat(actions.count) * 64 + 16
+        }
+
+        var body: some View {
+            GeometryReader { geo in
+                let origin = menuOrigin(in: geo.size)
+                menuPanel
+                    .frame(width: Self.menuWidth, height: panelHeight)
+                    .position(
+                        x: origin.x + Self.menuWidth / 2,
+                        y: origin.y + panelHeight / 2
+                    )
+            }
+            .ignoresSafeArea()
+            .onAppear { focusedID = "hold-sink" }
+            .onChange(of: session.readyForFocus) { _, ready in
+                guard ready else { return }
+                focusedID = actions.first?.id
+            }
+            .onExitCommand(perform: onCancel)
+        }
+
+        private var menuPanel: some View {
+            VStack(spacing: 4) {
+                ForEach(actions) { action in
+                    Button {
+                        onChoose(action)
+                    } label: {
+                        Label(action.title, systemImage: action.systemImage)
+                            .font(.system(size: 26, weight: .semibold))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .buttonStyle(TVHoldMenuRowStyle(isDestructive: action.isDestructive))
+                    .focused($focusedID, equals: action.id)
+                    .disabled(!action.isEnabled)
+                }
+            }
+            .padding(8)
+            .background(
+                Color(red: 0.16, green: 0.16, blue: 0.18),
+                in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .strokeBorder(.white.opacity(0.16), lineWidth: 1)
+            }
+            .background {
+                // Absorbs focus until Select is released, so that click does
+                // not run the first action.
+                Color.clear
+                    .frame(width: 1, height: 1)
+                    .focusable()
+                    .focusEffectDisabled()
+                    .focused($focusedID, equals: "hold-sink")
+            }
+            .focusSection()
+        }
+
+        private func menuOrigin(in size: CGSize) -> CGPoint {
+            let width = Self.menuWidth
+            let height = panelHeight
+            guard anchor.width > 2, anchor.height > 2 else {
+                return CGPoint(x: (size.width - width) / 2, y: (size.height - height) / 2)
+            }
+            var x = anchor.maxX + 16
+            if x + width > size.width - 40 {
+                x = anchor.minX - width - 16
+            }
+            if x < 40 {
+                x = min(max(40, anchor.minX), size.width - width - 40)
+            }
+            var y = anchor.midY - height / 2
+            y = min(max(40, y), max(40, size.height - height - 40))
+            return CGPoint(x: x, y: y)
+        }
+
+        private static let menuWidth: CGFloat = 420
+    }
+
+    private final class TVHoldSession: ObservableObject {
+        @Published var readyForFocus = false
+    }
+
+    private struct TVHoldMenuRowStyle: ButtonStyle {
+        var isDestructive = false
+
+        func makeBody(configuration: Configuration) -> some View {
+            TVHoldMenuRowBody(configuration: configuration, isDestructive: isDestructive)
+        }
+
+        private struct TVHoldMenuRowBody: View {
+            let configuration: ButtonStyleConfiguration
+            var isDestructive: Bool
+            @Environment(\.isFocused) private var isFocused
+
+            var body: some View {
+                configuration.label
+                    .foregroundStyle(isFocused ? Color.black : (isDestructive ? Color.red : Color.white))
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 10)
+                    .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+                    .background(
+                        isFocused ? Color.white : Color.clear,
+                        in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    )
+            }
+        }
+    }
+
+    @MainActor
+    private enum TVHoldMenuPresenter {
+        private static var isShowing = false
+        private static var session: TVHoldSession?
+
+        static func present(actions: [ApexContextAction], anchor: CGRect) {
+            let rows = actions.filter { !$0.isDivider }
+            guard !rows.isEmpty, !isShowing, let presenter = topViewController() else { return }
+            isShowing = true
+            let session = TVHoldSession()
+            self.session = session
+            let card = TVHoldMenuCard(
+                actions: rows,
+                anchor: anchor,
+                session: session,
+                onChoose: { action in finish(action) },
+                onCancel: { finish(nil) }
+            )
+            let host = TVHoldMenuController(rootView: card)
+            host.onMenu = { finish(nil) }
+            host.modalPresentationStyle = .overFullScreen
+            host.view.backgroundColor = .clear
+            let bounds = presenter.view.window?.bounds ?? presenter.view.bounds
+            presenter.present(host, animated: false) {
+                host.view.frame = bounds
+                host.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            }
+        }
+
+        /// The Select button came up. Move focus onto the first option only
+        /// after that, so the release does not activate it.
+        static func noteRelease() {
+            session?.readyForFocus = true
+            DispatchQueue.main.async {
+                TVRemoteHold.disarm()
+            }
+        }
+
+        private static func finish(_ action: ApexContextAction?) {
+            guard isShowing else { return }
+            isShowing = false
+            session = nil
+            guard let host = topViewController() else {
+                action?.perform()
+                return
+            }
+            let presenter = host.presentingViewController ?? host
+            presenter.dismiss(animated: true) {
+                action?.perform()
+            }
+        }
+
+        private static func topViewController() -> UIViewController? {
+            let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+            let window = scenes.flatMap(\.windows).first(where: \.isKeyWindow) ?? scenes.flatMap(\.windows).first
+            var controller = window?.rootViewController
+            while let presented = controller?.presentedViewController {
+                controller = presented
+            }
+            return controller
+        }
+    }
+
+    private final class TVHoldMenuController: UIHostingController<TVHoldMenuCard> {
+        var onMenu: () -> Void = {}
+
+        override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+            guard presses.contains(where: { $0.type == .menu }) else {
+                super.pressesBegan(presses, with: event)
+                return
+            }
+            onMenu()
+        }
+    }
+
+    private struct TVHoldClickSuppressor: UIViewRepresentable {
+        var suppress: Bool
+        var anchor: TVHoldAnchorBox
+
+        func makeUIView(context: Context) -> GateView {
+            let view = GateView()
+            view.anchor = anchor
+            return view
+        }
+
+        func updateUIView(_ view: GateView, context: Context) {
+            view.anchor = anchor
+            view.suppress = suppress
+        }
+
+        final class GateView: UIView {
+            var suppress = false {
+                didSet { guard suppress != oldValue else { return }; apply() }
+            }
+
+            weak var anchor: TVHoldAnchorBox?
+
+            private weak var gated: UIControl?
+
+            override init(frame: CGRect) {
+                super.init(frame: frame)
+                isUserInteractionEnabled = false
+                backgroundColor = .clear
+            }
+
+            @available(*, unavailable)
+            required init?(coder: NSCoder) {
+                fatalError("init(coder:) has not been implemented")
+            }
+
+            override func layoutSubviews() {
+                super.layoutSubviews()
+                guard bounds.width > 1, bounds.height > 1, let window else { return }
+                anchor?.frame = convert(bounds, to: window)
+            }
+
+            private func apply() {
+                if suppress {
+                    guard gated == nil, let control = nearestControl() else { return }
+                    gated = control
+                    control.isEnabled = false
+                } else if let gated {
+                    gated.isEnabled = true
+                    self.gated = nil
+                }
+            }
+
+            private func nearestControl() -> UIControl? {
+                var view: UIView? = superview
+                while let current = view {
+                    if let control = current as? UIControl { return control }
+                    view = current.superview
+                }
+                return nil
+            }
+        }
+    }
+#endif
+
+extension View {
+    /// Opens the cell's options card when Select is held. No-op until a
+    /// descendant publishes a `TVHoldMenuTarget`.
+    @ViewBuilder
+    func trackingTVHoldPress(_ isPressed: Bool) -> some View {
+        #if os(tvOS)
+            modifier(TVHoldPressTracker(isPressed: isPressed))
+        #else
+            self
+        #endif
     }
 }
 
@@ -401,8 +771,8 @@ private struct CatalogContextMenuModifier: ViewModifier {
                 if movie.isWatched {
                     movie.watchProgress = Double(movie.durationSecs ?? 0)
                 }
-                TraktService.shared.syncWatched(movie: movie, watched: movie.isWatched)
                 try? modelContext.save()
+                TraktService.shared.syncWatched(movie: movie, watched: movie.isWatched)
             })
         } else if let series {
             items.append(.button(String(localized: "Play"), systemImage: "play.fill") {

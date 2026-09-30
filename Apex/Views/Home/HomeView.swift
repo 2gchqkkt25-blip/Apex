@@ -105,7 +105,7 @@ struct HomeView: View {
     init() {
         // Recently watched: non-nil lastWatchedDate, newest first.
         var movies = FetchDescriptor<Movie>(
-            predicate: #Predicate { $0.lastWatchedDate != nil && ($0.isWatched || $0.watchProgress >= 5) },
+            predicate: #Predicate { $0.lastWatchedDate != nil && $0.isWatched == false && $0.watchProgress >= 5 },
             sortBy: [SortDescriptor(\.lastWatchedDate, order: .reverse)]
         )
         movies.fetchLimit = 20

@@ -4,6 +4,26 @@ All notable changes to Apex Stream Player.
 
 ---
 
+## Build 63 (1.2.0) — September 30, 2026
+
+### Bug Fixes
+
+- **Marking a movie watched removes it from Recently Watched** — On iPhone, marking a movie watched takes it off Home and Movies → Recently Watched. Play says Resume only while that movie is unfinished.
+- **Apple TV options stay in a small menu** — Holding Select on a movie opens a menu beside the poster. Watched, favorite, and the other actions can be chosen before it closes. A short click still opens the movie.
+- **Favorite a channel from the TV Guide** — On Apple TV, hold Select on the programme you are on. Add to Favorites and Show Details appear beside it. A heart shows on that channel once it is a favorite. A short click still tunes the channel.
+- **The in-player guide opens on the channel that is playing** — Opening the guide during fullscreen playback stays on that channel. On Apple TV the programme airing now is highlighted.
+
+### Improvements
+
+- **Apple TV guide stays on the current time** — Moving up or down the guide keeps the same time, including when the programme on the next channel is a longer box. Left and right still step to the previous or next programme.
+- **Apple TV guide does less work while you move** — Only the focused programme watches the hold gesture, so changing channels redraws less of the grid.
+
+### Release
+
+- Build number **63** (1.2.0). The Apex app and Top Shelf extension are both build 63.
+
+---
+
 ## Build 62 (1.2.0) — September 29, 2026
 
 ### New

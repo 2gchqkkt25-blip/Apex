@@ -2,7 +2,7 @@
 
 > **Purpose:** Track what stays, what goes, and what changes during the Lume → Apex rebrand.
 >
-> **Last updated:** September 29, 2026 (Build 62)
+> **Last updated:** September 30, 2026 (Build 63)
 
 ---
 
@@ -72,7 +72,7 @@ Play past programmes on live channels that support it (Xtream-only). Modelled as
 - **Status:** Core — **Decision:** ✅ Keep
 
 ### 2.5 Favorite Channels
-Toggle channels as favorites from the player or channel list. Favorited channel rows show a filled red heart inline beside the channel name. Independent Favorites ordering.
+Toggle channels as favorites from the player, the channel list, or — on Apple TV — by holding Select on the current programme in the TV Guide. Favorited channel rows show a filled red heart, including on the guide channel. Independent Favorites ordering.
 - **Files:** `LiveStream.swift`, `PlayerFavorites.swift`
 - **Status:** Core — **Decision:** ✅ Keep
 
@@ -91,7 +91,7 @@ Recently Watched section in the Live TV rail.
 ## 3. Movies
 
 ### 3.1 Movie Browsing
-Browse movies by category with preview rows, "Show All" per category, compact grid tiles for remaining categories, and an active-playlist movie count at the top. Smart collections (Recently Watched, Favorites, Recently Added). Favorited posters show a top-left heart without overlapping the top-right rating badge.
+Browse movies by category with preview rows, "Show All" per category, compact grid tiles for remaining categories, and an active-playlist movie count at the top. Smart collections (Recently Watched, Favorites, Recently Added). Marking a movie watched removes it from Recently Watched. Favorited posters show a top-left heart without overlapping the top-right rating badge.
 - **Files:** `MoviesView.swift`, `LibraryCollectionRows.swift`, `CategoryContentGrid.swift`
 - **Status:** Core — **Decision:** ✅ Keep
 
@@ -244,9 +244,9 @@ Each channel card shows current and next programme from EPG.
 - **Status:** Core — **Decision:** ✅ Keep
 
 ### 6.4 EPG Guide Grid View
-Full TV guide grid with timeline. Tappable programmes for detail/catch-up. List/Guide mode toggle.
+Full TV guide grid with timeline. On Apple TV, up and down stay on the current time and left and right step between programmes. Hold Select on a programme to favorite the channel or show details. The in-player guide opens on the channel that is playing. List/Guide mode toggle.
 - **Files:** `EPGGuideView.swift`, `EPGTimeline.swift`, `EPGProgramDetailView.swift`, `EPGComponents.swift`
-- **Status:** Core — **Decision:** 🔧 Rework — Navigation and scrolling needs improvement; it's not smooth
+- **Status:** Core — **Decision:** 🔧 Rework — Apple TV channel changes do less work; scrolling is still heavier than a typical guide
 
 ### 6.5 EPG Programme Detail
 Detail screen for a specific programme: title, description, times, Play Catch-up button.
@@ -567,9 +567,9 @@ Add support for manifest-based URL sources in addition to Xtream/M3U/Stalker.
 - **Status:** ⬜ Not started
 
 ### 🔜 EPG Guide Performance (IMPROVEMENT)
-The EPG guide grid navigation and scrolling needs improvement — it's currently not smooth.
+Apple TV guide movement stays on the current time, and only the focused programme watches the hold gesture. Vertical scrolling is still heavier than a typical Apple TV guide.
 - **Files to investigate:** `EPGGuideView.swift`, `EPGTimeline.swift`, `EPGComponents.swift`
-- **Status:** ⬜ Not started
+- **Status:** 🔧 In progress (Build 63)
 
 ### 🔜 Enhanced Metadata for VODs (IMPROVEMENT)
 Show richer IMDb + TMDB data on VOD detail screens. Currently metadata enrichment focuses on Movies/Series — extend to VOD content.
@@ -637,7 +637,7 @@ Persistent mini player that continues playing the current live TV stream while b
 ### Items needing rework
 1. **3.2 Movie Detail** — Add IMDb + TMDB collections data, improve VOD metadata display
 2. **4.2 Series Detail** — Bring to parity with Movie detail (IMDb, TMDB, ratings)
-3. **6.4 EPG Guide Grid** — Fix scrolling/performance issues
+3. **6.4 EPG Guide Grid** — Apple TV scrolling is still heavier than a typical guide
 
 ### New features to build
 4. **Manifest URL support** — Add manifest-based content source type
@@ -676,7 +676,7 @@ Play past programmes on live channels that support it (Xtream-only). Modelled as
 - **Decision:** keep
 
 ### 2.5 Favorite Channels
-Toggle channels as favorites from the player or channel list. Favorited channel rows show a filled red heart inline beside the channel name. Independent Favorites ordering.
+Toggle channels as favorites from the player, the channel list, or — on Apple TV — by holding Select on the current programme in the TV Guide. Favorited channel rows show a filled red heart, including on the guide channel. Independent Favorites ordering.
 - **Files:** `LiveStream.swift`, `PlayerFavorites.swift`
 - **Status:** Core
 - **Decision:** keep
@@ -698,7 +698,7 @@ Recently Watched section in the Live TV rail.
 ## 3. Movies
 
 ### 3.1 Movie Browsing
-Browse movies by category with preview rows, "Show All" per category, compact grid tiles for remaining categories, and an active-playlist movie count at the top. Smart collections (Recently Watched, Favorites, Recently Added). Favorited posters show a top-left heart without overlapping the top-right rating badge.
+Browse movies by category with preview rows, "Show All" per category, compact grid tiles for remaining categories, and an active-playlist movie count at the top. Smart collections (Recently Watched, Favorites, Recently Added). Marking a movie watched removes it from Recently Watched. Favorited posters show a top-left heart without overlapping the top-right rating badge.
 - **Files:** `MoviesView.swift`, `LibraryCollectionRows.swift`, `CategoryContentGrid.swift`
 - **Status:** Core
 - **Decision:** keep
@@ -878,7 +878,7 @@ Each channel card shows current and next programme from EPG.
 - **Decision:** Keep
 
 ### 6.4 EPG Guide Grid View
-Full TV guide grid with timeline. Tappable programmes for detail/catch-up. List/Guide mode toggle.
+Full TV guide grid with timeline. On Apple TV, up and down stay on the current time and left and right step between programmes. Hold Select on a programme to favorite the channel or show details. The in-player guide opens on the channel that is playing. List/Guide mode toggle.
 - **Files:** `EPGGuideView.swift`, `EPGTimeline.swift`, `EPGProgramDetailView.swift`, `EPGComponents.swift`
 - **Status:** Core
 - **Decision:** Keep

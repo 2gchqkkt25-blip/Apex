@@ -1,7 +1,14 @@
 # EPG (TV Guide) — Architecture Notes
 
-> Last updated: **September 29, 2026 (Build 62)**
+> Last updated: **September 30, 2026 (Build 63)**
 > Status: **Generic providers** — offset-honest `xmltv.php` bulk sync works. Playlist refresh includes EPG, valid listings persist across relaunch, live results publish incrementally, and the Guide remains stable for channels with no programme data. Programme blocks, the time ruler, and the live Now overlay share the same timestamp geometry on every platform.
+
+## Build 63
+
+- On Apple TV, hold Select on a programme to favorite that channel or open Show Details. A favorite channel shows a heart on its guide row. A short click still tunes the channel.
+- Opening the guide from fullscreen playback scrolls to the channel that is playing. On Apple TV, focus lands on the programme airing now.
+- Up and down stay on the current time. A longer programme on the next channel does not pull the highlight back to the start of that box. Left and right step to the previous or next programme.
+- Only the focused programme watches the hold gesture. Landing on a live programme does not rewrite the shared time, and sub-point scroll jitter does not redraw every title.
 
 ## Build 62
 

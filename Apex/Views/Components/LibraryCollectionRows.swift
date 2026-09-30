@@ -189,9 +189,10 @@ struct MovieCollectionView: View {
         case .recentlyWatched: "Movies you watch will appear here"
         case .recentlyAdded: "Movies recently added to your library will appear here"
         }
+        let visible = kind == .recentlyWatched ? movies.filter { !$0.isWatched } : movies
         CategoryContentGrid(
             title: kind.localizedTitleString,
-            items: movies,
+            items: visible,
             animationNamespace: animationNamespace,
             emptyTitle: kind.title,
             emptyIcon: kind.emptyIcon,
@@ -233,7 +234,7 @@ private enum MovieCollectionQuery {
         var descriptor = switch kind {
         case .recentlyWatched:
             FetchDescriptor<Movie>(
-                predicate: #Predicate { $0.lastWatchedDate != nil && $0.id.starts(with: prefix) && ($0.isWatched || $0.watchProgress >= 5) },
+                predicate: #Predicate { $0.lastWatchedDate != nil && $0.id.starts(with: prefix) && $0.isWatched == false && $0.watchProgress >= 5 },
                 sortBy: [SortDescriptor(\.lastWatchedDate, order: .reverse)]
             )
         case .favorites:
@@ -267,7 +268,7 @@ private enum MovieCollectionQuery {
         var descriptor = switch kind {
         case .recentlyWatched:
             FetchDescriptor<Movie>(
-                predicate: #Predicate { $0.lastWatchedDate != nil && $0.id.starts(with: prefix) && ($0.isWatched || $0.watchProgress >= 5) },
+                predicate: #Predicate { $0.lastWatchedDate != nil && $0.id.starts(with: prefix) && $0.isWatched == false && $0.watchProgress >= 5 },
                 sortBy: [SortDescriptor(\.lastWatchedDate, order: .reverse)]
             )
         case .favorites:

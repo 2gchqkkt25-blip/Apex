@@ -208,11 +208,11 @@ struct MovieDetailView: View {
     private var actions: some View {
         VStack(spacing: 12) {
             PrimaryPlayButton(
-                title: movie.watchProgress > 1 ? "Resume" : "Play",
+                title: canResume ? "Resume" : "Play",
                 isEnabled: moviePlaylist != nil,
                 action: startPlayback
             )
-            if movie.watchProgress > 1 {
+            if canResume {
                 Button {
                     startPlaybackFromBeginning()
                 } label: {
@@ -471,6 +471,10 @@ struct MovieDetailView: View {
         movie.addedToWatchlistDate = movie.isFavorite ? Date() : nil
     }
 
+    private var canResume: Bool {
+        movie.watchProgress > 1 && !movie.isWatched
+    }
+
     private func toggleWatched() {
         movie.isWatched.toggle()
         if movie.isWatched {
@@ -479,6 +483,7 @@ struct MovieDetailView: View {
                 downloads.checkAutoDelete(id: movie.id)
             #endif
         }
+        try? modelContext.save()
         TraktService.shared.syncWatched(movie: movie, watched: movie.isWatched)
     }
 }

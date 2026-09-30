@@ -1,6 +1,38 @@
-# TestFlight Checklist — Build 62
+# TestFlight Checklist — Build 63
 
 ## What to Test (paste in App Store Connect → TestFlight → What to Test)
+
+```
+Build 63 (1.2.0)
+
+Apex is an IPTV player—users add their own Xtream or M3U playlist. No content is bundled.
+
+1. On iPhone, mark a movie in Recently Watched as watched. It should leave Recently Watched on Home and in Movies. Play should say Resume only when you have started it and not finished it.
+2. On Apple TV, hold Select on a movie. A small menu should appear beside the poster and stay up so you can mark it watched or favorite it. A short click should still open the movie.
+3. On Apple TV, open the TV Guide, move to a channel, and hold Select. Add to Favorites should be there. A heart should show on that channel. A short click should still tune it.
+4. While watching a channel, open the guide. It should stay on that channel, and on Apple TV the programme on now should be highlighted.
+5. On Apple TV, move up and down the guide. The highlight should stay on the same time. Left and right should move to the previous and next programme.
+
+Contact: support@streaminfinitytv.com
+```
+
+## Build 63 Focused Checklist
+
+- [ ] iPhone: marking a movie watched removes it from Home and Movies → Recently Watched
+- [ ] Play says Resume only when the movie is started and not marked watched
+- [ ] Apple TV: hold Select on a movie opens a small menu beside the poster that can mark it watched or favorite
+- [ ] A short click on that movie still opens it
+- [ ] Apple TV guide: hold Select on the current programme offers Add to Favorites, and the channel shows a heart
+- [ ] A short click in the guide still tunes the channel
+- [ ] Opening the guide during playback stays on the playing channel and highlights the programme on now
+- [ ] Up and down the Apple TV guide stay on the same time
+- [ ] Left and right step to the previous and next programme
+
+**Release metadata:** Apex app and Top Shelf extension are both Build **63** (version 1.2.0).
+
+---
+
+## Build 62 (previous)
 
 ```
 Build 62 (1.2.0)

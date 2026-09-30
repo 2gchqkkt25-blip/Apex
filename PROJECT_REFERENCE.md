@@ -174,6 +174,7 @@ Without these keys, the app works but metadata is limited to what the IPTV provi
 | 105 | **Build 59 — tvOS post-refresh recovery + EPG alignment** | ✅ **Done (Sep 17)** — Bounded inline tvOS guide refresh; no heavy post-dismissal EPG/rating collision; restored settings focus; absolute timestamp placement; stable live-status merge; Now-line/overlay parity across platforms. See § Build 59. |
 | 106 | **Build 61 — seek, subtitles, guide return, iCloud** | ✅ **Done (Sep 24)** — Apple TV clickpad seek; subtitle menu stays open; Wyzie downloads appear in the captions button; guide returns to now after playback; iCloud no longer rewrites unchanged history. See `CHANGELOG.md`. |
 | 107 | **Build 62 — source picker, media servers, Apple TV menus** | ✅ **Done (Sep 29)** — Choose a source when a title is on more than one enabled playlist or an enabled media server; AIOStreams version details and default audio language; media servers can be turned off; search includes enabled servers; Apple TV source cards and language menus. See `CHANGELOG.md`. |
+| 108 | **Build 63 — watched movies, guide favorites, Apple TV menus** | ✅ **Done (Sep 30)** — Marking a movie watched removes it from Recently Watched. Apple TV hold-Select menus stay beside the item. The TV Guide can favorite the current channel. The in-player guide opens on the playing channel. Up and down stay on the current time. See `CHANGELOG.md`. |
 
 ---
 
@@ -1613,7 +1614,7 @@ Quick reference for [App Store Connect](https://appstoreconnect.apple.com) → *
 | Field | Value |
 |-------|-------|
 | Marketing version | **1.2.0** |
-| Build | **62** (`CURRENT_PROJECT_VERSION`) |
+| Build | **63** (`CURRENT_PROJECT_VERSION`) |
 | Bundle ID | `com.streaminfinity.apex` |
 | Team ID | `VS7D6GB238` |
 
@@ -1901,4 +1902,4 @@ See **What's Been Built → iOS Device — Large Library Fix** above for full de
 
 ---
 
-*Last updated: September 29, 2026 (Build 62 — source picker, media-server on/off, AIOStreams versions, Apple TV language menus).*
+*Last updated: September 30, 2026 (Build 63 — watched movies, guide favorites, in-player guide position, Apple TV time anchor).*
