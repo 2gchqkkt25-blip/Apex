@@ -2,7 +2,7 @@
 
 > **Purpose:** Track what stays, what goes, and what changes during the Lume → Apex rebrand.
 >
-> **Last updated:** October 2, 2026 (Build 64)
+> **Last updated:** October 2, 2026 (Build 64 — App Store review submitted for iOS, macOS, tvOS)
 
 ---
 

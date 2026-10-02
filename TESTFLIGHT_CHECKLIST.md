@@ -27,6 +27,8 @@ Contact: info@birdsenterprisellc.com
 
 **Release metadata:** Apex app and Top Shelf extension are both Build **64** (version 1.2.0).
 
+**App Store:** Version **1.2** with build **64** submitted for App Review on iOS, macOS, and tvOS (October 2, 2026).
+
 ---
 
 ## Build 63 (previous)

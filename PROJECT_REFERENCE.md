@@ -110,8 +110,8 @@ Without these keys, the app works but metadata is limited to what the IPTV provi
 | 41 | TestFlight — external tester groups (Beta App Review) | 🔄 In progress |
 | 42 | tvOS TestFlight + large-library hardening (lazy tabs, deferred indexing) | ✅ Done (build 17) |
 | 43 | GitHub README — Apex Stream Player logo (replaced Lume banner) | ✅ Done |
-| 44 | App Store metadata drafted (iOS + tvOS descriptions, age rating, privacy) | ✅ Done — paste in Connect |
-| 45 | Full App Store release (screenshots, public listing) | ⏳ After TestFlight |
+| 44 | App Store metadata drafted (iOS + tvOS descriptions, age rating, privacy) | ✅ Done — pasted in Connect |
+| 45 | Full App Store release (screenshots, public listing) | 🔄 **Submitted for review (Oct 2)** — iOS, macOS, and tvOS version **1.2** / build **64** sent to App Review. Waiting for Apple. |
 | 46 | TestFlight Pro unlock for beta testers | ✅ Done (`BetaBuildDetection` + `PremiumManager`) |
 | 47 | Home screen freeze fix (~28K playlist) | ✅ Mostly done — lazy tabs, deferred indexer/trending |
 | 48 | **EPG guide loading** (Xtream ~1.6K live channels) | ✅ **Done** — per-channel API + align, perf, progress %; see `EPG.md` |
@@ -176,6 +176,7 @@ Without these keys, the app works but metadata is limited to what the IPTV provi
 | 107 | **Build 62 — source picker, media servers, Apple TV menus** | ✅ **Done (Sep 29)** — Choose a source when a title is on more than one enabled playlist or an enabled media server; AIOStreams version details and default audio language; media servers can be turned off; search includes enabled servers; Apple TV source cards and language menus. See `CHANGELOG.md`. |
 | 108 | **Build 63 — watched movies, guide favorites, Apple TV menus** | ✅ **Done (Sep 30)** — Marking a movie watched removes it from Recently Watched. Apple TV hold-Select menus stay beside the item. The TV Guide can favorite the current channel. The in-player guide opens on the playing channel. Up and down stay on the current time. See `CHANGELOG.md`. |
 | 109 | **Build 64 — iPad toolbar, support links, trending ratings, pricing** | ✅ **Done (Oct 2)** — iPad keeps Search and Settings visible; support email and Discord updated; trending rails fill TMDB scores; Apex Pro monthly is $3.99. See `CHANGELOG.md`. |
+| 110 | **App Store submission — iOS, macOS, tvOS** | 🔄 **Submitted (Oct 2)** — Version **1.2** with build **64** submitted for App Review on iPhone/iPad, Mac, and Apple TV. Content Rights: Yes. Encryption: exempt (`ITSAppUsesNonExemptEncryption = NO`). Support email `info@birdsenterprisellc.com`. |
 
 ---
 
@@ -1649,12 +1650,23 @@ Complete **App Privacy** once; must align with `PRIVACY.md`:
 
 ### Monetization (Apex Pro)
 
-| Tier | What |
-|------|------|
-| **Free** | One playlist, core Live TV / Movies / Series playback |
-| **Apex Pro** | Unlimited playlists, downloads, profiles, Trakt, smart playback, For You |
+| Tier | What | Price |
+|------|------|-------|
+| **Free** | One playlist, core Live TV / Movies / Series playback | — |
+| **Apex Pro Monthly** | Unlimited playlists, downloads, profiles, Trakt, smart playback, For You | **$3.99 / month** |
+| **Apex Pro Lifetime** | Same Pro features, one-time unlock | **$19.99** |
 
 Products: `com.streaminfinity.apex.premium.monthly`, `com.streaminfinity.apex.premium.lifetime`. Charging for **app features** (not content) is allowed under AGPL with source on GitHub. Sideload builds unlock everything (`SIDE_LOAD`).
+
+### App Store submission status (Oct 2, 2026)
+
+| Platform | Connect version | Build | Status |
+|----------|-----------------|-------|--------|
+| **iOS** (iPhone / iPad) | **1.2** | **64** | Submitted for App Review |
+| **macOS** | **1.2** | **64** | Submitted for App Review |
+| **tvOS** | **1.2** | **64** | Submitted for App Review |
+
+Review notes positioning: player only; no bundled channels; users supply authorized credentials; Content Rights answered **Yes**; export compliance uses non-exempt encryption **No** (HTTPS / OS crypto only).
 
 ### External TestFlight — what you **need**
 
@@ -1701,19 +1713,19 @@ Add **test playlist credentials** in review notes if you have a legal test sourc
 
 ### Full App Store release — additional requirements
 
-When ready for public listing (after TestFlight):
+**Status (Oct 2, 2026):** Screenshots, metadata, and build **64** were submitted for App Review on **iOS, macOS, and tvOS** (version **1.2**). Mark this complete when Apple approves and the apps are Ready for Sale.
 
-| Item | Where in Connect |
-|------|------------------|
-| Screenshots | iOS App / Apple TV App → version → **App Store** tab |
-| Description, subtitle, keywords (iOS) | Same **App Store** tab |
-| tvOS description | **Apple TV App** → version → **App Store** tab (no keywords on tvOS) |
-| What’s New | Per version |
-| IAP localization | **Subscriptions** / **In-App Purchases** |
+| Item | Where in Connect | Status |
+|------|------------------|--------|
+| Screenshots | iOS / macOS / Apple TV → version → **App Store** tab | ✅ Uploaded |
+| Description, subtitle, keywords (iOS / macOS) | Same **App Store** tab | ✅ Done |
+| tvOS description | **Apple TV App** → version → **App Store** tab (no keywords on tvOS) | ✅ Done |
+| What’s New | Per version | ✅ Done |
+| IAP (monthly $3.99 + lifetime $19.99) | **Subscriptions** / **In-App Purchases** | ✅ Configured |
+| Content Rights | App Review information | ✅ Yes (third-party content; necessary rights) |
+| Encryption documentation | Export compliance | ✅ Not required (exempt) |
 
-**Screenshot tips:** Xcode Simulator → run Apex → sync playlist → **Cmd+S** to save. Capture Home, EPG, Live TV, detail, player. Simulators: iPhone 17 Pro Max (6.9"), Apple TV 4K. Avoid empty states and “free channels” marketing.
-
-**Draft copy** (iOS + tvOS subtitles, descriptions, IAP text) was prepared in project chat July 2, 2026 — paste into Connect when submitting for **public** release.
+**Screenshot tips:** Xcode Simulator → run Apex → sync playlist → **Cmd+S** to save. Capture Home, EPG, Live TV, detail, player. Simulators: iPhone 17 Pro Max (6.9"), iPad Pro 13", Apple TV 4K. Avoid empty states and “free channels” marketing.
 
 ### Review positioning (IPTV apps)
 
@@ -1903,4 +1915,4 @@ See **What's Been Built → iOS Device — Large Library Fix** above for full de
 
 ---
 
-*Last updated: October 2, 2026 (Build 64 — iPad toolbar, support email/Discord, trending TMDB ratings, Apex Pro $3.99/month).*
+*Last updated: October 2, 2026 (Build 64 — App Store review submitted for iOS, macOS, and tvOS).*

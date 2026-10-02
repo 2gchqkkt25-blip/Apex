@@ -19,6 +19,7 @@ All notable changes to Apex Stream Player.
 ### Release
 
 - Build number **64** (1.2.0). The Apex app and Top Shelf extension are both build 64.
+- **App Store:** Version **1.2** submitted for App Review on **iOS, macOS, and tvOS** (October 2, 2026).
 
 ---
 
