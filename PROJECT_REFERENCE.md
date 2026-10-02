@@ -1010,13 +1010,13 @@ Full rules: `EPG.md` § **Stability rules (do not regress)**. Highlights:
 2. ~~**Website / support email**~~ — ✅ info@birdsenterprisellc.com, GitHub as homepage
 3. ~~**Apple Developer setup**~~ — ✅ Team `VS7D6GB238`, bundle ID registered, IAP products created, iOS TestFlight builds uploaded (July 2, 2026)
 4. ~~**CloudKit Development schema**~~ — ✅ Bootstrapped; **Production deployed** — playlist + user data sync verified on TestFlight (July 2, 2026)
-5. **TestFlight build 59** — 🔄 Ready to archive (Sep 17). Apple TV post-refresh responsiveness and cross-platform Guide overlay/timeline alignment are ready for device testing. See § Build 59, `CHANGELOG.md`, `EPG.md`, and `TESTFLIGHT_CHECKLIST.md`.
-6. **External TestFlight** — Age rating + privacy URL + App Privacy + What to Test → Beta App Review (~1–2 days)
+5. **TestFlight build 64** — ✅ Uploaded (Oct 2). Build 64 is the App Store review binary for iOS, macOS, and tvOS.
+6. **External TestFlight** — ✅ Age rating + privacy URL + App Privacy + What to Test in place
 7. ~~**tvOS large-library hardening**~~ — ✅ Lazy tab mount, deferred indexing/EPG (tvOS-only); in build 17
 8. ~~**EPG guide**~~ — ✅ Working (`xmltv.php` bulk download, offset-honest parse; slow-sync + mismatch fixed); notes in `EPG.md`
-9. **App Store listing** — Screenshots + description/subtitle (not required for external TestFlight)
+9. **App Store listing** — ✅ Screenshots + description/subtitle completed for iOS, macOS, tvOS
 10. **macOS signing** — ✅ Done; certificates configured on build machine
-11. **App Store public release** — After TestFlight validation
+11. **App Store public release** — 🔄 **Submitted for review (Oct 2)** — Waiting for Apple on iOS, macOS, and tvOS (version 1.2 / build 64)
 
 ---
 
