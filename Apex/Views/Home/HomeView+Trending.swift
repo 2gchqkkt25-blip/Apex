@@ -151,18 +151,60 @@ extension HomeView {
             playlistPrefix: prefix,
             restriction: restriction
         )
-        applyTrendingMatch(match, preserveExistingHeroes: preserveExistingHeroes)
+        applyTrendingMatch(
+            match,
+            movieScores: trendingScores(from: movies),
+            seriesScores: trendingScores(from: tvSeries),
+            preserveExistingHeroes: preserveExistingHeroes
+        )
         trendingState = .loaded
         lastTrendingPlaylistStamp = playlistStamp
     }
 
-    private func applyTrendingMatch(_ match: TrendingCatalogMatch, preserveExistingHeroes: Bool = false) {
+    private func trendingScores(from titles: [TrendingTitle]) -> [Int: Double] {
+        var scores: [Int: Double] = [:]
+        for title in titles {
+            guard let score = title.voteAverage, score > 0 else { continue }
+            scores[title.id] = score
+        }
+        return scores
+    }
+
+    private func applyTrendingMatch(
+        _ match: TrendingCatalogMatch,
+        movieScores: [Int: Double] = [:],
+        seriesScores: [Int: Double] = [:],
+        preserveExistingHeroes: Bool = false
+    ) {
         let movieLookup = fetchMoviesByCatalogID(Set(match.movieIDs + match.heroSlots.compactMap {
             $0.media == .movie ? $0.catalogID : nil
         }))
         let seriesLookup = fetchSeriesByCatalogID(Set(match.seriesIDs + match.heroSlots.compactMap {
             $0.media == .series ? $0.catalogID : nil
         }))
+
+        var didWriteRating = false
+        for movie in movieLookup.values {
+            guard movie.rating == 0, movie.rating5Based == 0,
+                  let tmdbId = movie.tmdbId,
+                  let score = movieScores[tmdbId], score > 0
+            else { continue }
+            movie.rating = score
+            didWriteRating = true
+        }
+        for series in seriesLookup.values {
+            let hasScore = (Double(series.rating ?? "") ?? 0) > 0
+                || (Double(series.rating5Based ?? "") ?? 0) > 0
+            guard !hasScore,
+                  let tmdbId = series.tmdbId,
+                  let score = seriesScores[tmdbId], score > 0
+            else { continue }
+            series.rating = String(format: "%.1f", score)
+            didWriteRating = true
+        }
+        if didWriteRating {
+            try? modelContext.save()
+        }
 
         if !match.movieIDs.isEmpty {
             trendingMovies = match.movieIDs.compactMap { movieLookup[$0].map(HomeMediaItem.movie) }

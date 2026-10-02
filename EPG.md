@@ -1,6 +1,6 @@
 # EPG (TV Guide) — Architecture Notes
 
-> Last updated: **September 30, 2026 (Build 63)**
+> Last updated: **October 2, 2026 (Build 64)**
 > Status: **Generic providers** — offset-honest `xmltv.php` bulk sync works. Playlist refresh includes EPG, valid listings persist across relaunch, live results publish incrementally, and the Guide remains stable for channels with no programme data. Programme blocks, the time ruler, and the live Now overlay share the same timestamp geometry on every platform.
 
 ## Build 63

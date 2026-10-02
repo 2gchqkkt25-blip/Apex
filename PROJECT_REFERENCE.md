@@ -104,7 +104,7 @@ Without these keys, the app works but metadata is limited to what the IPTV provi
 | 35 | iOS device — large-library crash/freeze fix (~28K Xtream playlist) | ✅ Done |
 | 36 | CloudKit re-enabled + Development schema bootstrapped | ✅ Done |
 | 37 | CloudKit Production schema deploy + iCloud sync verified | ✅ Done |
-| 38 | Discord link — `discord.gg/fKhGp6xpB` (app + README + GitHub) | ✅ Done |
+| 38 | Discord link — `discord.gg/sn5ATVA83S` (app + README + GitHub) | ✅ Done |
 | 39 | Subtitles — KSPlayer overlay + tvOS track menus + macOS AVPlayer legible output | ✅ Done |
 | 40 | TestFlight build **17** (1.2.0) — iOS + tvOS upload | 🔄 Superseded — use **18+** |
 | 41 | TestFlight — external tester groups (Beta App Review) | 🔄 In progress |
@@ -175,6 +175,7 @@ Without these keys, the app works but metadata is limited to what the IPTV provi
 | 106 | **Build 61 — seek, subtitles, guide return, iCloud** | ✅ **Done (Sep 24)** — Apple TV clickpad seek; subtitle menu stays open; Wyzie downloads appear in the captions button; guide returns to now after playback; iCloud no longer rewrites unchanged history. See `CHANGELOG.md`. |
 | 107 | **Build 62 — source picker, media servers, Apple TV menus** | ✅ **Done (Sep 29)** — Choose a source when a title is on more than one enabled playlist or an enabled media server; AIOStreams version details and default audio language; media servers can be turned off; search includes enabled servers; Apple TV source cards and language menus. See `CHANGELOG.md`. |
 | 108 | **Build 63 — watched movies, guide favorites, Apple TV menus** | ✅ **Done (Sep 30)** — Marking a movie watched removes it from Recently Watched. Apple TV hold-Select menus stay beside the item. The TV Guide can favorite the current channel. The in-player guide opens on the playing channel. Up and down stay on the current time. See `CHANGELOG.md`. |
+| 109 | **Build 64 — iPad toolbar, support links, trending ratings, pricing** | ✅ **Done (Oct 2)** — iPad keeps Search and Settings visible; support email and Discord updated; trending rails fill TMDB scores; Apex Pro monthly is $3.99. See `CHANGELOG.md`. |
 
 ---
 
@@ -1005,7 +1006,7 @@ Full rules: `EPG.md` § **Stability rules (do not regress)**. Highlights:
 ## Key Decisions Pending
 
 1. ~~**GitHub repo**~~ — ✅ Live at [github.com/2gchqkkt25-blip/Apex](https://github.com/2gchqkkt25-blip/Apex)
-2. ~~**Website / support email**~~ — ✅ support@streaminfinitytv.com, GitHub as homepage
+2. ~~**Website / support email**~~ — ✅ info@birdsenterprisellc.com, GitHub as homepage
 3. ~~**Apple Developer setup**~~ — ✅ Team `VS7D6GB238`, bundle ID registered, IAP products created, iOS TestFlight builds uploaded (July 2, 2026)
 4. ~~**CloudKit Development schema**~~ — ✅ Bootstrapped; **Production deployed** — playlist + user data sync verified on TestFlight (July 2, 2026)
 5. **TestFlight build 59** — 🔄 Ready to archive (Sep 17). Apple TV post-refresh responsiveness and cross-platform Guide overlay/timeline alignment are ready for device testing. See § Build 59, `CHANGELOG.md`, `EPG.md`, and `TESTFLIGHT_CHECKLIST.md`.
@@ -1023,10 +1024,10 @@ Full rules: `EPG.md` § **Stability rules (do not regress)**. Highlights:
 | What | Current | Needs |
 |------|---------|-------|
 | Website | `github.com/2gchqkkt25-blip/Apex` | Done (GitHub as homepage) |
-| Support email | `support@streaminfinitytv.com` | ✅ Done |
+| Support email | `info@birdsenterprisellc.com` | ✅ Done |
 | GitHub repo | `github.com/2gchqkkt25-blip/Apex` | ✅ Done |
 | Privacy policy | `github.com/2gchqkkt25-blip/Apex/blob/main/PRIVACY.md` | ✅ Done (iOS + tvOS same URL) |
-| Discord | `discord.gg/fKhGp6xpB` | ✅ Done |
+| Discord | `discord.gg/sn5ATVA83S` | ✅ Done |
 | App Store Connect | [Apex Stream Player](https://apps.apple.com/app/id6779551584) — ID `6779551584` | ✅ Done |
 
 ---
@@ -1315,7 +1316,7 @@ Settings → Appearance (between Premium and Profiles)
 
 ### Discord + Subtitles (July 2, 2026)
 
-**Discord:** `SupportInfo.swift` → Settings → Support (iOS/iPad/Mac) and About QR (tvOS). Invite: `https://discord.gg/fKhGp6xpB`. Also updated in `README.md` and `.github/ISSUE_TEMPLATE/config.yml`.
+**Discord:** `SupportInfo.swift` → Settings → Support (iOS/iPad/Mac) and About QR (tvOS). Invite: `https://discord.gg/sn5ATVA83S`. Also updated in `README.md` and `.github/ISSUE_TEMPLATE/config.yml`.
 
 **Subtitles:** All three engines expose a CC menu in player controls. **KSPlayer** (default) now mounts `KSPlayerSubtitleOverlay` so selected tracks actually render (previously menu-only). **VLCKit** / **AVPlayer** unchanged for rendering; tvOS track menus refresh when tracks load mid-stream; **macOS AVPlayer** uses `AVPlayerItemLegibleOutput` overlay.
 
@@ -1614,7 +1615,7 @@ Quick reference for [App Store Connect](https://appstoreconnect.apple.com) → *
 | Field | Value |
 |-------|-------|
 | Marketing version | **1.2.0** |
-| Build | **63** (`CURRENT_PROJECT_VERSION`) |
+| Build | **64** (`CURRENT_PROJECT_VERSION`) |
 | Bundle ID | `com.streaminfinity.apex` |
 | Team ID | `VS7D6GB238` |
 
@@ -1627,7 +1628,7 @@ Quick reference for [App Store Connect](https://appstoreconnect.apple.com) → *
 | **Privacy Policy URL** | `https://github.com/2gchqkkt25-blip/Apex/blob/main/PRIVACY.md` |
 | **Support URL** | `https://github.com/2gchqkkt25-blip/Apex` |
 | **Marketing URL** (optional) | Same GitHub repo |
-| Support email (in-app / review notes) | `support@streaminfinitytv.com` |
+| Support email (in-app / review notes) | `info@birdsenterprisellc.com` |
 
 Apple TV uses the **same Privacy Policy URL** as iPhone — no separate tvOS policy needed.
 
@@ -1693,7 +1694,7 @@ Scroll the Guide vertically and horizontally, including channels with no program
 
 Force-close and reopen Apex; previously loaded Guide data should remain.
 
-Contact: support@streaminfinitytv.com
+Contact: info@birdsenterprisellc.com
 ```
 
 Add **test playlist credentials** in review notes if you have a legal test source — helps IPTV Beta App Review.
@@ -1902,4 +1903,4 @@ See **What's Been Built → iOS Device — Large Library Fix** above for full de
 
 ---
 
-*Last updated: September 30, 2026 (Build 63 — watched movies, guide favorites, in-player guide position, Apple TV time anchor).*
+*Last updated: October 2, 2026 (Build 64 — iPad toolbar, support email/Discord, trending TMDB ratings, Apex Pro $3.99/month).*

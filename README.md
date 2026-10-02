@@ -20,7 +20,7 @@ Browse, search, and stream your IPTV playlists or personal **Plex, Jellyfin, and
 [![SwiftUI](https://img.shields.io/badge/UI-SwiftUI-0A84FF)](https://developer.apple.com/xcode/swiftui/)
 [![SwiftData](https://img.shields.io/badge/Persistence-SwiftData-30B0C7)](https://developer.apple.com/documentation/swiftdata)
 [![Issues](https://img.shields.io/github/issues/2gchqkkt25-blip/Apex?color=F9EE00&labelColor=1f1f2e)](https://github.com/2gchqkkt25-blip/Apex/issues)
-[![Discord](https://img.shields.io/badge/chat-Discord-5865F2?logo=discord&logoColor=white&labelColor=1f1f2e)](https://discord.gg/fKhGp6xpB)
+[![Discord](https://img.shields.io/badge/chat-Discord-5865F2?logo=discord&logoColor=white&labelColor=1f1f2e)](https://discord.gg/sn5ATVA83S)
 [![License](https://img.shields.io/badge/license-AGPL--3.0-blue?labelColor=1f1f2e)](LICENSE)
 
 </div>
@@ -367,7 +367,7 @@ Planned features and enhancements are tracked as
 ## Contributing
 
 > 💬 Have a question, want to share feedback, or just hang out? Join the community on
-> **[Discord](https://discord.gg/fKhGp6xpB)**.
+> **[Discord](https://discord.gg/sn5ATVA83S)**.
 
 Contributions are welcome! The short version:
 

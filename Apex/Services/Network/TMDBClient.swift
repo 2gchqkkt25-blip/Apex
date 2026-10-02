@@ -160,7 +160,8 @@ nonisolated struct TMDBClient {
                     id: $0.id,
                     title: $0.title ?? $0.name ?? "",
                     overview: $0.overview ?? "",
-                    backdropPath: $0.backdropPath
+                    backdropPath: $0.backdropPath,
+                    voteAverage: $0.voteAverage
                 )
             }
     }
@@ -389,6 +390,9 @@ struct TrendingTitle: Identifiable, Hashable {
     let title: String
     let overview: String
     let backdropPath: String?
+    /// TMDB popularity score (0…10). Used to fill poster badges when the local
+    /// catalog title has not been rating-enriched yet.
+    let voteAverage: Double?
 }
 
 /// Normalized TMDB detail payload shared by movies and series. Empty/absent
@@ -478,10 +482,12 @@ private nonisolated struct TrendingItem: Decodable {
     let name: String?
     let overview: String?
     let backdropPath: String?
+    let voteAverage: Double?
 
     enum CodingKeys: String, CodingKey {
         case id, title, name, overview
         case backdropPath = "backdrop_path"
+        case voteAverage = "vote_average"
     }
 }
 

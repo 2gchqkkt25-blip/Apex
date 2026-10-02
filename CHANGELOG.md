@@ -4,6 +4,24 @@ All notable changes to Apex Stream Player.
 
 ---
 
+## Build 64 (1.2.0) — October 2, 2026
+
+### Bug Fixes
+
+- **iPad Search and Settings stay visible** — Sort, Sync, Settings, and Search sit in one trailing toolbar group, so iPad no longer hides them in the overflow menu.
+- **Trending Movies and Series show TMDB scores** — When a trending title has no local rating yet, the TMDB score from the trending feed fills the poster badge on every platform.
+
+### Improvements
+
+- **Support email and Discord updated** — Settings → Support (and Apple TV About) now use `info@birdsenterprisellc.com` and `https://discord.gg/sn5ATVA83S`.
+- **Apex Pro monthly is $3.99** — The monthly plan is $3.99. Lifetime stays $19.99 for launch.
+
+### Release
+
+- Build number **64** (1.2.0). The Apex app and Top Shelf extension are both build 64.
+
+---
+
 ## Build 63 (1.2.0) — September 30, 2026
 
 ### Bug Fixes

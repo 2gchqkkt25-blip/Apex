@@ -2,7 +2,7 @@
 
 > **Purpose:** Track what stays, what goes, and what changes during the Lume → Apex rebrand.
 >
-> **Last updated:** September 30, 2026 (Build 63)
+> **Last updated:** October 2, 2026 (Build 64)
 
 ---
 

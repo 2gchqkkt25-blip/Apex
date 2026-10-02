@@ -1,6 +1,35 @@
-# TestFlight Checklist — Build 63
+# TestFlight Checklist — Build 64
 
 ## What to Test (paste in App Store Connect → TestFlight → What to Test)
+
+```
+Build 64 (1.2.0)
+
+Apex is an IPTV player—users add their own Xtream or M3U playlist. No content is bundled.
+
+1. On iPad, open Home. Sort, Sync, Settings (gear), and Search (magnifying glass) should all be visible in the top bar — not hidden behind a ··· menu.
+2. Open Settings → Support. Email should be info@birdsenterprisellc.com and Discord should open https://discord.gg/sn5ATVA83S. Check the same on Apple TV About.
+3. On Home, open Trending Movies and Trending Series. Poster rating badges should appear on titles that have a TMDB score, including ones that had no badge before.
+4. In Settings → Apex Pro (or the paywall), monthly should show $3.99 and lifetime $19.99.
+
+Contact: info@birdsenterprisellc.com
+```
+
+## Build 64 Focused Checklist
+
+- [ ] iPad Home: Search and Settings icons are visible in the toolbar
+- [ ] iPhone / Mac Home: Search and Settings still work as before
+- [ ] Settings → Support email is info@birdsenterprisellc.com
+- [ ] Settings → Support Discord opens discord.gg/sn5ATVA83S
+- [ ] Apple TV About shows the same email and Discord
+- [ ] Trending Movies / Series posters show TMDB rating badges more completely
+- [ ] Apex Pro monthly is $3.99; lifetime is $19.99
+
+**Release metadata:** Apex app and Top Shelf extension are both Build **64** (version 1.2.0).
+
+---
+
+## Build 63 (previous)
 
 ```
 Build 63 (1.2.0)
@@ -13,7 +42,7 @@ Apex is an IPTV player—users add their own Xtream or M3U playlist. No content 
 4. While watching a channel, open the guide. It should stay on that channel, and on Apple TV the programme on now should be highlighted.
 5. On Apple TV, move up and down the guide. The highlight should stay on the same time. Left and right should move to the previous and next programme.
 
-Contact: support@streaminfinitytv.com
+Contact: info@birdsenterprisellc.com
 ```
 
 ## Build 63 Focused Checklist
@@ -45,7 +74,7 @@ Apex is an IPTV player—users add their own Xtream or M3U playlist. No content 
 4. Search for a title that is on an enabled media server. It should appear with the IPTV results.
 5. On Apple TV, Choose a source and the stream list should be compact cards. Settings → Media Servers → Language and Settings → Subtitles → Language should each be one row that opens a menu.
 
-Contact: support@streaminfinitytv.com
+Contact: info@birdsenterprisellc.com
 ```
 
 ## Build 62 Focused Checklist
@@ -77,7 +106,7 @@ Apex is an IPTV player—users add their own Xtream or M3U playlist. No content 
 4. Watch a long programme, then exit to the TV Guide. The guide should open at the current time, not the time you pressed play.
 5. On Apple TV, scroll the Guide. Programme titles should stay readable, and the selected poster on Movies and Series should be obvious.
 
-Contact: support@streaminfinitytv.com
+Contact: info@birdsenterprisellc.com
 ```
 
 ## Build 61 Focused Checklist

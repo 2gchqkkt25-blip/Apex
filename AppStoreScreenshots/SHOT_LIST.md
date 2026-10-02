@@ -1,4 +1,4 @@
-# Apex App Store Screenshot Shot List — Build 63
+# Apex App Store Screenshot Shot List — Build 64
 
 ## Capture Checklist Before You Start
 

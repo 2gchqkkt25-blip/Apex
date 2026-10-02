@@ -117,22 +117,23 @@ struct TMDBClientTests {
     // MARK: - TrendingTitle
 
     @Test func `trending title properties`() {
-        let title = TrendingTitle(id: 1, title: "Test", overview: "Overview", backdropPath: "/backdrop.jpg")
+        let title = TrendingTitle(id: 1, title: "Test", overview: "Overview", backdropPath: "/backdrop.jpg", voteAverage: 7.5)
         #expect(title.id == 1)
         #expect(title.title == "Test")
         #expect(title.overview == "Overview")
         #expect(title.backdropPath == "/backdrop.jpg")
+        #expect(title.voteAverage == 7.5)
     }
 
     @Test func `trending title empty title`() {
-        let title = TrendingTitle(id: 1, title: "", overview: "", backdropPath: nil)
+        let title = TrendingTitle(id: 1, title: "", overview: "", backdropPath: nil, voteAverage: nil)
         #expect(title.title.isEmpty)
     }
 
     @Test func `trending title hashable`() {
-        let titleA = TrendingTitle(id: 1, title: "A", overview: "", backdropPath: nil)
-        let titleB = TrendingTitle(id: 1, title: "A", overview: "", backdropPath: nil)
-        let titleC = TrendingTitle(id: 2, title: "C", overview: "", backdropPath: nil)
+        let titleA = TrendingTitle(id: 1, title: "A", overview: "", backdropPath: nil, voteAverage: nil)
+        let titleB = TrendingTitle(id: 1, title: "A", overview: "", backdropPath: nil, voteAverage: nil)
+        let titleC = TrendingTitle(id: 2, title: "C", overview: "", backdropPath: nil, voteAverage: nil)
         #expect(titleA == titleB)
         #expect(titleA != titleC)
     }

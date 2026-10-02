@@ -61,7 +61,7 @@ This policy may be updated over time. Changes will be posted to this page.
 
 If you have questions about this policy:
 
-📧 **support@streaminfinitytv.com**
+📧 **info@birdsenterprisellc.com**
 
 ---
 

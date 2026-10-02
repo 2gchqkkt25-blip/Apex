@@ -219,30 +219,28 @@ struct HomeView: View {
                 .toolbarBackground(heroItems.isEmpty ? .automatic : .hidden, for: .navigationBar)
             #endif
                 .profileMenuToolbar()
-                .libraryToolbar(config: LibraryToolbarConfiguration(
-                    playlists: playlists,
-                    selectedPlaylistID: $selectedPlaylistID,
-                    categorySortRaw: $categorySortRaw,
-                    contentSortRaw: $contentSortRaw,
-                    showingSync: $showingSync,
-                    showingSettings: $showingSettings,
-                    activePlaylist: activePlaylist
-                ))
-            #if os(iOS)
-                .toolbar {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button {
-                            showingSearch = true
-                        } label: {
-                            Image(systemName: "magnifyingglass")
-                        }
-                        .accessibilityLabel("Search")
-                    }
-                }
-                .sheet(isPresented: $showingSearch) {
-                    SearchView()
-                }
-            #endif
+                #if os(iOS)
+                    .libraryToolbar(config: LibraryToolbarConfiguration(
+                        playlists: playlists,
+                        selectedPlaylistID: $selectedPlaylistID,
+                        categorySortRaw: $categorySortRaw,
+                        contentSortRaw: $contentSortRaw,
+                        showingSync: $showingSync,
+                        showingSettings: $showingSettings,
+                        showingSearch: $showingSearch,
+                        activePlaylist: activePlaylist
+                    ))
+                #else
+                    .libraryToolbar(config: LibraryToolbarConfiguration(
+                        playlists: playlists,
+                        selectedPlaylistID: $selectedPlaylistID,
+                        categorySortRaw: $categorySortRaw,
+                        contentSortRaw: $contentSortRaw,
+                        showingSync: $showingSync,
+                        showingSettings: $showingSettings,
+                        activePlaylist: activePlaylist
+                    ))
+                #endif
                 .navigationDestination(for: Movie.self) { movie in
                     MovieDetailView(movie: movie, animationNamespace: animationNamespace)
                     #if os(iOS)

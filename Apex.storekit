@@ -79,6 +79,9 @@
     ],
     "_timeRate" : 0
   },
+  "subscriptionBundleGroups" : [
+
+  ],
   "subscriptionGroups" : [
     {
       "id" : "21111111",
@@ -94,8 +97,8 @@
           "billingPlans" : [
             {
               "billingPlanType" : "BILLED_UPFRONT",
-              "commitmentDisplayPrice" : "1.99",
-              "displayPrice" : "1.99",
+              "commitmentDisplayPrice" : "3.99",
+              "displayPrice" : "3.99",
               "internalID" : "43245CE8",
               "isEnabled" : true
             }
@@ -103,7 +106,7 @@
           "codeOffers" : [
 
           ],
-          "displayPrice" : "1.99",
+          "displayPrice" : "3.99",
           "familyShareable" : false,
           "groupNumber" : 1,
           "internalID" : "5002",
@@ -129,8 +132,11 @@
       ]
     }
   ],
+  "subscriptionSuiteGroups" : [
+
+  ],
   "version" : {
-    "major" : 5,
-    "minor" : 0
+    "major" : 6,
+    "minor" : 3
   }
 }
